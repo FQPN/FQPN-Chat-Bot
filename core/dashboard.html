@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FQPN's Chat Bot</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Tajawal:wght@400;500;700&display=swap">
+<style>
+:root{--bg:#0b0b0c;--side:#0d0d0e;--panel:#0f0f10;--line:#222224;--text:#d3d3d8;--mute:#8a8a92;--red:#7d0b0f;--red2:#9a1118;--chip:#1c1c1e;--mod-bg:#12332a;--mod-t:#4fb386;--ev-bg:#2b2b2e;--ev-t:#b4b4bb;--soft:#b2b2ba;--hover:#151517;--off:#3a3a3d;--menu-h:#2a1214;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+:root[data-theme="light"]{--bg:#f4f4f6;--side:#fff;--panel:#fff;--line:#e2e2e7;--text:#17171a;--mute:#6b6b73;--chip:#eeeef1;--mod-bg:#d6f3e5;--mod-t:#0f7a46;--ev-bg:#e6e6ea;--ev-t:#44444a;--soft:#44444a;--hover:#f4f4f6;--off:#c4c4ca;--menu-h:#fde8e8}
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--text);font-family:'Outfit','Tajawal',system-ui,sans-serif;display:flex;min-height:100vh}
+aside{position:sticky;top:0;height:100vh;height:100dvh;align-self:flex-start;overflow-y:auto;width:232px;background:var(--side);border-inline-end:1px solid var(--line);padding:30px 16px;display:flex;flex-direction:column;flex-shrink:0}
+.brand{margin:0 14px 34px;font-weight:700;font-size:23px;line-height:1.15}
+.brand small{display:block;font-weight:500;font-size:13px;letter-spacing:.45em;margin-top:6px}
+nav a{display:flex;gap:12px;align-items:center;padding:11px 14px;border-radius:8px;color:var(--soft);text-decoration:none;margin-bottom:6px;font-weight:500}
+nav a.on{background:var(--red);color:#fff}
+.acct{margin-top:auto;position:relative}
+.acct small{display:block;font-size:11px;color:var(--mute);margin:0 0 4px;padding-inline-start:10px}
+.me{width:100%;display:flex;gap:10px;align-items:center;padding:8px 10px;background:none;border:0;border-radius:10px;color:inherit;font-family:inherit;cursor:pointer;text-align:start}
+.me:hover{background:var(--hover)}
+.av{width:44px;height:44px;border-radius:50%;flex-shrink:0}
+.who{display:block}.who b{display:block;unicode-bidi:isolate;font-size:19px;line-height:1.1}.who i{display:flex;align-items:center;gap:6px;white-space:nowrap;font-style:normal;font-size:13px;color:#4ade80}.dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex-shrink:0}
+.tw{margin-inline-start:auto;display:flex;gap:10px;align-items:center;color:var(--mute)}
+.chev{transition:transform .2s}.me[aria-expanded=true] .chev{transform:rotate(180deg)}
+.menu{position:absolute;left:0;right:0;bottom:calc(100% + 6px);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px;display:none;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+.menu.open{display:block}
+.menu button{width:100%;background:none;border:0;color:#ff6b6b;font:500 15px 'Outfit','Tajawal',sans-serif;text-align:start;padding:10px 12px;border-radius:7px;cursor:pointer}
+.menu button:hover{background:var(--menu-h)}
+main{flex:1;min-width:0}
+.top{height:84px;border-bottom:1px solid var(--line);display:flex;justify-content:flex-end;align-items:center;padding:0 36px;color:var(--mute)}
+.wrap{padding:28px 26px}
+header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:24px}
+h1{font-size:36px;font-weight:600;margin:0}
+header p{margin:4px 0 0;color:var(--mute);font-size:17px}
+.btn{background:var(--red);color:#fff;border:1px solid var(--red2);padding:14px 26px;border-radius:8px;font:500 17px 'Outfit','Tajawal',sans-serif;cursor:pointer}
+.btn:hover{background:var(--red2)}
+.bar{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:20px;align-items:center}
+.tabs{display:flex;background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.tabs button{border:0;background:none;color:var(--soft);padding:12px 26px;font:500 15px 'Outfit','Tajawal',sans-serif;cursor:pointer}
+.tabs button.on{background:var(--red);color:#fff}
+input[type=search]{flex:1;min-width:180px;max-width:300px;border:1px solid var(--line);background:var(--panel);color:var(--text);padding:12px 16px;border-radius:8px;font:15px 'Outfit','Tajawal',sans-serif}
+.count{margin-inline-start:auto;color:var(--mute);font-size:14px}
+:focus-visible{outline:2px solid var(--red2);outline-offset:2px}
+.tbl{border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow-x:auto}
+.row{display:grid;grid-template-columns:190px 1fr 120px 100px 90px 100px;gap:14px;align-items:center;padding:8px 26px;min-width:760px;border-top:1px solid var(--line)}
+.row:first-child{border-top:0}
+.row:not(.head):hover{background:var(--hover);box-shadow:inset 3px 0 0 var(--red2)}
+.row.head{font-weight:600;font-size:15px;padding:18px 26px}
+.cmd{display:inline-flex;gap:12px;align-items:center;background:var(--chip);color:var(--text);padding:9px 12px;border-radius:7px;border:0;font:500 16px 'Outfit','Tajawal',sans-serif;cursor:pointer;justify-self:start}
+.cmd span{opacity:.6}
+.msg{font-size:16px;overflow-wrap:anywhere}
+.lvl{font-size:14px;font-weight:500;padding:6px 12px;border-radius:5px;justify-self:start}
+.lvl.mod{background:var(--mod-bg);color:var(--mod-t)}.lvl.all{background:var(--ev-bg);color:var(--ev-t)}
+.cd{color:var(--soft)}
+.sw{width:46px;height:26px;border-radius:999px;background:var(--off);border:0;position:relative;cursor:pointer;transition:background .2s}
+.sw::after{content:"";position:absolute;top:3px;inset-inline-start:3px;width:20px;height:20px;border-radius:50%;background:#dcdce0;transition:transform .2s}
+.sw[aria-checked=true]{background:var(--red2)}.sw[aria-checked=true]::after{transform:translateX(20px)}
+.act{display:flex;gap:14px;justify-content:center}.act button{border:0;background:none;color:var(--soft);cursor:pointer;font-size:17px;padding:4px}
+.act button{display:flex;transition:color .2s,transform .2s}.act button:hover{color:var(--text)}.act .del:hover,.act .del:focus-visible{color:#ff3b3b;transform:scale(1.15)}.act .del:active{transform:scale(.9)}
+.empty{padding:30px;text-align:center;color:var(--mute)}
+.toast{position:fixed;bottom:calc(20px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);background:var(--red);color:#fff;padding:10px 18px;border-radius:8px;opacity:0;transition:opacity .2s;pointer-events:none}
+.toast.show{opacity:1}
+.view{display:none}.view.on{display:block}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-bottom:22px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:20px}
+.card span{color:var(--mute);font-size:15px}.card b{display:block;font-size:34px;font-weight:600;margin-top:6px}
+.card.red{border-color:var(--red2);box-shadow:inset 3px 0 0 var(--red2)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.panel h2{margin:0;padding:18px 24px;font-size:18px;font-weight:600;border-bottom:1px solid var(--line)}
+.line{display:flex;gap:16px;align-items:center;padding:14px 24px;border-top:1px solid var(--line)}
+.line:first-of-type{border-top:0}
+.line .grow{flex:1;min-width:0;overflow-wrap:anywhere}.line small{display:block;color:var(--mute);font-size:13px;margin-top:2px}
+.time{color:var(--mute);font-size:14px;min-width:64px}
+.field{display:flex;flex-direction:column;gap:6px;padding:16px 24px;border-top:1px solid var(--line)}
+.field label{font-weight:500}.field small{color:var(--mute)}
+.field input,.field select{max-width:320px;border:1px solid var(--line);background:var(--bg);color:var(--text);padding:11px 14px;border-radius:8px;font:15px 'Outfit','Tajawal',sans-serif}
+.sp{padding:16px 24px}
+@media (max-width:900px){.mnav{display:flex!important}}
+.mnav{display:none;gap:6px;overflow-x:auto;padding:10px 14px;border-bottom:1px solid var(--line)}
+.mnav a{color:var(--soft);text-decoration:none;padding:8px 14px;border-radius:8px;white-space:nowrap;font-weight:500}.mnav a.on{background:var(--red);color:#fff}
+@media (max-width:900px){aside{display:none}.wrap{padding:20px 14px}.top{padding:0 16px;height:60px}h1{font-size:30px}.count{display:none}}
+
+nav{position:relative}
+nav a{position:relative;z-index:1;transition:color .25s}
+nav a.on{background:transparent!important}
+.pill{position:absolute;left:0;right:0;top:0;height:44px;border-radius:8px;background:var(--red);box-shadow:0 4px 14px -8px var(--red2);transition:transform .45s cubic-bezier(.3,1.25,.5,1),height .3s}
+.ic{flex-shrink:0;overflow:visible}
+nav a .ic{transition:transform .35s cubic-bezier(.34,1.56,.64,1)}
+nav a:hover .ic{transform:scale(1.15)}
+nav a:hover .wand{transform:scale(1.15) rotate(-14deg)}
+nav a:hover .gear{transform:scale(1.15) rotate(90deg)}
+nav a:hover .clock .hand{transform-origin:12px 12px;animation:tick .8s steps(4) 1}
+.spark{transform-origin:15px 7px}.spark2{transform-origin:19px 16px}
+nav a.on .spark{animation:twinkle 2.4s ease-in-out infinite}
+nav a.on .spark2{animation:twinkle 2.4s ease-in-out .8s infinite}
+@keyframes twinkle{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.6)}}
+@keyframes tick{to{transform:rotate(360deg)}}
+main{position:relative;overflow:hidden}
+main::before{content:"";position:absolute;width:560px;height:560px;right:-160px;top:-240px;border-radius:50%;background:radial-gradient(circle,rgba(163,18,26,.12),transparent 68%);animation:drift 16s ease-in-out infinite alternate;pointer-events:none}
+.top,.wrap{position:relative;z-index:1}
+@keyframes drift{to{transform:translate(-120px,90px) scale(1.15)}}
+.line{flex-wrap:wrap;transition:opacity .25s,transform .25s}.line.out{opacity:0;transform:translateX(24px)}
+.eform .grow{display:flex;flex-direction:column;gap:8px;min-width:220px}
+.eform input,.eform select{border:1px solid var(--line);background:var(--bg);color:var(--text);padding:10px 12px;border-radius:8px;font:15px 'Outfit','Tajawal',sans-serif}
+.btn.sm{padding:10px 18px;font-size:15px}
+.ghost{background:none;border:1px solid var(--line);color:var(--soft);padding:10px 16px;border-radius:8px;font:500 15px 'Outfit','Tajawal',sans-serif;cursor:pointer}.ghost:hover{color:var(--text)}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.62);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;padding:20px;z-index:50}
+.modal.open{display:flex;animation:fade .2s}
+@keyframes fade{from{opacity:0}}
+.sheet{width:100%;max-width:480px;background:var(--panel);border:1px solid var(--line);border-top:3px solid var(--red2);border-radius:12px;padding:24px;box-shadow:0 24px 60px rgba(0,0,0,.55);animation:pop2 .35s cubic-bezier(.34,1.4,.64,1)}
+@keyframes pop2{from{opacity:0;transform:translateY(18px) scale(.95)}}
+.sheet h2{margin:0 0 14px;font-size:22px;font-weight:600}
+.sheet label{display:block;font-weight:500;font-size:14px;margin:14px 0 6px}
+.sheet input,.sheet textarea,.sheet select{width:100%;border:1px solid var(--line);background:var(--bg);color:var(--text);padding:11px 14px;border-radius:8px;font:15px 'Outfit','Tajawal',sans-serif;resize:vertical}
+.sheet .two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.mact{display:flex;justify-content:flex-end;gap:10px;margin-top:22px}
+.err{border-color:var(--red2)!important}
+.sheet{max-width:560px;max-height:92vh;overflow-y:auto}
+.hint{margin:0 0 4px;color:var(--mute);font-size:13px;line-height:1.45}
+.sheet label+.hint,.sheet textarea+.hint{margin-top:10px}
+.sub{color:var(--mute);font-weight:400}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.chip{display:inline-flex;align-items:center;gap:7px;background:var(--chip);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 10px;cursor:pointer;font:500 13px ui-monospace,Menlo,Consolas,monospace;transition:background .2s,border-color .2s,transform .15s}
+.chip i{width:8px;height:8px;border-radius:50%;display:inline-block}
+.chip:hover{border-color:var(--red2);transform:translateY(-1px)}.chip:active{transform:scale(.95)}
+.chip.on{background:var(--red);border-color:var(--red2);color:#fff}
+#annchips .chip{font-family:'Outfit','Tajawal',sans-serif;font-size:14px}
+.al{display:block;color:var(--mute);font-size:12px;margin-top:3px}
+.tip{position:fixed;z-index:80;max-width:260px;background:var(--text);color:var(--bg);padding:10px 12px;border-radius:8px;font-size:13px;line-height:1.4;display:flex;flex-direction:column;gap:4px;pointer-events:none;opacity:0;transform:translateY(4px) scale(.97);transition:opacity .15s,transform .2s cubic-bezier(.34,1.56,.64,1);box-shadow:0 10px 28px rgba(0,0,0,.45)}
+.tip.below{transform:translateY(-4px) scale(.97)}
+.tip.on{opacity:1;transform:none}
+.tip b{font:600 13px ui-monospace,Menlo,Consolas,monospace;color:var(--red2)}
+.tip em{font-style:normal;opacity:.7;font-size:12px}
+.eform .hint{margin:0}.eform .chips{margin-top:0}
+
+:root[dir=rtl]{--dx:14px}
+[dir=rtl] .sw[aria-checked=true]::after{transform:translateX(-20px)}
+[dir=rtl] .row:not(.head):hover,[dir=rtl] .card.red{box-shadow:inset -3px 0 0 var(--red2)}
+[dir=rtl] main::before{right:auto;left:-160px}
+[dir=rtl] .line.out{transform:translateX(-24px)}
+[lang=ar] .brand small{letter-spacing:0;font-size:14px}
+[lang=ar] body{line-height:1.55}
+[lang=ar] .cmd,[lang=ar] .chip{font-family:ui-monospace,Menlo,Consolas,'Tajawal',monospace}
+[lang=ar] #annchips .chip{font-family:'Outfit','Tajawal',sans-serif}
+.xtra{border-style:dashed}
+.hint.warn{color:#f59e0b}
+[hidden]{display:none!important}
+.view.on{animation:viewIn .45s cubic-bezier(.2,.8,.2,1)}
+@keyframes viewIn{from{opacity:0;transform:translateY(10px)}}
+.fresh .row:not(.head){animation:rowIn .5s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--i)*40ms)}
+@keyframes rowIn{from{opacity:0;transform:translateX(var(--dx,-14px))}}
+.row{transition:background .2s,box-shadow .2s}
+.cmd{transition:background .2s,transform .2s}.cmd:hover{background:var(--red);color:#fff;transform:translateY(-1px)}
+.cmd:active{transform:scale(.95)}
+.btn{transition:transform .2s,box-shadow .2s,background .2s}
+.btn:hover{transform:translateY(-2px);box-shadow:0 10px 24px -8px var(--red2)}.btn:active{transform:scale(.96)}
+.sw::after{transition:transform .35s cubic-bezier(.34,1.56,.64,1)}
+.sw[aria-checked=true]{box-shadow:0 0 8px -4px var(--red2)}
+.sw:active::after{width:24px}
+.card{transition:transform .25s,border-color .25s}.card:hover{transform:translateY(-3px);border-color:var(--red2)}
+.dot{animation:ping 2s ease-out infinite}
+@keyframes ping{0%{box-shadow:0 0 0 0 rgba(74,222,128,.6)}100%{box-shadow:0 0 0 8px rgba(74,222,128,0)}}
+.menu.open{animation:pop .22s cubic-bezier(.34,1.56,.64,1);transform-origin:bottom}
+@keyframes pop{from{opacity:0;transform:translateY(8px) scale(.94)}}
+.toast{transform:translate(-50%,12px);transition:opacity .25s,transform .3s cubic-bezier(.34,1.56,.64,1)}.toast.show{transform:translate(-50%,0)}
+@media (prefers-reduced-motion:reduce){*,*::before{transition:none!important;animation:none!important}}
+
+/* ---- linked-dashboard additions ---- */
+:root[data-theme="light"] .sw::after{background:#fff}
+.lvl.sub{background:#2d2250;color:#c4a8ff}.lvl.vip{background:#4a1d38;color:#ff9ccf}.lvl.bc{background:#4a1518;color:#ff9a9a}
+:root[data-theme="light"] .lvl.sub{background:#ece4ff;color:#5b34b0}:root[data-theme="light"] .lvl.vip{background:#ffe3f1;color:#a01d62}:root[data-theme="light"] .lvl.bc{background:#ffe0e0;color:#a31616}
+.row.dim .msg,.row.dim .cmd{opacity:.5}
+.row .bi{font-size:13px;color:var(--mute);justify-self:center}
+.who i.st-ok{color:#3fb871}.who i.st-wait{color:#f59e0b}.who i.st-off{color:var(--mute)}
+.who i.st-wait .dot,.who i.st-off .dot{animation:none}
+.menu button.neutral{color:var(--text)}.menu button.neutral:hover{background:var(--hover)}
+.banner{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:18px 26px 0;padding:12px 18px;border-radius:10px;border:1px solid var(--line);background:var(--panel);position:relative;z-index:2}
+.banner.bad{border-color:#b4161d;background:rgba(180,22,29,.12)}.banner.warn{border-color:#f59e0b;background:rgba(245,158,11,.1)}.banner.info{border-color:var(--red2)}
+.banner span{flex:1;min-width:200px}.banner .code{font:600 20px ui-monospace,Menlo,Consolas,monospace;letter-spacing:.15em;margin-inline:6px;padding:2px 10px;border-radius:6px;background:var(--chip);color:var(--text)}
+.bbtn{background:var(--red);color:#fff;border:1px solid var(--red2);padding:8px 16px;border-radius:8px;font:500 14px 'Outfit','Tajawal',sans-serif;cursor:pointer;text-decoration:none}
+.bbtn:hover{background:var(--red2)}
+.btn.danger{background:#b4161d;border-color:#d11f27}.btn.danger:hover{background:#d11f27}
+.btn:disabled{opacity:.6;cursor:wait}
+.sheet.small{max-width:420px}
+.evtop{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:14px}.evtop .note{margin:0;max-width:760px}
+[hidden]{display:none!important}
+.sheet .chip[data-ev]{display:none}
+.sheet[data-evk=watch_streak] .chip[data-ev~=watch_streak],
+.sheet[data-evk=follow] .chip[data-ev~=follow],
+.sheet[data-evk=subscription] .chip[data-ev~=subscription],
+.sheet[data-evk=gift_sub] .chip[data-ev~=gift_sub],
+.sheet[data-evk=raid] .chip[data-ev~=raid],
+.sheet[data-evk=hype_train] .chip[data-ev~=hype_train],
+.sheet[data-evk=bits] .chip[data-ev~=bits]{display:inline-flex}
+.msgbox{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px 14px;max-width:680px;white-space:pre-wrap;overflow-wrap:anywhere;margin-bottom:10px}
+.evcard{margin-bottom:16px}
+.warnline{color:#f59e0b}
+.field code{font-family:ui-monospace,Menlo,Consolas,monospace;background:var(--chip);padding:1px 6px;border-radius:5px;font-size:12px}
+#mmin{max-width:200px}
+.gmsg{display:flex;gap:8px;align-items:flex-start;margin-bottom:8px}.gmsg textarea{flex:1}
+.gdel{border:1px solid var(--line);background:none;color:var(--mute);border-radius:8px;width:38px;height:38px;cursor:pointer;font-size:20px;line-height:1;flex-shrink:0}.gdel:hover{color:#ff3b3b;border-color:#ff3b3b}
+.pill-b{font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:var(--chip);color:var(--soft);margin-inline-start:8px}
+.pause.grn.on span{color:#3fb871}
+.h2row{display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.h2row h2{border:0!important;flex:1}
+.pause{display:flex;align-items:center;gap:12px;padding:0 24px;color:var(--mute);font-size:14px}
+.pause.on span{color:#f59e0b}
+.av{object-fit:cover;background:var(--chip)}
+.sheet [data-for]{display:none}
+.sheet[data-kind=command] [data-for~=command],.sheet[data-kind=timer] [data-for~=timer],.sheet[data-kind=greeting] [data-for~=greeting],.sheet[data-kind=alert] [data-for~=alert]{display:block}
+.cnt{font-size:12px;color:var(--mute);text-align:end;margin-top:4px}.cnt.over{color:#ff6b6b}
+.merr{color:#ff6b6b;margin:14px 0 0;font-size:14px}
+.cards{grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}
+.card small{display:block;color:var(--mute);font-size:13px;margin-top:4px}
+.card b.s{font-size:22px;margin-top:12px}
+.tags{display:flex;flex-wrap:wrap;gap:8px;padding:16px 24px 20px}
+.tag{display:inline-flex;align-items:center;gap:8px;background:var(--chip);border:1px solid var(--line);border-radius:999px;padding:6px 8px 6px 14px;font-size:14px}
+[dir=rtl] .tag{padding:6px 14px 6px 8px}
+.tag button{border:0;background:none;color:var(--mute);cursor:pointer;font-size:16px;line-height:1;padding:2px 6px;border-radius:50%}
+.tag button:hover{color:#ff3b3b}
+.addrow{display:flex;gap:10px;padding:16px 24px 0}
+.addrow input{flex:1;max-width:340px;border:1px solid var(--line);background:var(--bg);color:var(--text);padding:10px 14px;border-radius:8px;font:15px 'Outfit','Tajawal',sans-serif}
+.pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+.pill-b{font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:var(--chip);color:var(--soft);margin-inline-start:8px}
+.field input[type=number]{max-width:180px}
+.note{color:var(--mute);margin:-8px 0 16px;font-size:14px}
+.loading{padding:30px;text-align:center;color:var(--mute)}
+.cmd{max-width:100%}.cmd .tt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.cmd.static{cursor:default}.cmd.static:hover{background:var(--chip);color:var(--text);transform:none}
+@media (max-width:900px){.banner{margin:14px}.row{min-width:900px}}
+</style>
+</head>
+<body>
+<aside>
+  <div class="brand">FQPN's<small data-i18n="brand_sub"></small></div>
+  <nav id="nav"><span class="pill" id="pill"></span>
+    <a href="#dashboard" data-v="dashboard"><svg class="ic " width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11 12 3l9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg><span data-i18n="nav_dashboard"></span></a><a href="#commands" data-v="commands" class="on"><svg class="ic wand" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20 14 10"/><path class="spark" d="m15 3 1.2 2.8L19 7l-2.8 1.2L15 11l-1.2-2.8L11 7l2.8-1.2z"/><path class="spark2" d="M19 14v4M17 16h4"/></svg><span data-i18n="nav_commands"></span></a><a href="#timers" data-v="timers"><svg class="ic clock" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path class="hand" d="M12 7v5l3 2"/></svg><span data-i18n="nav_timers"></span></a><a href="#events" data-v="events"><svg class="ic " width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg><span data-i18n="nav_events"></span></a><a href="#blocklist" data-v="blocklist"><svg class="ic " width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/></svg><span data-i18n="nav_blocklist"></span></a><a href="#logs" data-v="logs"><svg class="ic " width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg><span data-i18n="nav_logs"></span></a><a href="#settings" data-v="settings"><svg class="ic gear" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg><span data-i18n="nav_settings"></span></a>
+  </nav>
+  <div class="acct">
+    <small data-i18n="twitch_account"></small>
+    <div class="menu" id="menu"><button id="menubtn" type="button"></button></div>
+    <button class="me" id="me" aria-haspopup="true" aria-expanded="false">
+      <img class="av" id="avatar" alt="" src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2044%2044%22%3E%3Crect%20width%3D%2244%22%20height%3D%2244%22%20fill%3D%22%232a2a2e%22/%3E%3Ccircle%20cx%3D%2222%22%20cy%3D%2217%22%20r%3D%227.5%22%20fill%3D%22%236b6b75%22/%3E%3Cpath%20d%3D%22M7%2040c1.5-8.5%208-12.5%2015-12.5S35.5%2031.5%2037%2040z%22%20fill%3D%22%236b6b75%22/%3E%3C/svg%3E" data-ph="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2044%2044%22%3E%3Crect%20width%3D%2244%22%20height%3D%2244%22%20fill%3D%22%232a2a2e%22/%3E%3Ccircle%20cx%3D%2222%22%20cy%3D%2217%22%20r%3D%227.5%22%20fill%3D%22%236b6b75%22/%3E%3Cpath%20d%3D%22M7%2040c1.5-8.5%208-12.5%2015-12.5S35.5%2031.5%2037%2040z%22%20fill%3D%22%236b6b75%22/%3E%3C/svg%3E">
+      <span class="who"><b dir="ltr" id="acname">FQPN_</b><i id="st" class="st-off"><span class="dot"></span><span id="stt"></span></i></span>
+      <span class="tw"><svg width="26" height="26" viewBox="0 0 24 24" fill="#9146ff" aria-label="Twitch"><path d="M4 2 2.5 6v14H8v3h3l3-3h4l4.5-4.5V2H4zm16 12-3 3h-5l-3 3v-3H6V4h14v10zM17 7.5h-2v5h2v-5zm-5 0h-2v5h2v-5z"/></svg><svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg></span>
+    </button>
+  </div>
+</aside>
+<main>
+  <div class="top"></div>
+  <div class="mnav" id="mnav"><a href="#dashboard" data-v="dashboard" data-i18n="nav_dashboard"></a><a href="#commands" data-v="commands" class="on" data-i18n="nav_commands"></a><a href="#timers" data-v="timers" data-i18n="nav_timers"></a><a href="#events" data-v="events" data-i18n="nav_events"></a><a href="#blocklist" data-v="blocklist" data-i18n="nav_blocklist"></a><a href="#logs" data-v="logs" data-i18n="nav_logs"></a><a href="#settings" data-v="settings" data-i18n="nav_settings"></a></div>
+  <div class="banner" id="banner" hidden></div>
+
+  <div class="wrap view" id="v-dashboard">
+    <header><div><h1 data-i18n="dash_title"></h1><p data-i18n="dash_sub"></p></div></header>
+    <div class="cards" id="d-cards"></div>
+    <div class="panel"><h2 data-i18n="recent"></h2><div id="d-act"></div></div>
+  </div>
+
+  <div class="wrap view on" id="v-commands">
+    <header>
+      <div><h1 data-i18n="cmd_title"></h1><p data-i18n="cmd_sub"></p></div>
+      <button class="btn" id="new" data-i18n="new_cmd"></button>
+    </header>
+    <div class="bar">
+      <div class="tabs"><button class="on" data-t="custom" data-i18n="tab_custom"></button><button data-t="default" data-i18n="tab_default"></button></div>
+      <input type="search" id="q" data-i18n-ph="search_ph" data-i18n-aria="search_ph">
+      <span class="count" id="count"></span>
+    </div>
+    <div class="tbl" id="list"></div>
+  </div>
+
+  <div class="wrap view" id="v-timers">
+    <header><div><h1 data-i18n="timers_title"></h1><p data-i18n="timers_sub"></p></div><button class="btn" id="newt" data-i18n="new_timer"></button></header>
+    <p class="note" id="tnote" hidden></p>
+    <div class="panel" id="t-list"></div>
+  </div>
+
+  <div class="wrap view" id="v-events">
+    <header><div><h1 data-i18n="events_title"></h1><p data-i18n="events_sub"></p></div></header>
+    <div class="bar"><div class="tabs" id="evtabs"><button class="on" data-x="g" data-i18n="nav_greetings"></button><button data-x="e" data-i18n="ev_tab_events"></button></div></div>
+
+    <div id="paneG">
+      <div class="evtop"><p class="note" data-i18n="greet_note"></p><button class="btn" id="newgr" data-i18n="new_greeting"></button></div>
+      <div class="panel"><div class="h2row" style="border-top:0"><h2 data-i18n="your_greetings"></h2><div class="pause grn" id="grbox"><span id="grtxt"></span><button class="sw" id="grsw" role="switch" aria-checked="true" data-i18n-aria="greet_title"></button></div></div><div id="gr-list"></div></div>
+    </div>
+
+    <div id="paneE" hidden><div id="ev-cards"></div></div>
+  </div>
+
+  <div class="wrap view" id="v-blocklist">
+    <header><div><h1 data-i18n="bl_title"></h1><p data-i18n="bl_sub"></p></div></header>
+    <div class="pair">
+      <div class="panel"><h2 data-i18n="bl_users"></h2><div class="addrow"><input id="bu" dir="auto" maxlength="100" data-i18n-ph="bl_user_ph" data-i18n-aria="bl_users"><button class="btn sm" data-add="users" data-i18n="bl_add"></button></div><div class="tags" id="bl-users"></div></div>
+      <div class="panel"><h2 data-i18n="bl_words"></h2><div class="addrow"><input id="bw" dir="auto" maxlength="100" data-i18n-ph="bl_word_ph" data-i18n-aria="bl_words"><button class="btn sm" data-add="words" data-i18n="bl_add"></button></div><div class="tags" id="bl-words"></div></div>
+    </div>
+  </div>
+
+  <div class="wrap view" id="v-logs">
+    <header><div><h1 data-i18n="logs_title"></h1><p data-i18n="logs_sub"></p></div><button class="btn sm" id="lrefresh" data-i18n="refresh"></button></header>
+    <div class="panel" id="l-list"></div>
+    <p class="note" style="margin:14px 0 0" data-i18n="log_note"></p>
+  </div>
+
+  <div class="wrap view" id="v-settings">
+    <header><div><h1 data-i18n="set_title"></h1><p data-i18n="set_sub"></p></div></header>
+    <div class="panel">
+      <h2 data-i18n="general"></h2>
+      <div class="line" style="border-top:0"><div class="grow"><span data-i18n="dark"></span><small data-i18n="dark_s"></small></div><button class="sw" id="dmsw" role="switch" aria-checked="true" data-i18n-aria="dark"></button></div>
+      <div class="field" style="border-top:1px solid var(--line)"><label for="lg" data-i18n="language"></label><select id="lg"><option value="en">English</option><option value="ar">العربية</option></select></div>
+      <div class="h2row"><h2 data-i18n="bot_settings"></h2><div class="pause" id="pausebox"><span id="pausetxt"></span><button class="sw" id="pausesw" role="switch" aria-checked="false" data-i18n-aria="pause_aria"></button></div></div>
+      <div class="line"><div class="grow"><span data-i18n="only_live"></span><small data-i18n="only_live_s"></small></div><button class="sw" id="owsw" role="switch" aria-checked="true" data-i18n-aria="only_live"></button></div>
+      <div class="field" style="border-top:1px solid var(--line)"><label for="lcs" data-i18n="live_check"></label><input id="lcs" type="number" min="15" max="3600" step="1"><small data-i18n="live_check_s"></small></div>
+      <div class="field"><label for="cu" data-i18n="cmds_url"></label><input id="cu" dir="ltr" maxlength="300" placeholder="https://…" style="max-width:420px"><small data-i18n="cmds_url_s"></small></div>
+      <div class="sp"><button class="btn" id="save" data-i18n="save_changes"></button></div>
+    </div>
+  </div>
+</main>
+
+<div class="modal" id="modal"><div class="sheet" id="sheet" data-kind="command" role="dialog" aria-modal="true" aria-labelledby="mt">
+  <h2 id="mt"></h2>
+  <p class="hint" data-for="command" data-i18n="m_hint1"></p>
+  <div data-for="command timer greeting"><label for="mc" id="lbl-name"></label><input id="mc" maxlength="40" autocomplete="off" dir="auto"></div>
+  <div data-for="command"><label for="ma" data-i18n="lbl_alias"></label><input id="ma" autocomplete="off" dir="auto" data-i18n-ph="alias_ph"></div>
+  <p class="hint" data-for="greeting" data-i18n="m_hint_greet"></p>
+  <p class="hint" id="hintalert" data-for="alert" data-i18n="m_hint_alert"></p>
+  <div data-for="alert" id="minwrap"><label for="mmin" id="lbl-min"></label><input id="mmin" type="number" min="0" max="1000000" step="1"></div>
+  <div data-for="greeting"><label data-i18n="lbl_gmsgs"></label><div id="gmsgs"></div><button type="button" class="ghost" id="gadd" data-i18n="add_msg"></button></div>
+  <div data-for="command timer alert"><label for="mr" id="lbl-resp"></label><textarea id="mr" rows="3" dir="auto"></textarea><div class="cnt" id="cnt"></div></div>
+  <p class="hint" data-i18n-html="ann_hint"></p>
+  <div class="chips" id="annchips" role="group" data-i18n-aria="ann_aria"></div>
+  <label><span data-i18n="lbl_vars"></span> <span class="sub" data-i18n="lbl_vars_sub"></span></label>
+  <div class="chips" id="varchips" role="group" data-i18n-aria="vars_aria"></div>
+  <div class="two">
+    <div data-for="command"><label for="ml" data-i18n="lbl_level"></label><select id="ml"></select></div>
+    <div data-for="command"><label for="md" data-i18n="lbl_cd"></label><input id="md" type="number" min="0" max="86400" step="1"></div>
+    <div data-for="timer"><label for="mi" data-i18n="lbl_interval"></label><input id="mi" type="number" min="1" max="1440" step="1"></div>
+  </div>
+  <p class="merr" id="merr" hidden></p>
+  <div class="mact"><button class="ghost" id="mcancel" type="button" data-i18n="cancel"></button><button class="btn sm" id="msave" type="button" data-i18n="save_changes"></button></div>
+</div></div>
+
+<div class="modal" id="cmodal"><div class="sheet small" role="alertdialog" aria-modal="true" aria-labelledby="ct">
+  <h2 id="ct"></h2><p class="hint" id="cb"></p>
+  <div class="mact"><button class="ghost" id="ccancel" type="button" data-i18n="cancel"></button><button class="btn sm danger" id="cok" type="button"></button></div>
+</div></div>
+<div class="toast" id="toast"></div>
+<script>
+/* ===================== i18n ===================== */
+var AH='<bdi dir="ltr">/announce</bdi>',AB='<bdi dir="ltr">/announceblue</bdi>',AG='<bdi dir="ltr">/announcegreen</bdi>',AO='<bdi dir="ltr">/announceorange</bdi>',AP='<bdi dir="ltr">/announcepurple</bdi>';
+var VAR_TOK=["$(user)","$(touser)","$(query)","$(querystring)","$(count)","$(channel)","$(game)","$(title)","$(uptime)","$(follow)","$(followdate)","$(followage)","$(streak)","$(tier)","$(months)","$(message)","$(gifts)","$(raider)","$(viewers)","$(level)","$(bits)","$(eval Math.floor(Math.random() * 101))","$(urlfetch https://…)"];
+var CHIP_EV={"$(streak)":"watch_streak","$(tier)":"subscription gift_sub","$(months)":"subscription","$(message)":"subscription bits","$(gifts)":"gift_sub","$(raider)":"raid","$(viewers)":"raid","$(level)":"hype_train","$(bits)":"bits"};   // buttons that only appear in the matching event editor
+var VAR_LBL=VAR_TOK.slice();VAR_LBL[VAR_TOK.length-2]="$(eval …)";   // shorter text on the button; the full example is what gets inserted
+var VAR_EX=["Hi FQPN_!","!hug @sam → sam","!game valorant → valorant","hello world → hello%20world","42","fqpn_","Valorant","Ranked grind!","2h 14m","followed fqpn_ on March 3, 2024 (1 year, 2 months ago)","March 3, 2024","1 year, 2 months, 3 days","604","Tier 1","7","Keep going!","5","StreamerXYZ","82","5","100","Math.floor(Math.random() * 101) → 57","(text from the page)"];
+var I18N={
+en:{brand_sub:"CHAT BOT",nav_dashboard:"Dashboard",nav_commands:"Commands",nav_timers:"Timers",nav_blocklist:"Blocklist",nav_logs:"Logs",nav_settings:"Settings",
+twitch_account:"Twitch Account",disconnect:"Disconnect account",connect:"Connect Twitch",connected:"Connected",connecting:"Connecting…",not_connected:"Not connected",disc_toast:"Account disconnected",conn_started:"Starting Twitch login…",
+disc_q:"Disconnect your Twitch account?",disc_body:"The bot will stop answering in chat until you connect again.",disc_yes:"Disconnect",
+ban_offline:"Can't reach the bot. Make sure it's still running.",ban_login:"Open Twitch and enter this code:",ban_open:"Open Twitch",ban_copy:"Copy code",ban_copied:"Code copied",ban_starting:"Starting Twitch login…",ban_err:"Twitch login failed: {m}",retry:"Try again",
+ban_perm:"This version needs new Twitch permissions (announcements, title and game). Connect again and click Authorize.",ban_none:"No Twitch account is connected, so the bot is not running.",
+cmd_title:"Commands",cmd_sub:"Create and manage custom commands for your Twitch chat.",new_cmd:"+ New Command",tab_custom:"Custom",tab_default:"Built-in",search_ph:"Search commands…",count:"{n} commands",
+th_cmd:"Command",th_resp:"Response",th_level:"User level",th_cd:"Cooldown",th_status:"Status",th_actions:"Actions",
+empty_cmds:"No commands match. Try a different search.",empty_none:"No commands yet. Select New Command to add one.",bi_tag:"Built-in",
+bi_commands:'Lists your commands, or sends your commands page link. Moderators can manage commands with <bdi dir="ltr">{p}commands add / edit / delete</bdi>.',
+bi_addcom:'Moderators add a command from chat: <bdi dir="ltr">{p}addcom {p}name response</bdi>',bi_editcom:"Moderators change a command's response or options from chat.",bi_delcom:"Moderators delete a command, or remove one alias, from chat.",
+bi_title:'Shows the stream title. Moderators can change it: <bdi dir="ltr">{p}title new title</bdi>',bi_game:'Shows the current game. Moderators can change it: <bdi dir="ltr">{p}game game name</bdi>',
+lvl_everyone:"Everyone",lvl_subscriber:"Subscriber",lvl_vip:"VIP",lvl_moderator:"Moderator",lvl_broadcaster:"Owner",
+copy_title:"Copy command",copied:"Copied {c}",also:"Also: ",edit_aria:"Edit {n}",delete_aria:"Delete {n}",enable_aria:"Enable {n}",
+dash_title:"Dashboard",dash_sub:"A quick look at your bot and your chat.",card_cmds:"Commands",card_cmds_sub:"{n} enabled",card_timers:"Active timers",card_status:"Bot status",
+st_live:"Live · {d}",st_off:"Connected · offline",st_none:"Not connected",recent:"Recent activity",
+logs_title:"Logs",logs_sub:"See which commands viewers used and when.",log_empty:"Nothing yet. Activity shows up when viewers use your commands.",log_note:"This list is kept in memory and clears when the bot restarts.",
+ago_s:"{n}s ago",ago_m:"{n}m ago",ago_h:"{n}h ago",log_cmd:"used by {u}",log_timer:"timer sent",log_manage:"by {u}",refresh:"Refresh",
+nav_greetings:"Greetings",greet_title:"Greetings",greet_sub:"Greet a chosen person with a message of your choice.",greet_note:"The bot greets each person once per stream, 3 seconds after their first message in chat. It only works while you're live. If a person has several messages, the bot picks one at random each stream.",greet_on:"Greetings are on",greet_off:"Greetings are off",greet_on_toast:"Greetings turned on",greet_off_toast:"Greetings turned off",new_greeting:"+ New Greeting",your_greetings:"People to greet",no_greetings:"No greetings yet. Select New Greeting to add one.",t_new_greeting:"New greeting",t_edit_greeting:"Edit greeting",m_hint_greet:"The bot greets this person once per stream, 3 seconds after their first message in chat.",lbl_gname:"Twitch username",gname_ph:"username",lbl_gmsgs:"Messages (one is picked at random each stream)",add_msg:"+ Add another message",remove_msg_aria:"Remove this message",err_gname:"Enter a Twitch username (letters, numbers and underscores only).",err_gmsg:"Add at least one message.",err_gdup:"{n} already has a greeting. Add more messages to it instead.",msgs_n:function(p){return p.n==1?"1 message":p.n+" messages"},more_msgs:"+{n} more",log_greet:"greeted",nav_events:"Events",events_title:"Events",events_sub:"Automatic replies when something happens in your chat.",ws_title:"Watch streak",ws_on:"Reply is on",ws_off:"Reply is off",ws_desc:"When a viewer shares their Watch Streak in chat, the bot replies with the message below. Twitch only announces a streak when the viewer chooses to share it (from about their 3rd stream in a row).",ws_reply:"Reply",ws_edit:"Edit reply",ws_example:"Example for a 604-stream streak:",ws_min:"Only reply for streaks of at least",ws_min_s:"Streams in a row. Use 1 to reply every time someone shares.",t_edit_streak:"Watch streak reply",m_hint_streak:"Use $(streak) (or {streak}) for the viewer's streak number and $(user) for their name.",log_event:"reply to {u}",ws_on_toast:"Watch streak reply turned on",ws_off_toast:"Watch streak reply turned off",err_min:"Enter a whole number of 1 or more.",ev_tab_events:"Twitch events",ev_on:"Reply is on",ev_off:"Reply is off",ev_on_toast:"{n} reply turned on",ev_off_toast:"{n} reply turned off",
+ev_t_follow:"Follow",ev_d_follow:"When someone follows your channel.",
+ev_t_sub:"Subscription",ev_d_sub:"When someone subscribes or resubscribes (not gifts). Add replies that start from a number of months to celebrate long-time subs.",
+ev_t_gift:"Gift subs",ev_d_gift:"When someone gifts subs. One reply per gift, however many subs it contains. Pick different replies for 1, 5, 10, 25 gifts and so on.",
+ev_t_raid:"Raid",ev_d_raid:"When another streamer raids your channel. Pick different replies for small and huge raids.",
+ev_t_hype:"Hype train",ev_d_hype:"When a Hype Train starts and each time it reaches a new level. Delete the low replies if you only want to celebrate high levels.",
+ev_t_bits:"Bits (cheers)",ev_d_bits:"When someone cheers with Bits in chat. Pick different replies by the amount.",
+ev_d_streak:"When a viewer shares their Watch Streak in chat. Twitch only announces a streak when the viewer chooses to share it (from about their 3rd stream in a row).",
+ev_u_streak:"Streams in a row",ev_u_months:"Months",ev_u_gifts:"Gifts",ev_u_viewers:"Viewers",ev_u_level:"Level",ev_u_bits:"Bits",
+ev_from:"{u}: {n}+",ev_add:"+ Add another reply",ev_new_reply:"New reply",ev_edit_reply:"Edit reply",ev_lbl_min:"Use this reply from ({u})",
+ev_perm:"Needs the {p} permission (add it to auth.py, then reconnect Twitch once).",ev_refused:"Twitch refused this one when the bot started: the permission is missing. Add it, reconnect, then restart the bot.",
+m_hint_alert:"The bot answers with the reply whose number is the highest one the event reaches. Hover over a variable button to see what it does.",
+err_dupmin:"Another reply already starts at {n}.",err_lasttier:"An event needs at least one reply. Turn it off instead.",pause_aria:"Pause bot",pause_on:"Bot is paused",pause_off:"Bot is active",paused_toast:"Bot paused",resumed_toast:"Bot resumed",st_paused:"Paused",ban_paused:"The bot is paused and won't reply to anyone or send timers.",resume:"Resume",timers_title:"Timers",timers_sub:"Send messages to your chat automatically on a schedule.",new_timer:"+ New Timer",your_timers:"Your timers",no_timers:"No timers yet. Select New Timer to add one.",
+every:"Every {t}",mins:function(p){return p.n+" min"},timer_live_note:"Timers only send while you're live. You can change this in Settings.",
+
+bl_title:"Blocklist",bl_sub:"The bot ignores messages from blocked users and messages that contain blocked words.",bl_users:"Blocked users",bl_words:"Blocked words",bl_add:"Add",bl_user_ph:"username",bl_word_ph:"word or phrase",bl_empty:"Nothing blocked yet.",remove_aria:"Remove {n}",
+set_title:"Settings",set_sub:"Control how your bot behaves in chat.",general:"This dashboard",bot_settings:"Bot",dark:"Dark mode",dark_s:"Switch the dashboard between dark and light colors.",language:"Language",
+only_live:"Timers only while I'm live",only_live_s:"Timers stay quiet while you're offline.",live_check:"Check if I'm live every (seconds)",live_check_s:"Between 15 and 3600.",
+cmds_url:"Commands page link",cmds_url_s:"Sent when someone types the commands command. Leave empty to list the commands in chat.",save_changes:"Save changes",
+t_edit_command:"Edit command",t_new_command:"New command",t_edit_timer:"Edit timer",t_new_timer:"New timer",
+m_hint1:"A command runs when a viewer's message starts with its name. Type the name exactly as viewers will: spaces are allowed, and you can start it with a symbol like ! or use none. Aliases are extra names for the same command.",lbl_cmd:"Command",lbl_alias:"Aliases",alias_ph:"!g, hello there (separate with commas)",name_ph:"!discord  or  hello there",lbl_name:"Timer name",
+lbl_resp:"Response",lbl_msg:"Message",lbl_match:"When chat says",lbl_mode:"Match type",lbl_level:"Who can use it",lbl_cd:"Cooldown (seconds)",lbl_interval:"Repeat every (minutes)",
+ann_hint:"Start with "+AH+" to post it as an announcement. For a color, use "+AB+", "+AG+", "+AO+" or "+AP+" instead.",ann_aria:"Announcement style",
+ann_announce:"Announce",ann_blue:"Blue",ann_green:"Green",ann_orange:"Orange",ann_purple:"Purple",lbl_vars:"Variables",lbl_vars_sub:"(click to add to your text)",vars_aria:"Variables",example:"Example:",
+cancel:"Cancel","delete":"Delete",confirm_del_q:"Delete {n}?",confirm_del_body:"This can't be undone.",
+saved:"Saved",added:"Added",deleted:"Deleted",settings_saved:"Settings saved",err_gone:"That item changed or was removed. The list was reloaded.",err_net:"Couldn't reach the bot.",err_exists:"{n} already exists.",
+err_spaces:"The name can't contain spaces.",err_name:"Enter a name.",err_resp:"Enter some text.",err_num:"Enter a valid number.",err_len:"The text is too long (max 450 characters).",err_match:"Enter the text to look for.",err_url:"The link must start with http:// or https://",err_range:"Number out of range.",
+vars:["The display name of the viewer who used the command.","The first name after the command (the @ is removed). If there isn't one, it's the viewer who used the command.","Everything the viewer typed after the command name.","Same as the text after the command, but made safe to use inside a link.","How many times this command has been used.","Your channel name.","The game or category you're streaming right now.","Your current stream title.","How long you've been live. If you're offline, the command says you're offline instead.","A sentence about whether the viewer follows you.","The date the viewer started following you.","How long the viewer has followed you.","The viewer's Watch Streak: how many streams in a row they have watched. Only works in the Watch streak reply.","The subscription type: Tier 1, Tier 2, Tier 3 or Prime. Only works in the Subscription and Gift subs replies.","How many months the person has subscribed in total. Only works in the Subscription reply.","The message the person wrote with their sub or their Bits. Only works in the Subscription and Bits replies.","How many subs were gifted at once. Only works in the Gift subs reply.","The name of the streamer who raided you. Only works in the Raid reply.","How many viewers came with the raid. Only works in the Raid reply.","The Hype Train level. Only works in the Hype train reply.","How many Bits were cheered. Only works in the Bits reply.","Does a little math, like Nightbot's eval. The button adds a ready example that picks a random whole number from 0 to 100. You can use + - * / %, brackets, and Math.random(), Math.floor(), Math.round(), Math.ceil(), Math.abs(), Math.min(), Math.max().","Gets the text of a public web page (first 400 characters) and puts it in the reply. Replace the link with yours."]},
+ar:{brand_sub:"بوت الدردشة",nav_dashboard:"لوحة التحكم",nav_commands:"الأوامر",nav_timers:"المؤقتات",nav_blocklist:"قائمة الحظر",nav_logs:"السجلات",nav_settings:"الإعدادات",
+twitch_account:"حساب تويتش",disconnect:"فصل الحساب",connect:"ربط تويتش",connected:"متصل",connecting:"جارٍ الاتصال…",not_connected:"غير متصل",disc_toast:"تم فصل الحساب",conn_started:"جارٍ بدء تسجيل الدخول إلى تويتش…",
+disc_q:"فصل حساب تويتش؟",disc_body:"سيتوقف البوت عن الرد في الدردشة حتى تعيد الربط.",disc_yes:"فصل",
+ban_offline:"تعذر الوصول إلى البوت. تأكد أنه ما زال يعمل.",ban_login:"افتح تويتش وأدخل هذا الرمز:",ban_open:"فتح تويتش",ban_copy:"نسخ الرمز",ban_copied:"تم نسخ الرمز",ban_starting:"جارٍ بدء تسجيل الدخول…",ban_err:"فشل تسجيل الدخول إلى تويتش: {m}",retry:"حاول مرة أخرى",
+ban_perm:"هذا الإصدار يحتاج صلاحيات جديدة من تويتش (الإعلانات والعنوان واللعبة). اربط الحساب مجددًا واضغط Authorize.",ban_none:"لا يوجد حساب تويتش مربوط، لذلك البوت لا يعمل.",
+cmd_title:"الأوامر",cmd_sub:"أنشئ وأدر أوامر مخصصة لدردشة تويتش الخاصة بك.",new_cmd:"+ أمر جديد",tab_custom:"مخصصة",tab_default:"مدمجة",search_ph:"ابحث في الأوامر…",count:"الأوامر: {n}",
+th_cmd:"الأمر",th_resp:"الرد",th_level:"مستوى المستخدم",th_cd:"فترة الانتظار",th_status:"الحالة",th_actions:"الإجراءات",
+empty_cmds:"لا توجد أوامر مطابقة. جرّب بحثًا مختلفًا.",empty_none:"لا توجد أوامر بعد. اضغط «أمر جديد» لإضافة واحد.",bi_tag:"مدمج",
+bi_commands:'يعرض أوامرك أو يرسل رابط صفحة الأوامر. ويستطيع المشرفون إدارة الأوامر عبر <bdi dir="ltr">{p}commands add / edit / delete</bdi>.',
+bi_addcom:'يضيف المشرفون أمرًا من الدردشة: <bdi dir="ltr">{p}addcom {p}name response</bdi>',bi_editcom:"يغيّر المشرفون رد الأمر أو خياراته من الدردشة.",bi_delcom:"يحذف المشرفون أمرًا، أو اسمًا مستعارًا واحدًا، من الدردشة.",
+bi_title:'يعرض عنوان البث. ويستطيع المشرفون تغييره: <bdi dir="ltr">{p}title new title</bdi>',bi_game:'يعرض اللعبة الحالية. ويستطيع المشرفون تغييرها: <bdi dir="ltr">{p}game game name</bdi>',
+lvl_everyone:"الجميع",lvl_subscriber:"مشترك",lvl_vip:"VIP",lvl_moderator:"مشرف",lvl_broadcaster:"صاحب القناة",
+copy_title:"نسخ الأمر",copied:"تم نسخ {c}",also:"ويُستخدم أيضًا: ",edit_aria:"تعديل {n}",delete_aria:"حذف {n}",enable_aria:"تفعيل {n}",
+dash_title:"لوحة التحكم",dash_sub:"نظرة سريعة على البوت والدردشة.",card_cmds:"الأوامر",card_cmds_sub:"المفعّل: {n}",card_timers:"المؤقتات النشطة",card_status:"حالة البوت",
+st_live:"مباشر · {d}",st_off:"متصل · غير مباشر",st_none:"غير متصل",recent:"آخر النشاطات",
+logs_title:"السجلات",logs_sub:"اطّلع على الأوامر التي استخدمها المشاهدون ومتى.",log_empty:"لا شيء بعد. يظهر النشاط عندما يستخدم المشاهدون أوامرك.",log_note:"هذه القائمة محفوظة في الذاكرة وتُمسح عند إعادة تشغيل البوت.",
+ago_s:"منذ {n} ث",ago_m:"منذ {n} د",ago_h:"منذ {n} س",log_cmd:"استخدمه {u}",log_timer:"أُرسل المؤقت",log_manage:"بواسطة {u}",refresh:"تحديث",
+nav_greetings:"التحيات",greet_title:"التحيات",greet_sub:"رحّب بشخص تختاره برسالة من اختيارك.",greet_note:"يرحّب البوت بكل شخص مرة واحدة في كل بث، بعد 3 ثوانٍ من أول رسالة يكتبها في الدردشة. يعمل فقط أثناء البث المباشر. إذا كان للشخص عدة رسائل، يختار البوت واحدة عشوائيًا في كل بث.",greet_on:"التحيات مفعّلة",greet_off:"التحيات متوقفة",greet_on_toast:"تم تفعيل التحيات",greet_off_toast:"تم إيقاف التحيات",new_greeting:"+ تحية جديدة",your_greetings:"الأشخاص المراد الترحيب بهم",no_greetings:"لا توجد تحيات بعد. اضغط «تحية جديدة» لإضافة واحدة.",t_new_greeting:"تحية جديدة",t_edit_greeting:"تعديل التحية",m_hint_greet:"يرحّب البوت بهذا الشخص مرة واحدة في كل بث، بعد 3 ثوانٍ من أول رسالة يكتبها في الدردشة.",lbl_gname:"اسم المستخدم في تويتش",gname_ph:"اسم المستخدم",lbl_gmsgs:"الرسائل (تُختار واحدة عشوائيًا في كل بث)",add_msg:"+ إضافة رسالة أخرى",remove_msg_aria:"إزالة هذه الرسالة",err_gname:"أدخل اسم مستخدم تويتش (أحرف إنجليزية وأرقام وشرطة سفلية فقط).",err_gmsg:"أضف رسالة واحدة على الأقل.",err_gdup:"{n} لديه تحية بالفعل. أضف مزيدًا من الرسائل إليها بدلًا من ذلك.",msgs_n:function(p){var n=p.n;return n==1?"رسالة واحدة":n==2?"رسالتان":n<=10?n+" رسائل":n+" رسالة"},more_msgs:"+{n} أخرى",log_greet:"تمت التحية",nav_events:"الأحداث",events_title:"الأحداث",events_sub:"ردود تلقائية عندما يحدث شيء في دردشتك.",ws_title:"سلسلة المشاهدة",ws_on:"الرد مفعّل",ws_off:"الرد متوقف",ws_desc:"عندما يشارك مشاهد سلسلة مشاهدته في الدردشة، يرد البوت بالرسالة أدناه. لا تعلن تويتش عن السلسلة إلا إذا اختار المشاهد مشاركتها (تبدأ تقريبًا من البث الثالث على التوالي).",ws_reply:"الرد",ws_edit:"تعديل الرد",ws_example:"مثال لسلسلة من 604 بثًا:",ws_min:"الرد فقط عند سلسلة لا تقل عن",ws_min_s:"عدد البثوث المتتالية. استخدم 1 للرد في كل مرة يشارك فيها أحدهم.",t_edit_streak:"رد سلسلة المشاهدة",m_hint_streak:"استخدم $(streak) (أو {streak}) لرقم سلسلة المشاهد، و$(user) لاسمه.",log_event:"رد على {u}",ws_on_toast:"تم تفعيل رد سلسلة المشاهدة",ws_off_toast:"تم إيقاف رد سلسلة المشاهدة",err_min:"أدخل عددًا صحيحًا لا يقل عن 1.",ev_tab_events:"أحداث تويتش",ev_on:"الرد مفعّل",ev_off:"الرد متوقف",ev_on_toast:"تم تفعيل رد {n}",ev_off_toast:"تم إيقاف رد {n}",
+ev_t_follow:"المتابعة",ev_d_follow:"عندما يتابع أحدهم قناتك.",
+ev_t_sub:"الاشتراك",ev_d_sub:"عندما يشترك أحدهم أو يجدد اشتراكه (دون الإهداءات). أضف ردودًا تبدأ من عدد معين من الأشهر للاحتفاء بالمشتركين القدامى.",
+ev_t_gift:"إهداء الاشتراكات",ev_d_gift:"عندما يهدي أحدهم اشتراكات. رد واحد لكل إهداء مهما بلغ عدد الاشتراكات. اختر ردودًا مختلفة لإهداء 1 و5 و10 و25 وهكذا.",
+ev_t_raid:"الغارة (Raid)",ev_d_raid:"عندما يغير عليك مذيع آخر بمشاهديه. اختر ردودًا مختلفة للغارات الصغيرة والضخمة.",
+ev_t_hype:"قطار الحماس",ev_d_hype:"عندما يبدأ قطار الحماس وفي كل مرة يصل فيها إلى مستوى جديد. احذف الردود المنخفضة إن أردت الاحتفاء بالمستويات العالية فقط.",
+ev_t_bits:"البيتس (Bits)",ev_d_bits:"عندما يشجع أحدهم بالبيتس في الدردشة. اختر ردودًا مختلفة حسب المبلغ.",
+ev_d_streak:"عندما يشارك مشاهد سلسلة مشاهدته في الدردشة. لا تعلن تويتش عن السلسلة إلا إذا اختار المشاهد مشاركتها (تبدأ تقريبًا من البث الثالث على التوالي).",
+ev_u_streak:"بثوث متتالية",ev_u_months:"أشهر",ev_u_gifts:"إهداءات",ev_u_viewers:"مشاهدين",ev_u_level:"المستوى",ev_u_bits:"بيتس",
+ev_from:"{u}: {n}+",ev_add:"+ إضافة رد آخر",ev_new_reply:"رد جديد",ev_edit_reply:"تعديل الرد",ev_lbl_min:"استخدم هذا الرد ابتداءً من ({u})",
+ev_perm:"يحتاج إلى صلاحية {p} (أضفها إلى auth.py ثم أعد ربط تويتش مرة واحدة).",ev_refused:"رفضت تويتش هذا الحدث عند تشغيل البوت: الصلاحية ناقصة. أضفها وأعد الربط ثم أعد تشغيل البوت.",
+m_hint_alert:"يرد البوت بالرد الذي رقمه هو الأعلى بين ما وصل إليه الحدث. مرّر المؤشر فوق زر متغير لترى ما يفعله.",
+err_dupmin:"هناك رد آخر يبدأ من {n} بالفعل.",err_lasttier:"يحتاج الحدث إلى رد واحد على الأقل. أوقفه بدلًا من ذلك.",pause_aria:"إيقاف البوت مؤقتًا",pause_on:"البوت متوقف مؤقتًا",pause_off:"البوت يعمل",paused_toast:"تم إيقاف البوت مؤقتًا",resumed_toast:"تم استئناف البوت",st_paused:"متوقف مؤقتًا",ban_paused:"البوت متوقف مؤقتًا ولن يرد على أحد ولن يرسل المؤقتات.",resume:"استئناف",timers_title:"المؤقتات",timers_sub:"أرسل رسائل إلى الدردشة تلقائيًا حسب جدول زمني.",new_timer:"+ مؤقت جديد",your_timers:"مؤقتاتك",no_timers:"لا توجد مؤقتات بعد. اضغط «مؤقت جديد» لإضافة واحد.",
+every:"كل {t}",mins:function(p){var n=p.n;return n==1?"دقيقة":n==2?"دقيقتين":n<=10?n+" دقائق":n+" دقيقة"},timer_live_note:"لا تُرسل المؤقتات إلا أثناء البث المباشر. يمكنك تغيير ذلك من الإعدادات.",
+
+bl_title:"قائمة الحظر",bl_sub:"يتجاهل البوت رسائل المستخدمين المحظورين والرسائل التي تحتوي على كلمات محظورة.",bl_users:"المستخدمون المحظورون",bl_words:"الكلمات المحظورة",bl_add:"إضافة",bl_user_ph:"اسم المستخدم",bl_word_ph:"كلمة أو عبارة",bl_empty:"لا يوجد شيء محظور بعد.",remove_aria:"إزالة {n}",
+set_title:"الإعدادات",set_sub:"تحكم في طريقة عمل البوت في الدردشة.",general:"لوحة التحكم هذه",bot_settings:"البوت",dark:"الوضع الداكن",dark_s:"بدّل لوحة التحكم بين الألوان الداكنة والفاتحة.",language:"اللغة",
+only_live:"المؤقتات أثناء البث فقط",only_live_s:"تبقى المؤقتات صامتة عندما لا تكون مباشرًا.",live_check:"التحقق من البث كل (ثانية)",live_check_s:"بين 15 و3600.",
+cmds_url:"رابط صفحة الأوامر",cmds_url_s:"يُرسل عندما يكتب أحدهم أمر الأوامر. اتركه فارغًا ليعرض البوت الأوامر في الدردشة.",save_changes:"حفظ التغييرات",
+t_edit_command:"تعديل الأمر",t_new_command:"أمر جديد",t_edit_timer:"تعديل المؤقت",t_new_timer:"مؤقت جديد",
+m_hint1:"يعمل الأمر عندما تبدأ رسالة المشاهد باسمه. اكتب الاسم تمامًا كما سيكتبه المشاهدون: المسافات مسموحة، ويمكنك البدء برمز مثل ! أو بدونه. الأسماء المستعارة هي أسماء إضافية لنفس الأمر.",lbl_cmd:"الأمر",lbl_alias:"الأسماء المستعارة",alias_ph:"!g، مرحبا بك (افصل بينها بفاصلة)",name_ph:"!discord  أو  مرحبا بك",lbl_name:"اسم المؤقت",
+lbl_resp:"الرد",lbl_msg:"الرسالة",lbl_match:"عندما يكتب أحدهم",lbl_mode:"نوع المطابقة",lbl_level:"من يستخدمه",lbl_cd:"فترة الانتظار (بالثواني)",lbl_interval:"التكرار كل (دقيقة)",
+ann_hint:"ابدأ بـ "+AH+" لنشره كإعلان. وللحصول على لون استخدم "+AB+" أو "+AG+" أو "+AO+" أو "+AP+".",ann_aria:"نمط الإعلان",
+ann_announce:"إعلان",ann_blue:"أزرق",ann_green:"أخضر",ann_orange:"برتقالي",ann_purple:"بنفسجي",lbl_vars:"المتغيرات",lbl_vars_sub:"(اضغط لإضافتها إلى نصك)",vars_aria:"المتغيرات",example:"مثال:",
+cancel:"إلغاء","delete":"حذف",confirm_del_q:"حذف {n}؟",confirm_del_body:"لا يمكن التراجع عن هذا.",
+saved:"تم الحفظ",added:"تمت الإضافة",deleted:"تم الحذف",settings_saved:"تم حفظ الإعدادات",err_gone:"تغيّر هذا العنصر أو حُذف. تم تحديث القائمة.",err_net:"تعذر الوصول إلى البوت.",err_exists:"{n} موجود بالفعل.",
+err_spaces:"لا يمكن أن يحتوي الاسم على مسافات.",err_name:"أدخل اسمًا.",err_resp:"أدخل نصًا.",err_num:"أدخل رقمًا صحيحًا.",err_len:"النص طويل جدًا (الحد الأقصى 450 حرفًا).",err_match:"أدخل النص المراد البحث عنه.",err_url:"يجب أن يبدأ الرابط بـ http:// أو https://",err_range:"الرقم خارج النطاق المسموح.",
+vars:["الاسم الظاهر للمشاهد الذي استخدم الأمر.","أول اسم بعد الأمر (يُحذف الرمز @). إذا لم يوجد، يكون المشاهد الذي استخدم الأمر.","كل ما كتبه المشاهد بعد اسم الأمر.","نفس النص بعد الأمر، لكنه آمن للاستخدام داخل رابط.","عدد مرات استخدام هذا الأمر.","اسم قناتك.","اللعبة أو التصنيف الذي تبثه الآن.","عنوان بثك الحالي.","المدة التي مضت منذ بدء بثك. إذا لم تكن مباشرًا، يقول الأمر إنك غير متصل.","جملة تقول إن كان المشاهد يتابعك أم لا.","تاريخ بدء المشاهد متابعتك.","المدة التي يتابعك فيها المشاهد.","سلسلة مشاهدة المشاهد: كم بثًا متتاليًا شاهده. تعمل فقط في رد سلسلة المشاهدة.","نوع الاشتراك: Tier 1 أو Tier 2 أو Tier 3 أو Prime. يعمل فقط في ردّي الاشتراك وإهداء الاشتراكات.","إجمالي عدد الأشهر التي اشترك فيها الشخص. يعمل فقط في رد الاشتراك.","الرسالة التي كتبها الشخص مع اشتراكه أو بيتسه. يعمل فقط في ردّي الاشتراك والبيتس.","عدد الاشتراكات المُهداة دفعة واحدة. يعمل فقط في رد إهداء الاشتراكات.","اسم المذيع الذي أغار عليك. يعمل فقط في رد الغارة.","عدد المشاهدين الذين جاؤوا مع الغارة. يعمل فقط في رد الغارة.","مستوى قطار الحماس. يعمل فقط في رد قطار الحماس.","عدد البيتس المُرسلة. يعمل فقط في رد البيتس.","يجري عملية حسابية بسيطة مثل eval في Nightbot. يضيف الزر مثالًا جاهزًا يختار رقمًا صحيحًا عشوائيًا من 0 إلى 100. يمكنك استخدام + - * / % والأقواس والدوال Math.random() وMath.floor() وMath.round() وMath.ceil() وMath.abs() وMath.min() وMath.max().","يجلب نص صفحة ويب عامة (أول 400 حرف) ويضعه في الرد. استبدل الرابط برابطك."]}
+};
+var lang="en";
+function t(k,p){var d=I18N[lang][k];if(d===undefined)d=I18N.en[k];if(typeof d=="function")return d(p||{});if(p)d=d.replace(/\{(\w+)\}/g,function(m,n){return p[n]});return d}
+function esc(s){return String(s).replace(/[&<>]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;"}[c]})}
+function attr(s){return esc(s).replace(/"/g,"&quot;")}
+function $(id){return document.getElementById(id)}
+function copyText(txt){
+  function fallback(){var ta=document.createElement("textarea");ta.value=txt;ta.style.cssText="position:fixed;opacity:0";document.body.appendChild(ta);ta.select();try{document.execCommand("copy")}catch(e){}ta.remove()}
+  try{navigator.clipboard.writeText(txt).catch(fallback)}catch(e){fallback()}}
+
+/* ===================== state ===================== */
+var D={commands:{},timers:[],greetings:{enabled:true,users:[]},events:{},blocklist:{users:[],words:[]},settings:{paused:false,only_when_live:true,live_check_seconds:60,commands_url:""}};
+var S={account:null,connected:false,live:false,uptime_seconds:null,login:{status:"idle"},problem:null,avatar:null};
+var LOGS=[],offline=false,loaded=false,tab="custom",curView="commands",anim=true,lastSig="",settingsDirty=false;
+var LEVELS=["everyone","subscriber","vip","moderator","broadcaster"],LVCLS={everyone:"all",subscriber:"sub",vip:"vip",moderator:"mod",broadcaster:"bc"};
+function lvText(l){return t("lvl_"+(LVCLS[l]?l:"everyone"))}
+function lvCls(l){return LVCLS[l]||"all"}
+function fmtCd(n){return lang=="ar"?n+" ث":n+"s"}
+function fmtMin(n){return t("mins",{n:n})}
+function fmtDur(sec){sec=Math.max(0,Math.floor(sec));var h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60,u=lang=="ar"?[" س"," د"," ث"]:["h","m","s"],sp=lang=="ar"?" ":"";
+  return h?h+u[0]+sp+m+u[1]:m?m+u[1]+sp+s+u[2]:s+u[2]}
+function fmtAgo(iso){var d=Math.max(0,Math.floor((Date.now()-new Date(iso).getTime())/1000));return d<60?t("ago_s",{n:d}):d<3600?t("ago_m",{n:Math.floor(d/60)}):t("ago_h",{n:Math.floor(d/3600)})}
+
+/* ===================== API ===================== */
+async function req(path,opts){
+  var r;try{r=await fetch(path,opts)}catch(e){throw new Error(t("err_net"))}
+  var d=null;try{d=await r.json()}catch(e){}
+  if(!r.ok)throw new Error((d&&d.error)||("Error "+r.status));
+  return d}
+var API={get:function(s){return req("/api/"+s)},
+  put:function(s,data){return req("/api/"+s,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)})},
+  post:function(p){return req(p,{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"})}};
+function Gone(){var e=new Error(t("err_gone"));e.gone=true;return e}
+/* Always re-read the latest data first, change it, then save, so edits made from chat (!addcom ...) are never overwritten. */
+var mutQ=Promise.resolve();   // saves run one after another, so two quick clicks can never overwrite each other
+function mutate(sec,fn){var run=mutQ.then(async function(){var fresh=await API.get(sec);var r=fn(fresh);if(r!==undefined)fresh=r;var saved=await API.put(sec,fresh);D[sec]=saved;return saved});mutQ=run.catch(function(){});return run}
+function idxOf(list,i,pred){if(list[i]&&pred(list[i]))return i;for(var k=0;k<list.length;k++)if(pred(list[k]))return k;throw Gone()}
+var toastT=null;
+function say(msg,err){var el=$("toast");el.textContent=msg;el.style.background=err?"#b4161d":"";el.classList.add("show");clearTimeout(toastT);toastT=setTimeout(function(){el.classList.remove("show")},err?4200:1600)}
+async function fail(e){say(e.message||String(e),true);if(e.gone){await loadSections();renderAll()}}
+async function loadSections(){
+  try{var r=await Promise.all(["commands","timers","blocklist","settings","greetings","events"].map(function(s){return API.get(s)}));
+    D.commands=r[0];D.timers=r[1];D.blocklist=r[2];D.settings=r[3];D.greetings=r[4];D.events=r[5];loaded=true;return true}catch(e){offline=true;return false}}
+async function loadStatus(){try{S=await API.get("status");offline=false}catch(e){offline=true}}
+async function loadLogs(){try{LOGS=await API.get("logs")}catch(e){}}
+
+/* ===================== static text ===================== */
+function applyStatic(){
+  document.querySelectorAll("[data-i18n]").forEach(function(el){el.textContent=t(el.dataset.i18n)});
+  document.querySelectorAll("[data-i18n-html]").forEach(function(el){el.innerHTML=t(el.dataset.i18nHtml)});
+  document.querySelectorAll("[data-i18n-ph]").forEach(function(el){el.placeholder=t(el.dataset.i18nPh)});
+  document.querySelectorAll("[data-i18n-aria]").forEach(function(el){el.setAttribute("aria-label",t(el.dataset.i18nAria))});
+}
+function fillSelects(){
+  var ml=$("ml"),cur=ml.value;ml.innerHTML=LEVELS.map(function(v){return '<option value="'+v+'">'+lvText(v)+'</option>'}).join("");if(cur)ml.value=cur;
+}
+
+/* ===================== announcement + variable buttons ===================== */
+var ANNS=[["/announce","announce","#9b9ba1"],["/announceblue","blue","#3b82f6"],["/announcegreen","green","#22c55e"],["/announceorange","orange","#f97316"],["/announcepurple","purple","#a855f7"]];
+var ANN_RE=/^\/(announce(?:blue|green|orange|purple)?)(?=\s|$)/i,ANN_STRIP=/^\/announce(?:blue|green|orange|purple)?\s*/i;
+var gActive=null;
+function tbox(){return M&&M.kind=="greeting"?(gActive&&document.body.contains(gActive)?gActive:$("gmsgs").querySelector("textarea")):$("mr")}
+function buildAnn(){var bx=tbox(),m=(bx?bx.value:"").match(ANN_RE),cur=m?"/"+m[1].toLowerCase():"";
+  $("annchips").innerHTML=ANNS.map(function(a){return '<button type="button" class="chip'+(a[0]==cur?' on':'')+'" data-p="'+a[0]+'"><i style="background:'+a[2]+'"></i><span>'+t("ann_"+a[1])+'</span></button>'}).join("")}
+$("annchips").addEventListener("click",function(e){var b=e.target.closest(".chip");if(!b)return;var mr=tbox(),m=mr.value.match(ANN_RE),same=m&&b.dataset.p=="/"+m[1].toLowerCase(),rest=mr.value.replace(ANN_STRIP,"");
+  mr.value=same?rest:b.dataset.p+" "+rest;buildAnn();updCnt();mr.focus()});
+$("varchips").innerHTML=VAR_TOK.map(function(v,i){return '<button type="button" class="chip"'+(CHIP_EV[v]?' data-ev="'+CHIP_EV[v]+'"':"")+' dir="ltr" data-i="'+i+'" data-v="'+attr(v)+'">'+esc(VAR_LBL[i])+'</button>'}).join("");
+$("varchips").addEventListener("click",function(e){var b=e.target.closest(".chip");if(!b)return;var mr=tbox(),v=b.dataset.v,s0=mr.selectionStart==null?mr.value.length:mr.selectionStart,e0=mr.selectionEnd==null?s0:mr.selectionEnd;
+  mr.focus();mr.setRangeText(v,s0,e0,"end");if(v.indexOf("urlfetch")>-1){var i=s0+v.indexOf("https");mr.setSelectionRange(i,s0+v.length-1)}buildAnn();updCnt()});
+function updCnt(){var n=$("mr").value.length,c=$("cnt");c.textContent=n+"/450";c.classList.toggle("over",n>450)}
+$("mr").addEventListener("input",function(){buildAnn();updCnt();hideErr()});
+var tip=document.createElement("div");tip.className="tip";tip.id="vartip";tip.setAttribute("role","tooltip");document.body.appendChild(tip);
+function showTip(b){var i=+b.dataset.i,v=VAR_TOK[i];if(!v)return;tip.innerHTML='<b dir="ltr">'+esc(v)+'</b><span>'+esc(I18N[lang].vars[i])+'</span><em>'+t("example")+' <bdi>'+esc(VAR_EX[i])+'</bdi></em>';
+  tip.classList.add("on");b.setAttribute("aria-describedby","vartip");var r=b.getBoundingClientRect(),w=tip.offsetWidth,h=tip.offsetHeight,x=Math.max(8,Math.min(innerWidth-w-8,r.left+r.width/2-w/2)),y=r.top-h-10;
+  if(y<8){y=r.bottom+10;tip.classList.add("below")}else tip.classList.remove("below");tip.style.left=x+"px";tip.style.top=y+"px"}
+function hideTip(){tip.classList.remove("on")}
+var vc=$("varchips");vc.addEventListener("mouseover",function(e){var b=e.target.closest(".chip");if(b)showTip(b)});vc.addEventListener("mouseout",function(e){if(e.target.closest(".chip"))hideTip()});
+vc.addEventListener("focusin",function(e){var b=e.target.closest(".chip");if(b)showTip(b)});vc.addEventListener("focusout",hideTip);$("modal").addEventListener("scroll",hideTip,true);
+
+/* ===================== rendering ===================== */
+var BUILTINS=[["commands","everyone",10],["addcom","moderator",null],["editcom","moderator",null],["delcom","moderator",null],["title","everyone",5],["game","everyone",5]];
+var EDIT_SVG='<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
+var DEL_SVG='<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5"/></svg>';
+function actBtns(label){return '<div class="act"><button class="edit" aria-label="'+attr(t("edit_aria",{n:label}))+'">'+EDIT_SVG+'</button><button class="del" aria-label="'+attr(t("delete_aria",{n:label}))+'">'+DEL_SVG+'</button></div>'}
+function swBtn(on,label){return '<button class="sw" role="switch" aria-checked="'+(on!==false)+'" aria-label="'+attr(t("enable_aria",{n:label}))+'"></button>'}
+function renderCommands(){
+  var q=$("q").value.trim().toLowerCase(),head='<div class="row head"><span>'+t("th_cmd")+'</span><span>'+t("th_resp")+'</span><span>'+t("th_level")+'</span><span>'+t("th_cd")+'</span><span>'+t("th_status")+'</span><span style="text-align:center">'+t("th_actions")+'</span></div>',rows="",n=0,pe="!";
+  if(tab=="custom"){
+    Object.keys(D.commands).forEach(function(name){var c=D.commands[name],hay=(name+" "+(c.aliases||[]).join(" ")+" "+c.response).toLowerCase();if(q&&hay.indexOf(q)<0)return;
+      var al=(c.aliases&&c.aliases.length)?'<span class="al">'+t("also")+'<bdi>'+esc(c.aliases.join(", "))+'</bdi></span>':'';
+      rows+='<div class="row'+(c.enabled===false?' dim':'')+'" data-k="'+attr(name)+'" style="--i:'+n+'"><button class="cmd" dir="auto" data-c="'+attr(name)+'" title="'+attr(t("copy_title"))+'"><span class="tt">'+esc(name)+'</span> <span>⧉</span></button><div class="msg" dir="auto">'+esc(c.response)+al+'</div><span class="lvl '+lvCls(c.permission)+'">'+lvText(c.permission)+'</span><span class="cd">'+fmtCd(c.cooldown)+'</span>'+swBtn(c.enabled,name)+actBtns(name)+'</div>';n++});
+    if(!n)rows='<div class="empty">'+t(offline?"err_net":(Object.keys(D.commands).length?"empty_cmds":"empty_none"))+'</div>'
+  }else{
+    BUILTINS.forEach(function(b,i){if(q&&(b[0]).indexOf(q)<0)return;n++;
+      rows+='<div class="row" style="--i:'+i+'"><span class="cmd static" dir="auto">'+pe+b[0]+'</span><div class="msg">'+t("bi_"+b[0],{p:pe})+'</div><span class="lvl '+lvCls(b[1])+'">'+lvText(b[1])+'</span><span class="cd">'+(b[2]==null?"—":fmtCd(b[2]))+'</span><span class="bi">'+t("bi_tag")+'</span><span></span></div>'})
+  }
+  $("count").textContent=t("count",{n:n});$("list").className="tbl"+(anim?" fresh":"");$("list").innerHTML=head+rows}
+function renderTimers(){
+  var h='<h2>'+t("your_timers")+'</h2>';if(!D.timers.length)h+='<div class="empty">'+t("no_timers")+'</div>';
+  D.timers.forEach(function(tm,i){h+='<div class="line" data-i="'+i+'"><div class="grow"><b dir="auto">'+esc(tm.name)+'</b><small dir="auto">'+esc(tm.message)+'</small></div><span class="cd">'+t("every",{t:fmtMin(tm.interval_minutes)})+'</span>'+swBtn(tm.enabled,tm.name)+actBtns(tm.name)+'</div>'});
+  $("t-list").innerHTML=h;var n=$("tnote");n.hidden=!D.settings.only_when_live;n.textContent=t("timer_live_note")}
+function renderGreetings(){
+  var g=D.greetings||{enabled:true,users:[]},us=g.users||[],on=g.enabled!==false;
+  $("grsw").setAttribute("aria-checked",on);$("grtxt").textContent=t(on?"greet_on":"greet_off");$("grbox").classList.toggle("on",on);
+  var h=us.length?"":'<div class="empty">'+t("no_greetings")+'</div>';
+  us.forEach(function(u,i){var ms=u.messages||[],shown=ms.slice(0,3).map(function(m){return '<small dir="auto">• '+esc(m)+'</small>'}).join("")+(ms.length>3?'<small>'+t("more_msgs",{n:ms.length-3})+'</small>':"");
+    h+='<div class="line" data-i="'+i+'"><div class="grow"><b dir="ltr">'+esc(u.user)+'</b><span class="pill-b">'+t("msgs_n",{n:ms.length})+'</span>'+shown+'</div>'+swBtn(u.enabled,u.user)+actBtns(u.user)+'</div>'});
+  $("gr-list").innerHTML=h}
+var EVM={watch_streak:{t:"ws_title",d:"ev_d_streak",u:"ev_u_streak",single:true},follow:{t:"ev_t_follow",d:"ev_d_follow",single:true,perm:"moderator:read:followers"},
+  subscription:{t:"ev_t_sub",d:"ev_d_sub",u:"ev_u_months"},gift_sub:{t:"ev_t_gift",d:"ev_d_gift",u:"ev_u_gifts"},raid:{t:"ev_t_raid",d:"ev_d_raid",u:"ev_u_viewers"},
+  hype_train:{t:"ev_t_hype",d:"ev_d_hype",u:"ev_u_level",perm:"channel:read:hype_train"},bits:{t:"ev_t_bits",d:"ev_d_bits",u:"ev_u_bits"}};
+var EVORDER=["follow","subscription","gift_sub","raid","hype_train","bits","watch_streak"];
+function renderEvents(){
+  var h="";
+  EVORDER.forEach(function(k){
+    var m=EVM[k],ev=(D.events&&D.events[k])||{enabled:false,tiers:[]},on=ev.enabled!==false,tiers=ev.tiers||[],p=(S.event_problems||{})[k];
+    h+='<div class="panel evcard" data-k="'+k+'"><div class="h2row" style="border-top:0"><h2>'+t(m.t)+'</h2><div class="pause grn'+(on?" on":"")+'"><span>'+t(on?"ev_on":"ev_off")+'</span><button class="sw" data-evsw="'+k+'" role="switch" aria-checked="'+on+'" aria-label="'+attr(t(m.t))+'"></button></div></div>';
+    h+='<div class="field" style="border-top:0"><small>'+t(m.d)+'</small>';
+    if(m.perm){h+='<small>'+t("ev_perm",{p:"<code>"+m.perm+"</code>"})+'</small>';if(p)h+='<small class="warnline">'+t("ev_refused")+'</small>'}
+    h+='</div>';
+    tiers.forEach(function(x,i){
+      h+='<div class="line" data-k="'+k+'" data-i="'+i+'"><div class="grow">'+(m.single?"":'<span class="pill-b" style="margin:0 0 6px">'+t("ev_from",{n:x.min,u:t(m.u)})+'</span>')+'<div class="msgbox" dir="auto" style="margin:0">'+esc(x.response)+'</div></div>'
+        +'<div class="act"><button class="edit" aria-label="'+attr(t("edit_aria",{n:t(m.t)}))+'">'+EDIT_SVG+'</button>'+(tiers.length>1?'<button class="del" aria-label="'+attr(t("delete_aria",{n:t(m.t)}))+'">'+DEL_SVG+'</button>':'')+'</div></div>'});
+    if(!m.single)h+='<div class="sp" style="border-top:1px solid var(--line)"><button class="ghost addtier" type="button" data-k="'+k+'">'+t("ev_add")+'</button></div>';
+    h+='</div>'});
+  $("ev-cards").innerHTML=h}
+function askTierDelete(k,i){var x=((D.events[k]||{}).tiers||[])[i];if(!x)return;
+  confirmBox({title:t("confirm_del_q",{n:t(EVM[k].t)}),body:t("confirm_del_body"),ok:t("delete"),danger:true,run:async function(){
+    await mutate("events",function(e){var ev=e[k];if(!ev||!ev.tiers)throw Gone();if(ev.tiers.length<=1)throw new Error(t("err_lasttier"));
+      ev.tiers.splice(idxOf(ev.tiers,i,function(y){return y.min==x.min&&y.response==x.response}),1)});
+    renderEvents();say(t("deleted"))}})}
+function renderBlocklist(){["users","words"].forEach(function(k){var a=D.blocklist[k]||[];
+  $("bl-"+k).innerHTML=a.length?a.map(function(x){return '<span class="tag"><bdi>'+esc(x)+'</bdi><button data-rm="'+k+'" data-v="'+attr(x)+'" aria-label="'+attr(t("remove_aria",{n:x}))+'">×</button></span>'}).join(""):'<span class="note" style="margin:0">'+t("bl_empty")+'</span>'})}
+function logRow(l){var title,sub;
+  if(l.kind=="command"){title=esc(l.name);sub=t("log_cmd",{u:"<bdi>"+esc(l.user)+"</bdi>"})}
+  else if(l.kind=="event"){title=esc(l.name);sub=t("log_event",{u:"<bdi>"+esc(l.user)+"</bdi>"})}
+  else if(l.kind=="greeting"){title=esc(l.name);sub=t("log_greet")}
+  else if(l.kind=="timer"){title=esc(l.name);sub=t("log_timer")}
+  else{title=esc(l.name);sub=t("log_manage",{u:"<bdi>"+esc(l.user)+"</bdi>"})}
+  return '<div class="line"><span class="time">'+fmtAgo(l.time)+'</span><div class="grow"><b dir="auto">'+title+'</b><small>'+sub+'</small></div></div>'}
+function renderLogs(){$("l-list").innerHTML='<h2>'+t("recent")+'</h2>'+(LOGS.length?LOGS.map(logRow).join(""):'<div class="empty">'+t("log_empty")+'</div>');
+  $("d-act").innerHTML=LOGS.length?LOGS.slice(0,5).map(logRow).join(""):'<div class="empty">'+t("log_empty")+'</div>'}
+function renderDashboard(){
+  var cs=Object.keys(D.commands),en=cs.filter(function(k){return D.commands[k].enabled!==false}).length,total=cs.length,tm=D.timers.filter(function(x){return x.enabled!==false}).length,stc,stk;
+  if(!S.account||offline){stk=t("st_none");stc="#9b9ba1"}else if(S.connected&&D.settings.paused){stk=t("st_paused");stc="#f59e0b"}else if(S.connected&&S.live){stk=t("st_live",{d:fmtDur(S.uptime_seconds||0)});stc="#3fb871"}else if(S.connected){stk=t("st_off");stc="#3fb871"}else{stk=t("connecting");stc="#f59e0b"}
+  $("d-cards").innerHTML='<div class="card red"><span>'+t("card_cmds")+'</span><b data-n="'+total+'">'+total+'</b><small>'+t("card_cmds_sub",{n:en})+'</small></div><div class="card"><span>'+t("card_timers")+'</span><b data-n="'+tm+'">'+tm+'</b></div><div class="card"><span>'+t("card_status")+'</span><b class="s" style="color:'+stc+'">'+esc(stk)+'</b></div>'}
+function fillSettings(force){if(settingsDirty&&!force)return;var s=D.settings;$("owsw").setAttribute("aria-checked",s.only_when_live!==false);$("lcs").value=s.live_check_seconds;$("cu").value=s.commands_url||""}
+function renderPause(){var on=!!D.settings.paused;$("pausesw").setAttribute("aria-checked",on);$("pausetxt").textContent=t(on?"pause_on":"pause_off");$("pausebox").classList.toggle("on",on)}
+async function setPaused(on){
+  var sw=$("pausesw");sw.setAttribute("aria-checked",on);
+  try{await mutate("settings",function(s){s.paused=on});anim=false;renderPause();renderDashboard();renderBanner();anim=true;say(t(on?"paused_toast":"resumed_toast"))}
+  catch(e){sw.setAttribute("aria-checked",!on);fail(e)}}
+$("pausesw").onclick=function(){setPaused(this.getAttribute("aria-checked")!="true")};
+function renderAccount(){
+  var k,c;if(offline||!S.account){c="st-off";k="not_connected"}else if(S.connected){c="st-ok";k="connected"}else{c="st-wait";k="connecting"}
+  $("st").className=c;$("stt").textContent=t(k);$("acname").textContent=S.account||"—";
+  var img=$("avatar"),want=(S.account&&S.avatar&&/^https:\/\/[a-z0-9.-]*\.jtvnw\.net\//i.test(S.avatar))?S.avatar:img.dataset.ph;
+  if(img.getAttribute("src")!==want){img.onerror=function(){this.onerror=null;this.src=this.dataset.ph};img.src=want}
+  var mb=$("menubtn");mb.textContent=t(S.account?"disconnect":"connect");mb.className=S.account?"":"neutral"}
+function renderBanner(){
+  var b=$("banner"),h="",cls="",L=S.login||{status:"idle"};
+  if(offline){h='<span>'+t("ban_offline")+'</span>';cls="bad"}
+  else if(L.status=="waiting"){var safe=L.uri&&/^https:\/\/([a-z0-9-]+\.)*twitch\.tv(\/|$)/i.test(L.uri);
+    h=L.code?'<span>'+t("ban_login")+' <b class="code" dir="ltr">'+esc(L.code)+'</b></span>'+(safe?'<a class="bbtn" href="'+attr(L.uri)+'" target="_blank" rel="noopener">'+t("ban_open")+'</a>':'')+'<button class="bbtn" data-a="copycode">'+t("ban_copy")+'</button>':'<span>'+t("ban_starting")+'</span>';cls="info"}
+  else if(L.status=="error"){h='<span>'+t("ban_err",{m:esc(L.message||"")})+'</span><button class="bbtn" data-a="connect">'+t("retry")+'</button>';cls="bad"}
+  else if(!S.account){h='<span>'+t(S.problem=="permissions"?"ban_perm":"ban_none")+'</span><button class="bbtn" data-a="connect">'+t("connect")+'</button>';cls="warn"}
+  else if(D.settings.paused){h='<span>'+t("ban_paused")+'</span><button class="bbtn" data-a="resume">'+t("resume")+'</button>';cls="warn"}
+  b.hidden=!h;b.className="banner "+cls;b.innerHTML=h}
+function renderAll(){renderDashboard();renderCommands();renderTimers();renderGreetings();renderEvents();renderBlocklist();renderLogs();fillSettings(false);renderPause();renderAccount();renderBanner()}
+
+/* ===================== edit window (commands / timers / triggers) ===================== */
+var M=null,lastFocus=null,sheet=$("sheet");
+function cleanName(raw){return String(raw).split(/\s+/).filter(Boolean).join(" ").toLowerCase()}
+function showErr(m){var e=$("merr");e.textContent=m;e.hidden=false}
+function hideErr(){$("merr").hidden=true}
+function modalOpen(){return $("modal").classList.contains("open")||$("cmodal").classList.contains("open")}
+function openEdit(kind,key){
+  var ak=null;if(kind=="alert"){var pp=String(key).split(":");ak=pp[0];key=pp[1]=="new"?null:+pp[1]}
+  var o=null;if(key!=null)o=kind=="command"?D.commands[key]:kind=="greeting"?D.greetings.users[key]:kind=="alert"?((D.events[ak]||{}).tiers||[])[key]:D.timers[key];
+  if(key!=null&&!o)return;
+  M={kind:kind,key:key,orig:o,ak:ak};lastFocus=document.activeElement;sheet.dataset.kind=kind;sheet.dataset.evk=ak||"";hideErr();
+  $("mt").textContent=kind=="alert"?t(EVM[ak].t)+" · "+t(key==null?"ev_new_reply":"ev_edit_reply"):t("t_"+(key==null?"new":"edit")+"_"+kind);
+  $("lbl-name").textContent=t(kind=="command"?"lbl_cmd":kind=="greeting"?"lbl_gname":"lbl_name");$("lbl-resp").textContent=t(kind=="timer"?"lbl_msg":"lbl_resp");
+  if(kind=="command"){$("mc").value=o?key:"";$("ma").value=o?(o.aliases||[]).join(", "):"";$("mr").value=o?o.response:"";$("ml").value=o?o.permission:"everyone";$("md").value=o?o.cooldown:5}
+  else if(kind=="alert"){var em=EVM[ak],tl=((D.events[ak]||{}).tiers||[]);$("mr").value=o?o.response:"";
+    $("mmin").value=o?o.min:(tl.length?(Math.max.apply(null,tl.map(function(x){return x.min}))*2||1):1);$("minwrap").hidden=!!em.single;$("hintalert").hidden=!!em.single;$("lbl-min").textContent=t("ev_lbl_min",{u:t(em.u)})}
+  else if(kind=="greeting"){$("mc").value=o?o.user:"";$("gmsgs").innerHTML="";gActive=null;(o?o.messages:[""]).forEach(function(m){addMsgBox(m)});gActive=$("gmsgs").querySelector("textarea")}
+  else{$("mc").value=o?o.name:"";$("mr").value=o?o.message:"";$("mi").value=o?o.interval_minutes:20}
+  $("mc").placeholder=kind=="command"?t("name_ph"):kind=="greeting"?t("gname_ph"):"";
+  buildAnn();updCnt();$("modal").classList.add("open");(kind=="alert"?($("minwrap").hidden?$("mr"):$("mmin")):$("mc")).focus()}
+function addMsgBox(text,focus){
+  var w=document.createElement("div");w.className="gmsg";w.innerHTML='<textarea rows="2" dir="auto" maxlength="450"></textarea><button type="button" class="gdel">×</button>';
+  var ta=w.querySelector("textarea");ta.value=text||"";w.querySelector("button").setAttribute("aria-label",t("remove_msg_aria"));
+  $("gmsgs").appendChild(w);if(focus){ta.focus();gActive=ta;buildAnn()}}
+function readMsgs(){var out=[];$("gmsgs").querySelectorAll("textarea").forEach(function(x){var v=x.value.trim();if(v&&out.indexOf(v)<0)out.push(v)});return out}
+$("gadd").onclick=function(){addMsgBox("",true)};
+$("gmsgs").addEventListener("click",function(e){var b=e.target.closest(".gdel");if(!b)return;b.parentNode.remove();if(!$("gmsgs").querySelector("textarea"))addMsgBox("");gActive=$("gmsgs").querySelector("textarea");buildAnn()});
+$("gmsgs").addEventListener("focusin",function(e){if(e.target.tagName=="TEXTAREA"){gActive=e.target;buildAnn()}});
+$("gmsgs").addEventListener("input",function(){buildAnn();hideErr()});
+function closeEdit(){hideTip();$("modal").classList.remove("open");M=null;if(lastFocus&&lastFocus.focus)lastFocus.focus()}
+function num(id,lo,hi){var v=$(id).value;if(String(v).trim()==="")throw new Error(t("err_num"));var n=Number(v);if(!isFinite(n))throw new Error(t("err_num"));if(n<lo||n>hi)throw new Error(t("err_range"));return n}
+async function saveEdit(){
+  if(!M)return;hideErr();var kind=M.kind,key=M.key,orig=M.orig,isNew=key==null,resp=$("mr").value.trim(),btn=$("msave");btn.disabled=true;
+  try{
+    if(kind!="greeting"){if(!resp)throw new Error(t("err_resp"));if(resp.length>450)throw new Error(t("err_len"))}
+    if(kind=="command"){
+      var name=cleanName($("mc").value);if(!name)throw new Error(t("err_name"));
+      var cd=num("md",0,86400),aliases=[];$("ma").value.split(/[,،;؛\n]+/).forEach(function(a){a=cleanName(a);if(a&&a!=name&&aliases.indexOf(a)<0)aliases.push(a)});
+      await mutate("commands",function(c){var obj={response:resp,permission:$("ml").value,cooldown:cd,enabled:true,aliases:aliases};
+        if(isNew){if(c[name])throw new Error(t("err_exists",{n:name}));c[name]=obj;return}
+        if(!c[key])throw Gone();obj.enabled=c[key].enabled!==false;if(name!=key&&c[name])throw new Error(t("err_exists",{n:name}));
+        var out={};Object.keys(c).forEach(function(k){if(k==key)out[name]=obj;else out[k]=c[k]});return out})
+    }else if(kind=="alert"){
+      var ak2=M.ak,em2=EVM[ak2],mn=em2.single?0:num("mmin",0,1000000);if(Math.floor(mn)!=mn)throw new Error(t("err_num"));
+      await mutate("events",function(e){var ev=e[ak2]=e[ak2]||{enabled:true,tiers:[]};ev.tiers=ev.tiers||[];
+        var dup=function(i){return !em2.single&&ev.tiers.some(function(x,k){return k!=i&&x.min==mn})};
+        if(isNew){if(dup(-1))throw new Error(t("err_dupmin",{n:mn}));ev.tiers.push({min:mn,response:resp})}
+        else{var i=idxOf(ev.tiers,key,function(x){return x.min==orig.min&&x.response==orig.response});if(dup(i))throw new Error(t("err_dupmin",{n:mn}));ev.tiers[i]={min:mn,response:resp}}
+        ev.tiers.sort(function(a,b){return a.min-b.min})})
+    }else if(kind=="greeting"){
+      var gu=$("mc").value.trim().replace(/^@/,"").toLowerCase();if(!/^[a-z0-9_]{1,25}$/.test(gu))throw new Error(t("err_gname"));
+      var msgs=readMsgs();if(!msgs.length)throw new Error(t("err_gmsg"));
+      await mutate("greetings",function(g){g.users=g.users||[];var obj={user:gu,messages:msgs,enabled:true};
+        if(isNew){if(g.users.some(function(x){return x.user==gu}))throw new Error(t("err_gdup",{n:gu}));g.users.push(obj);return}
+        var i=idxOf(g.users,key,function(x){return x.user==orig.user});obj.enabled=g.users[i].enabled!==false;
+        if(gu!=orig.user&&g.users.some(function(x,k){return k!=i&&x.user==gu}))throw new Error(t("err_gdup",{n:gu}));g.users[i]=obj})
+    }else{
+      var tn=$("mc").value.trim();if(!tn)throw new Error(t("err_name"));var iv=num("mi",1,1440);
+      await mutate("timers",function(a){var obj={name:tn,message:resp,interval_minutes:iv,enabled:true};
+        if(isNew){a.push(obj);return}var i=idxOf(a,key,function(x){return x.name==orig.name});obj.enabled=a[i].enabled!==false;a[i]=obj})
+    }
+    closeEdit();anim=false;renderAll();anim=true;say(t(isNew?"added":"saved"))
+  }catch(e){if(e.gone){closeEdit();fail(e)}else showErr(e.message)}
+  finally{btn.disabled=false}
+}
+$("msave").onclick=saveEdit;$("mcancel").onclick=closeEdit;
+$("modal").addEventListener("mousedown",function(e){if(e.target===$("modal"))closeEdit()});
+$("modal").addEventListener("keydown",function(e){if(e.key=="Enter"&&e.target.tagName=="INPUT"){e.preventDefault();saveEdit()}});
+["mc","ma","md","mi","ml"].forEach(function(id){$(id).addEventListener("input",hideErr)});
+
+/* confirm box */
+var CB=null;
+function confirmBox(o){CB=o;lastFocus=document.activeElement;$("ct").textContent=o.title;$("cb").textContent=o.body;$("cok").textContent=o.ok;$("cok").className="btn sm"+(o.danger?" danger":"");$("cmodal").classList.add("open");$("ccancel").focus()}
+function closeConfirm(){$("cmodal").classList.remove("open");CB=null;if(lastFocus&&lastFocus.focus)lastFocus.focus()}
+$("ccancel").onclick=closeConfirm;$("cmodal").addEventListener("mousedown",function(e){if(e.target===$("cmodal"))closeConfirm()});
+$("cok").onclick=async function(){var o=CB;if(!o)return;$("cok").disabled=true;try{await o.run();closeConfirm()}catch(e){closeConfirm();fail(e)}finally{$("cok").disabled=false}};
+document.addEventListener("keydown",function(e){if(e.key!="Escape")return;if($("cmodal").classList.contains("open"))closeConfirm();else if($("modal").classList.contains("open"))closeEdit()});
+function askDelete(kind,key,label){confirmBox({title:t("confirm_del_q",{n:label}),body:t("confirm_del_body"),ok:t("delete"),danger:true,run:async function(){
+  if(kind=="command")await mutate("commands",function(c){if(!c[key])throw Gone();delete c[key]});
+  else if(kind=="greeting"){var u0=D.greetings.users[key]&&D.greetings.users[key].user;await mutate("greetings",function(g){g.users.splice(idxOf(g.users,key,function(x){return x.user==u0}),1)})}
+  else{var n0=D.timers[key]&&D.timers[key].name;await mutate("timers",function(a){a.splice(idxOf(a,key,function(x){return x.name==n0}),1)})}
+  anim=false;renderAll();anim=true;say(t("deleted"))}})}
+async function toggleItem(kind,key,on,sw){
+  try{
+    if(kind=="command")await mutate("commands",function(c){if(!c[key])throw Gone();c[key].enabled=on});
+    else if(kind=="greeting"){var u0=D.greetings.users[key]&&D.greetings.users[key].user;await mutate("greetings",function(g){g.users[idxOf(g.users,key,function(x){return x.user==u0})].enabled=on})}
+    else{var n0=D.timers[key]&&D.timers[key].name;await mutate("timers",function(a){a[idxOf(a,key,function(x){return x.name==n0})].enabled=on})}
+    anim=false;renderDashboard();if(kind=="command")renderCommands();anim=true
+  }catch(e){sw.setAttribute("aria-checked",!on);fail(e)}}
+
+/* ===================== events ===================== */
+$("list").addEventListener("click",function(e){
+  var row=e.target.closest(".row"),key=row&&row.dataset.k;
+  var s=e.target.closest(".sw");if(s&&key){var on=s.getAttribute("aria-checked")!="true";s.setAttribute("aria-checked",on);row.classList.toggle("dim",!on);toggleItem("command",key,on,s);return}
+  if(e.target.closest(".edit")&&key){openEdit("command",key);return}
+  if(e.target.closest(".del")&&key){askDelete("command",key,key);return}
+  var c=e.target.closest(".cmd:not(.static)");if(c){copyText(c.dataset.c);say(t("copied",{c:c.dataset.c}))}});
+function listEvents(id,kind,arr,label){$(id).addEventListener("click",function(e){var ln=e.target.closest(".line");if(!ln||ln.dataset.i===undefined)return;var i=+ln.dataset.i,it=D[arr][i];if(!it)return;
+  var s=e.target.closest(".sw");if(s){var on=s.getAttribute("aria-checked")!="true";s.setAttribute("aria-checked",on);toggleItem(kind,i,on,s);return}
+  if(e.target.closest(".edit"))openEdit(kind,i);else if(e.target.closest(".del"))askDelete(kind,i,it[label])})}
+listEvents("t-list","timer","timers","name");
+$("gr-list").addEventListener("click",function(e){var ln=e.target.closest(".line");if(!ln||ln.dataset.i===undefined)return;var i=+ln.dataset.i,it=D.greetings.users[i];if(!it)return;
+  var s=e.target.closest(".sw");if(s){var on=s.getAttribute("aria-checked")!="true";s.setAttribute("aria-checked",on);toggleItem("greeting",i,on,s);return}
+  if(e.target.closest(".edit"))openEdit("greeting",i);else if(e.target.closest(".del"))askDelete("greeting",i,it.user)});
+$("newgr").onclick=function(){openEdit("greeting",null)};
+$("ev-cards").addEventListener("click",function(e){
+  var sw=e.target.closest("[data-evsw]");
+  if(sw){var k=sw.dataset.evsw,on=sw.getAttribute("aria-checked")!="true";sw.setAttribute("aria-checked",on);
+    mutate("events",function(ev){var x=ev[k]=ev[k]||{enabled:true,tiers:[]};x.enabled=on}).then(function(){renderEvents();say(t(on?"ev_on_toast":"ev_off_toast",{n:t(EVM[k].t)}))}).catch(function(err){sw.setAttribute("aria-checked",!on);fail(err)});return}
+  var ln=e.target.closest(".line");
+  if(ln&&e.target.closest(".edit")){openEdit("alert",ln.dataset.k+":"+ln.dataset.i);return}
+  if(ln&&e.target.closest(".del")){askTierDelete(ln.dataset.k,+ln.dataset.i);return}
+  var ad=e.target.closest(".addtier");if(ad)openEdit("alert",ad.dataset.k+":new")});
+$("grsw").onclick=async function(){var sw=this,on=sw.getAttribute("aria-checked")!="true";sw.setAttribute("aria-checked",on);
+  try{await mutate("greetings",function(g){g.enabled=on});renderGreetings();say(t(on?"greet_on_toast":"greet_off_toast"))}catch(e){sw.setAttribute("aria-checked",!on);fail(e)}};
+document.querySelectorAll("#v-commands .tabs button").forEach(function(b){b.onclick=function(){document.querySelectorAll("#v-commands .tabs button").forEach(function(x){x.classList.remove("on")});b.classList.add("on");tab=b.dataset.t;anim=true;renderCommands()}});
+$("q").oninput=function(){anim=false;renderCommands();anim=true};
+$("new").onclick=function(){openEdit("command",null)};$("newt").onclick=function(){openEdit("timer",null)};
+$("lrefresh").onclick=async function(){await loadLogs();renderLogs()};
+/* blocklist */
+async function blAdd(k){var inp=$(k=="users"?"bu":"bw"),v=inp.value.trim();if(k=="users")v=v.replace(/^@/,"").toLowerCase();if(!v)return;
+  try{await mutate("blocklist",function(b){b[k]=b[k]||[];if(b[k].some(function(x){return x.toLowerCase()==v.toLowerCase()}))return;b[k].push(v)});inp.value="";renderBlocklist();say(t("added"))}catch(e){fail(e)}}
+document.querySelectorAll("[data-add]").forEach(function(b){b.onclick=function(){blAdd(b.dataset.add)}});
+[["bu","users"],["bw","words"]].forEach(function(x){$(x[0]).addEventListener("keydown",function(e){if(e.key=="Enter")blAdd(x[1])})});
+["bl-users","bl-words"].forEach(function(id){$(id).addEventListener("click",function(e){var b=e.target.closest("[data-rm]");if(!b)return;var k=b.dataset.rm,v=b.dataset.v;
+  mutate("blocklist",function(o){o[k]=(o[k]||[]).filter(function(x){return x!==v})}).then(function(){renderBlocklist()}).catch(fail)})});
+/* settings */
+["lcs","cu"].forEach(function(id){$(id).addEventListener("input",function(){settingsDirty=true})});
+$("owsw").onclick=function(){this.setAttribute("aria-checked",this.getAttribute("aria-checked")!="true");settingsDirty=true};
+$("save").onclick=async function(){
+  try{var lc=num("lcs",15,3600),url=$("cu").value.trim();if(url&&!/^https?:\/\//i.test(url))throw new Error(t("err_url"));
+    var ow=$("owsw").getAttribute("aria-checked")=="true";
+    await mutate("settings",function(s){s.only_when_live=ow;s.live_check_seconds=Math.round(lc);s.commands_url=url});
+    settingsDirty=false;fillSettings(true);anim=false;renderAll();anim=true;say(t("settings_saved"))}catch(e){fail(e)}};
+var dm=$("dmsw");
+function setTheme(dark,save){document.documentElement.setAttribute("data-theme",dark?"dark":"light");dm.setAttribute("aria-checked",dark);if(save){try{localStorage.setItem("fqpn-theme",dark?"dark":"light")}catch(e){}}}
+dm.onclick=function(){setTheme(this.getAttribute("aria-checked")!="true",true)};
+$("lg").onchange=function(){setLang(this.value,true)};
+
+/* account menu + banner */
+var me=$("me"),menu=$("menu");
+function closeMenu(){menu.classList.remove("open");me.setAttribute("aria-expanded","false")}
+me.onclick=function(e){e.stopPropagation();var o=menu.classList.toggle("open");me.setAttribute("aria-expanded",o)};
+document.addEventListener("click",closeMenu);document.addEventListener("keydown",function(e){if(e.key=="Escape")closeMenu()});
+var fastOn=false;
+async function fastPoll(){   // while a Twitch login is waiting, check every second so the code shows up quickly
+  if(fastOn)return;fastOn=true;
+  try{for(var i=0;i<1800;i++){await new Promise(function(r){setTimeout(r,1000)});await loadStatus();renderAccount();renderBanner();if(!S.login||S.login.status!="waiting")break}
+    await loadSections();anim=false;renderAll();anim=true}finally{fastOn=false}}
+async function doConnect(){try{say(t("conn_started"));await API.post("/api/connect");await loadStatus();renderAccount();renderBanner();fastPoll()}catch(e){fail(e)}}
+$("menubtn").onclick=function(){closeMenu();
+  if(S.account)confirmBox({title:t("disc_q"),body:t("disc_body"),ok:t("disc_yes"),danger:true,run:async function(){await API.post("/api/disconnect");await loadStatus();renderAccount();renderBanner();renderDashboard();say(t("disc_toast"))}});
+  else doConnect()};
+$("banner").addEventListener("click",function(e){var b=e.target.closest("[data-a]");if(!b)return;
+  if(b.dataset.a=="connect")doConnect();
+  else if(b.dataset.a=="resume")setPaused(false);
+  else if(b.dataset.a=="copycode"){copyText((S.login||{}).code||"");say(t("ban_copied"))}});
+
+/* ===================== views, language, polling ===================== */
+function placePill(){var a=document.querySelector("#nav a.on"),pl=$("pill");if(a){pl.style.transform="translateY("+a.offsetTop+"px)";pl.style.height=a.offsetHeight+"px"}}
+function countUp(el,to){var t0=null;function f(ts){if(!t0)t0=ts;var k=Math.min((ts-t0)/700,1);el.textContent=Math.round(to*(1-Math.pow(1-k,3)));if(k<1)requestAnimationFrame(f)}requestAnimationFrame(f)}
+function evTab(x){document.querySelectorAll("#evtabs button").forEach(function(b){b.classList.toggle("on",b.dataset.x==x)});$("paneG").hidden=x!="g";$("paneE").hidden=x!="e"}
+$("evtabs").addEventListener("click",function(e){var b=e.target.closest("button");if(b)evTab(b.dataset.x)});
+async function show(){
+  var v=(location.hash||"#commands").slice(1);
+  if(v=="greetings"){v="events";evTab("g");try{history.replaceState(null,"","#events")}catch(e){}}   // Greetings now lives inside Eventsif(!$("v-"+v))v="commands";curView=v;
+  document.querySelectorAll(".view").forEach(function(x){x.classList.toggle("on",x.id=="v-"+v)});
+  document.querySelectorAll("#nav a,#mnav a").forEach(function(a){a.classList.toggle("on",a.dataset.v==v)});placePill();
+  if(v=="commands"){anim=true;renderCommands()}
+  if(v=="dashboard"||v=="logs"){await loadLogs();renderLogs();renderDashboard();if(v=="dashboard")document.querySelectorAll("#d-cards b[data-n]").forEach(function(el){countUp(el,+el.dataset.n)})}
+  window.scrollTo(0,0)}
+function setLang(l,save){
+  lang=l;var d=document.documentElement;d.lang=l;d.dir=l=="ar"?"rtl":"ltr";$("lg").value=l;
+  if(save){try{localStorage.setItem("fqpn-lang",l)}catch(e){}}
+  fillSelects();applyStatic();buildAnn();anim=true;renderAll();placePill()}
+async function tick(){
+  try{await loadStatus();
+    if(!modalOpen()){await loadSections();if(curView=="logs"||curView=="dashboard")await loadLogs();
+      var sig=JSON.stringify([D,S,LOGS,offline]);if(sig!==lastSig){lastSig=sig;anim=false;renderAll();anim=true}}
+  }catch(e){}
+  setTimeout(tick,(S.login&&S.login.status=="waiting")?2000:6000)}
+window.addEventListener("hashchange",show);
+(async function boot(){
+  var th=null,lg=null;try{th=localStorage.getItem("fqpn-theme");lg=localStorage.getItem("fqpn-lang")}catch(e){}
+  setTheme(th!="light",false);setLang(lg=="ar"?"ar":"en",false);
+  await loadStatus();await loadSections();lastSig=JSON.stringify([D,S,LOGS,offline]);anim=true;renderAll();await show();tick()})();
+
+</script>
+</body>
+</html>

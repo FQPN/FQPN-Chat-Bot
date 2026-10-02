@@ -1,0 +1,22 @@
+# ---- secrets and personal data: NEVER upload these ----
+authentication/
+data/
+
+# ---- Python ----
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# ---- editors and system files ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ---- build output (made by PyInstaller / Inno Setup) ----
+build/
+dist/
+Output/
+build-venv/
