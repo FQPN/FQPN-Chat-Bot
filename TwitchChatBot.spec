@@ -23,7 +23,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="FQPN's Chat Bot",
+    name="FQPN'sChatBot",
     console=False,          # the black window: it shows the Twitch code and closing it stops the bot
     icon="icon.ico",
 )
