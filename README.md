@@ -12,9 +12,9 @@ The dashboard is in English and Arabic.
 - **Blocklist, Logs and a Pause switch**
 
 ## Install (Windows, no Python needed)
-1. Open the **Releases** page of this project and download **TwitchChatBot-Setup-x.y.z.exe**.
+1. Open the **Releases** page of this project and download **FQPN-Chat-Bot-Setup-x.y.z.exe**.
 2. Run it and follow the steps. It installs for your user only; no administrator rights are needed.
-3. Start **Twitch Chat Bot** from the Start menu (or the desktop shortcut).
+3. Start **FQPN's Chat Bot** from the Start menu (or the desktop shortcut).
 
 Windows may show a blue **"Windows protected your PC"** box because the installer is not signed.
 Click **More info**, then **Run anyway**.
