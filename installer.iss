@@ -36,11 +36,12 @@ Filename: "{app}\FQPN'sChatBot.exe"; Description: "Start FQPN's Chat Bot now"; F
 ; After "Restart and update" inside the app, the update runs silently and the app opens again by itself.
 Filename: "{app}\FQPN'sChatBot.exe"; Flags: nowait; Check: StartAfterUpdate
 
+; Your commands, timers and Twitch login live in %APPDATA%\TwitchChatBot, outside the install folder,
+; so uninstalling or upgrading never deletes them.
+
+; Pascal code below: only code and // comments are allowed in this last section, so keep it at the end of the file.
 [Code]
 function StartAfterUpdate: Boolean;
 begin
   Result := WizardSilent and (ExpandConstant('{param:RELAUNCH|0}') = '1');
 end;
-
-; Your commands, timers and Twitch login live in %APPDATA%\TwitchChatBot, outside the install folder,
-; so uninstalling or upgrading never deletes them.
