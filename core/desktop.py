@@ -15,6 +15,7 @@ WINDOWS = sys.platform == "win32"
 caps = {"installed": FROZEN, "startup": WINDOWS and FROZEN, "tray": False, "notify": False, "sound": WINDOWS}
 
 quit_app = None   # set by the launcher: closes the app window for real (used to install an update)
+show_window = None   # set by the launcher: brings the app window to the front (a second launch asks for this)
 
 
 def startup_command(minimized: bool, exe: str | None = None) -> str:

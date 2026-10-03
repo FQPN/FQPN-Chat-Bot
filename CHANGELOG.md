@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.1
+- Fixed: starting the app a second time no longer opens a second copy (which also made the bot answer twice in chat). The copy that is already running comes to the front instead.
+- Commands > Built-in now has a Status switch for each built-in command, so you can turn `!game`, `!title` and the others off.
+
 ## 1.1.0
 - **The app updates itself.** It checks GitHub for a new release, downloads it in the background and installs it with one click ("Restart and update"), keeping your data.
 - Settings now has five tabs: Appearance, App, Bot, Notifications, Logs and data.

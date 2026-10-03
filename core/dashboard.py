@@ -447,6 +447,17 @@ def create_app(store: Store, state: dict, port: int = PORT) -> web.Application:
         asyncio.get_running_loop().call_later(1.0, close_app)     # let this answer reach the page first
         return web.json_response({"ok": True})
 
+    async def show_window(request):
+        """A second copy of the app was started: it asks this one to bring its window to the front instead of running twice."""
+        fn = desktop.show_window
+        if fn is None:
+            return web.json_response({"ok": True, "shown": False})      # running without an app window (browser mode)
+        try:
+            fn()
+        except Exception:
+            log.exception("Could not show the app window")
+        return web.json_response({"ok": True, "shown": True})
+
     async def reconnect(request):
         state["lost"] = False
         wake = state.get("wake")
@@ -466,6 +477,7 @@ def create_app(store: Store, state: dict, port: int = PORT) -> web.Application:
     app.router.add_post("/api/connect", connect)
     app.router.add_post("/api/disconnect", disconnect)
     app.router.add_post("/api/reconnect", reconnect)
+    app.router.add_post("/api/show", show_window)
     app.router.add_post("/api/update/check", update_check)
     app.router.add_post("/api/update/download", update_download)
     app.router.add_post("/api/update/install", update_install)

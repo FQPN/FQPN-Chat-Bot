@@ -36,6 +36,99 @@ PREF_DEFAULTS = {"startup": False, "start_minimized": False, "on_close": "quit",
                  "auto_update": True, "notify": True, "notify_sound": False, "log_days": 30, "log_chat": False}
 
 
+MUTEX_NAME = "Local\\FQPNsChatBot"        # one per Windows user
+ERROR_ALREADY_EXISTS = 183
+
+
+class WinMutex:
+    """A Windows "named mutex". Only one copy of the app can own it, so a second launch knows another copy is running.
+    On other systems it never blocks."""
+
+    def __init__(self, name: str = MUTEX_NAME):
+        self.name = name
+        self.handle = None
+
+    def acquire(self) -> bool:
+        if sys.platform != "win32":
+            return True
+        import ctypes
+        k = ctypes.WinDLL("kernel32", use_last_error=True)
+        k.CreateMutexW.restype = ctypes.c_void_p
+        k.CloseHandle.argtypes = [ctypes.c_void_p]
+        handle = k.CreateMutexW(None, False, self.name)
+        if not handle:
+            return True                       # could not tell: never stop the app from starting
+        if ctypes.get_last_error() == ERROR_ALREADY_EXISTS:
+            k.CloseHandle(handle)
+            return False
+        self.handle = handle                  # kept for as long as the program runs
+        return True
+
+
+def wake_existing(port: int, timeout: float = 3.0) -> str:
+    """Asks the copy that is already running to show its window.
+    Returns "shown", "nowindow" (it runs without an app window) or "" (could not reach it)."""
+    import urllib.request
+    req = urllib.request.Request(f"http://127.0.0.1:{port}/api/show", data=b"{}", method="POST",
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return "shown" if json.load(r).get("shown") else "nowindow"
+    except Exception:
+        return ""
+
+
+def _allow_foreground() -> None:
+    """Lets the copy that is already running come to the front when asked (Windows normally forbids that)."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.user32.AllowSetForegroundWindow(-1)
+        except Exception:
+            pass
+
+
+def _message_box(text: str) -> None:
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(0, text, "FQPN's Chat Bot", 0x40)
+            return
+        except Exception:
+            pass
+    print(text)
+
+
+def ensure_single_instance(get_port, mutex=None, wake=wake_existing, sleep=time.sleep, wait: float = 8.0,
+                           step: float = 0.5, quiet: bool = False, say=_message_box, browser=webbrowser.open) -> bool:
+    """True: this is the only copy, carry on. False: another copy is running (it was asked to show itself, or the user
+    was told), so this one must exit. Two copies would both answer in chat."""
+    mutex = mutex or WinMutex()
+    end = time.time() + wait
+    while True:
+        if mutex.acquire():
+            return True
+        if quiet:                             # started by Windows with --minimized while a copy runs: stay silent
+            return False
+        _allow_foreground()
+        result = wake(get_port())
+        if result == "shown":
+            return False
+        if result == "nowindow":
+            browser(f"http://localhost:{get_port()}")
+            return False
+        if time.time() >= end:                # nothing answers: either it is still starting or it is stuck
+            say("FQPN's Chat Bot is already running. If you can't see its window, look for its icon in the system tray, "
+                "or close it in Task Manager and start it again.")
+            return False
+        sleep(step)                           # it may just be closing (for example during an update): try again
+
+
+def dashboard_port() -> int:
+    import importlib
+    return importlib.import_module("core.dashboard").PORT
+
+
 def user_home() -> Path:
     base = Path(os.environ.get("APPDATA") or (Path.home() / ".config"))
     home = base / APP_NAME
@@ -194,6 +287,8 @@ def install_pending_update(home: Path) -> None:
 
 
 def run() -> None:
+    if not ensure_single_instance(dashboard_port, quiet="--minimized" in sys.argv):
+        os._exit(0)                                   # another copy is running: it has been asked to show its window
     for stream in (sys.stdout, sys.stderr):          # Arabic names and emoji in the log
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")
@@ -212,7 +307,7 @@ def run() -> None:
     log.info("Data folder: %s", home)
 
     import main
-    from core import dashboard
+    from core import dashboard, desktop
 
     # The bot runs in a background thread because the app window must use the main thread.
     def bot_thread():
@@ -234,6 +329,7 @@ def run() -> None:
         shell = Shell(home, resource_dir())
         shell.window = webview.create_window("FQPN's Chat Bot", url, width=1280, height=800, min_size=(900, 600), hidden=hidden)
         shell.window.events.closing += shell.closing
+        desktop.show_window = shell.show              # a second launch asks this copy to show its window
         # private_mode=False + storage_path keeps the dashboard's theme/language between launches
         webview.start(shell.start_tray, (hidden,), private_mode=False, storage_path=str(home / "webview"))
         # Window closed for real -> stop the tray, install a waiting update, and end the program.

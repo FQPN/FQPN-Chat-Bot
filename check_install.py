@@ -20,11 +20,22 @@ REQUIRED = ["main.py", "launcher.py", "core/__init__.py", "core/auth.py", "core/
 # a phrase that only the NEW version of each file contains
 NEW_IN = {
     "main.py": ["open_browser", "updater.loop", "apply_launch_defaults"],
-    "core/store.py": ["ActivityLog", '"prefs"', "apply_launch_defaults"],
-    "core/bot.py": ["store.activity", "notify.event", "_log_chat"],
-    "core/dashboard.py": ['"prefs"', "updater", "/api/update/check"],
-    "core/dashboard.html": ["data-pref", "spane-app", "updbtn"],
+    "launcher.py": ["class Shell", "ensure_single_instance"],
+    "core/store.py": ["ActivityLog", '"prefs"', "apply_launch_defaults", "disabled_builtins"],
+    "core/bot.py": ["store.activity", "notify.event", "_log_chat", "disabled_builtins"],
+    "core/dashboard.py": ['"prefs"', "updater", "/api/update/check", "/api/show", "disabled_builtins"],
+    "core/desktop.py": ["quit_app", "show_window"],
+    "core/dashboard.html": ["data-pref", "spane-app", "updbtn", "toggleBuiltin", "transform-origin:15px 7px", 'class="sep"'],
 }
+
+# a phrase that only the OLD version of a file contains (so it must NOT be there)
+OLD_IN = {"core/dashboard.html": ["animation:tick", "transform-origin:0.75rem"]}
+
+# files that belong in the TwitchBot folder (next to main.py) and files that belong inside core
+ROOT_FILES = ["launcher.py", "main.py", "check_install.py", "installer.iss", "requirements.txt", "README.md", "CHANGELOG.md",
+              "RELEASING.md", "TwitchChatBot.spec", "icon.ico", "run.bat", "update.bat", "build.bat"]
+CORE_FILES = ["auth.py", "bot.py", "dashboard.py", "dashboard.html", "store.py", "manage.py", "variables.py", "greetings.py",
+              "events.py", "version.py", "activity.py", "notify.py", "desktop.py", "updater.py"]
 
 
 def ok(text):
@@ -50,6 +61,17 @@ if missing:
 else:
     ok("all the program files are there")
 
+# 3a. files put in the wrong folder (the usual cause of "No module named 'core'")
+misplaced = [f"core/{n}  ->  should be in the TwitchBot folder, next to main.py" for n in ROOT_FILES if (ROOT / "core" / n).exists()]
+misplaced += [f"{n}  ->  should be inside the core folder" for n in CORE_FILES if (ROOT / n).exists()]
+if (ROOT / "core" / "core").exists():
+    misplaced.append("core/core  ->  a folder inside a folder: its files belong one level up, inside core")
+if misplaced:
+    bad("Files in the wrong place:\n               " + "\n               ".join(misplaced),
+        "Drag each one to where it belongs and choose Replace. Unzip updates into the TwitchBot folder itself, never into core.")
+else:
+    ok("no file is in the wrong folder")
+
 # 3. no typos or half-pasted code
 broken = []
 for f in REQUIRED:
@@ -70,16 +92,13 @@ for f, phrases in NEW_IN.items():
     p = ROOT / f
     if p.exists():
         text = p.read_text(encoding="utf-8", errors="replace")
-        if not all(x in text for x in phrases):
+        if not all(x in text for x in phrases) or any(x in text for x in OLD_IN.get(f, [])):
             old.append(f)
 if old:
     bad("These files are still the OLD version: " + ", ".join(old),
         "Replace them with the ones from the update pack. The new files only work together.")
 elif not missing:
-    ok("main.py, store, bot, dashboard and the page are all the new version")
-launcher = ROOT / "launcher.py"
-if launcher.exists() and "class Shell" not in launcher.read_text(encoding="utf-8", errors="replace"):
-    notes.append("launcher.py is the old one. The bot still runs, but the tray icon and close-to-tray need the new launcher.py.")
+    ok("main.py, launcher, store, bot, dashboard and the page are all the new version")
 
 # 5. libraries
 for name, needed, pip in [("aiohttp", True, "aiohttp"), ("twitchio", True, "twitchio"),
