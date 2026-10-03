@@ -4,6 +4,7 @@ It only edits the JSON files through Store. The bot re-reads those files
 automatically, so changes apply without restarting anything."""
 
 import asyncio
+import os
 import logging
 import re
 from datetime import datetime, timezone
@@ -12,7 +13,7 @@ from pathlib import Path
 import aiohttp
 from aiohttp import web
 
-from . import auth, events, manage
+from . import auth, desktop, events, manage, notify, updater
 from .store import Store
 
 log = logging.getLogger("twitchbot.dashboard")
@@ -20,8 +21,9 @@ log = logging.getLogger("twitchbot.dashboard")
 HOST = "127.0.0.1"   # this PC only - never exposed to the network
 PORT = 5000
 PAGE = Path(__file__).resolve().parent / "dashboard.html"
+ICON = Path(__file__).resolve().parent.parent / "icon.ico"   # next to main.py (and inside the installed program folder)
 PERMISSIONS = ("everyone", "subscriber", "vip", "moderator", "broadcaster")
-SECTIONS = ("commands", "timers", "greetings", "events", "blocklist", "settings")
+SECTIONS = ("commands", "timers", "greetings", "events", "blocklist", "settings", "ui", "prefs")
 _LOGIN = re.compile(r"[a-z0-9_]{1,25}")
 
 
@@ -267,8 +269,51 @@ def validate(section: str, data, prefix: str = "!"):
         return {
             "only_when_live": _bool(data.get("only_when_live"), "Only when live"),
             "paused": _bool(data.get("paused", False), "Paused"),
+            "start_active": _bool(data.get("start_active", True), "Start the bot when the app opens"),
             "live_check_seconds": int(_number(data.get("live_check_seconds"), "Live check interval", 15, 3600)),
             "commands_url": url,
+        }
+
+    if section == "prefs":
+        if not isinstance(data, dict):
+            raise ValidationError("Settings are invalid.")
+        on_close = data.get("on_close", "quit")
+        if on_close not in ("quit", "tray"):
+            raise ValidationError("Choose what happens when the window closes.")
+        days = data.get("log_days", 30)
+        if isinstance(days, bool) or days not in (0, 7, 30, 90):
+            raise ValidationError("Choose how long to keep the logs.")
+        return {
+            "startup": _bool(data.get("startup", False), "Run on startup"),
+            "start_minimized": _bool(data.get("start_minimized", False), "Start minimized"),
+            "on_close": on_close,
+            "auto_reconnect": _bool(data.get("auto_reconnect", True), "Reconnect to Twitch automatically"),
+            "auto_update": _bool(data.get("auto_update", True), "Check for updates automatically"),
+            "notify": _bool(data.get("notify", True), "Desktop notifications"),
+            "notify_sound": _bool(data.get("notify_sound", False), "Play a sound"),
+            "log_days": days,
+            "log_chat": _bool(data.get("log_chat", False), "Log chat messages"),
+        }
+
+    if section == "ui":
+        if not isinstance(data, dict):
+            raise ValidationError("Appearance settings are invalid.")
+        size = data.get("fontSize", "medium")
+        if size not in ("small", "medium", "large", "xlarge"):
+            raise ValidationError("Choose a font size: small, medium, large or extra large.")
+        language = data.get("language", "en")
+        if language not in ("en", "ar"):
+            raise ValidationError("The language must be English or Arabic.")
+        accent = str(data.get("accent", "#9a1118")).strip().lower()
+        if not re.fullmatch(r"#[0-9a-f]{6}", accent):
+            raise ValidationError("The accent color must look like #9a1118.")
+        return {
+            "dark": _bool(data.get("dark", True), "Dark mode"),
+            "language": language,
+            "fontSize": size,
+            "accent": accent,
+            "compact": _bool(data.get("compact", False), "Compact layout"),
+            "reduceMotion": _bool(data.get("reduceMotion", False), "Reduce motion"),
         }
 
     raise ValidationError("Unknown section.")
@@ -298,6 +343,11 @@ def create_app(store: Store, state: dict, port: int = PORT) -> web.Application:
     async def index(request):
         return web.Response(text=PAGE.read_text(encoding="utf-8"), content_type="text/html")
 
+    async def icon(request):
+        if not ICON.is_file():
+            raise web.HTTPNotFound()
+        return web.Response(body=ICON.read_bytes(), content_type="image/x-icon")
+
     async def status(request):
         bot = state.get("bot")
         account = state.get("account")
@@ -314,12 +364,13 @@ def create_app(store: Store, state: dict, port: int = PORT) -> web.Application:
             "problem": auth.last_problem,
             "event_problems": dict(getattr(bot, "event_problems", {}) or {}) if bot else {},
             "avatar": state.get("avatar") if account else None,
+            "lost": bool(state.get("lost")),
+            "caps": dict(desktop.caps, updates=bool(desktop.FROZEN and not updater.is_dev())),
+            "update": {k: updater.U.get(k) for k in ("status", "current", "latest", "notes", "progress", "error")},
         })
 
     async def logs(request):
-        bot = state.get("bot")
-        items = list(bot.activity) if bot else []
-        return web.json_response(items[::-1])      # newest first
+        return web.json_response(store.activity.recent(200))      # newest first, saved on disk
 
     async def connect(request):
         if state.get("account"):
@@ -356,15 +407,65 @@ def create_app(store: Store, state: dict, port: int = PORT) -> web.Application:
             return web.json_response({"error": str(e)}, status=400)
         except (ValueError, AttributeError):
             return web.json_response({"error": "That data couldn't be read."}, status=400)
+        if section == "prefs":
+            try:
+                desktop.apply_prefs(data)      # the Windows start-up entry
+            except Exception as e:
+                log.exception("Could not change the start-up setting")
+                return web.json_response({"error": "Couldn't change the Windows start-up setting: " + str(e)[:150]}, status=500)
         store.save(section, data)
+        if section == "prefs":
+            store.activity.prune()              # apply a new "Keep logs for"
+            wake = state.get("update_wake")
+            if wake is not None and data.get("auto_update"):
+                wake.set()                      # look for updates now that automatic updates are on
         return web.json_response(data)
+
+    async def update_check(request):
+        await updater.check(updater.U)
+        if updater.U["status"] == "available" and store.get("prefs").get("auto_update", True):
+            state["update_task"] = asyncio.create_task(updater.download(updater.U))
+        return web.json_response({"ok": True})
+
+    async def update_download(request):
+        if updater.U["status"] in ("available", "error") and updater.U.get("asset"):
+            state["update_task"] = asyncio.create_task(updater.download(updater.U))
+        return web.json_response({"ok": True})
+
+    async def update_install(request):
+        if not updater.install(updater.U, relaunch=True):
+            return web.json_response({"error": "There is no downloaded update to install."}, status=400)
+        def close_app():
+            if desktop.quit_app:
+                desktop.quit_app()
+            else:
+                os._exit(0)
+        asyncio.get_running_loop().call_later(1.0, close_app)     # let this answer reach the page first
+        return web.json_response({"ok": True})
+
+    async def reconnect(request):
+        state["lost"] = False
+        wake = state.get("wake")
+        if wake is not None:
+            wake.set()
+        return web.json_response({"ok": True})
+
+    async def notify_test(request):
+        shown = notify.send(dict(store.get("prefs"), notify=True), "FQPN's Chat Bot", "This is a test notification.")
+        return web.json_response({"ok": bool(shown)})
 
     app = web.Application(middlewares=[guard])
     app.router.add_get("/", index)
+    app.router.add_get("/icon.ico", icon)
     app.router.add_get("/api/status", status)
     app.router.add_get("/api/logs", logs)
     app.router.add_post("/api/connect", connect)
     app.router.add_post("/api/disconnect", disconnect)
+    app.router.add_post("/api/reconnect", reconnect)
+    app.router.add_post("/api/update/check", update_check)
+    app.router.add_post("/api/update/download", update_download)
+    app.router.add_post("/api/update/install", update_install)
+    app.router.add_post("/api/notify/test", notify_test)
     app.router.add_get("/api/{section}", read)
     app.router.add_put("/api/{section}", write)
     return app

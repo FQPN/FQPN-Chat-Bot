@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>FQPN's Chat Bot</title>
+<link rel="icon" href="/icon.ico">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Tajawal:wght@400;500;700&display=swap">
 <style>
 :root{--bg:#0b0b0c;--side:#0d0d0e;--panel:#0f0f10;--line:#222224;--text:#d3d3d8;--mute:#8a8a92;--red:#7d0b0f;--red2:#9a1118;--chip:#1c1c1e;--mod-bg:#12332a;--mod-t:#4fb386;--ev-bg:#2b2b2e;--ev-t:#b4b4bb;--soft:#b2b2ba;--hover:#151517;--off:#3a3a3d;--menu-h:#2a1214;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
@@ -11,136 +12,136 @@
 *{box-sizing:border-box}
 html{scroll-padding-top:env(safe-area-inset-top,0px)}
 body{margin:0;background:var(--bg);color:var(--text);font-family:'Outfit','Tajawal',system-ui,sans-serif;display:flex;min-height:100vh}
-aside{position:sticky;top:0;height:100vh;height:100dvh;align-self:flex-start;overflow-y:auto;width:232px;background:var(--side);border-inline-end:1px solid var(--line);padding:30px 16px;display:flex;flex-direction:column;flex-shrink:0}
-.brand{margin:0 14px 34px;font-weight:700;font-size:23px;line-height:1.15}
-.brand small{display:block;font-weight:500;font-size:13px;letter-spacing:.45em;margin-top:6px}
-nav a{display:flex;gap:12px;align-items:center;padding:11px 14px;border-radius:8px;color:var(--soft);text-decoration:none;margin-bottom:6px;font-weight:500}
-nav a.on{background:var(--red);color:#fff}
+aside{position:sticky;top:0;height:100vh;height:100dvh;align-self:flex-start;overflow-y:auto;width:14.5rem;background:var(--side);border-inline-end:1px solid var(--line);padding:1.875rem 1rem;display:flex;flex-direction:column;flex-shrink:0}
+.brand{margin:0 0.875rem 2.125rem;font-weight:700;font-size:1.4375rem;line-height:1.15}
+.brand small{display:block;font-weight:500;font-size:0.8125rem;letter-spacing:.45em;margin-top:0.375rem}
+nav a{display:flex;gap:0.75rem;align-items:center;padding:0.6875rem 0.875rem;border-radius:0.5rem;color:var(--soft);text-decoration:none;margin-bottom:0.375rem;font-weight:500}
+nav a.on{background:var(--red);color:var(--on-red,#fff)}
 .acct{margin-top:auto;position:relative}
-.acct small{display:block;font-size:11px;color:var(--mute);margin:0 0 4px;padding-inline-start:10px}
-.me{width:100%;display:flex;gap:10px;align-items:center;padding:8px 10px;background:none;border:0;border-radius:10px;color:inherit;font-family:inherit;cursor:pointer;text-align:start}
+.acct small{display:block;font-size:0.6875rem;color:var(--mute);margin:0 0 0.25rem;padding-inline-start:0.625rem}
+.me{width:100%;display:flex;gap:0.625rem;align-items:center;padding:0.5rem 0.625rem;background:none;border:0;border-radius:0.625rem;color:inherit;font-family:inherit;cursor:pointer;text-align:start}
 .me:hover{background:var(--hover)}
-.av{width:44px;height:44px;border-radius:50%;flex-shrink:0}
-.who{display:block}.who b{display:block;unicode-bidi:isolate;font-size:19px;line-height:1.1}.who i{display:flex;align-items:center;gap:6px;white-space:nowrap;font-style:normal;font-size:13px;color:#4ade80}.dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex-shrink:0}
-.tw{margin-inline-start:auto;display:flex;gap:10px;align-items:center;color:var(--mute)}
+.av{width:2.75rem;height:2.75rem;border-radius:50%;flex-shrink:0}
+.who{display:block}.who b{display:block;unicode-bidi:isolate;font-size:1.1875rem;line-height:1.1}.who i{display:flex;align-items:center;gap:0.375rem;white-space:nowrap;font-style:normal;font-size:0.8125rem;color:#4ade80}.dot{width:0.4375rem;height:0.4375rem;border-radius:50%;background:currentColor;flex-shrink:0}
+.tw{margin-inline-start:auto;display:flex;gap:0.625rem;align-items:center;color:var(--mute)}
 .chev{transition:transform .2s}.me[aria-expanded=true] .chev{transform:rotate(180deg)}
-.menu{position:absolute;left:0;right:0;bottom:calc(100% + 6px);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px;display:none;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+.menu{position:absolute;left:0;right:0;bottom:calc(100% + 0.375rem);background:var(--panel);border:1px solid var(--line);border-radius:0.625rem;padding:0.375rem;display:none;box-shadow:0 0.5rem 1.5rem rgba(0,0,0,.5)}
 .menu.open{display:block}
-.menu button{width:100%;background:none;border:0;color:#ff6b6b;font:500 15px 'Outfit','Tajawal',sans-serif;text-align:start;padding:10px 12px;border-radius:7px;cursor:pointer}
+.menu button{width:100%;background:none;border:0;color:#ff6b6b;font:500 0.9375rem 'Outfit','Tajawal',sans-serif;text-align:start;padding:0.625rem 0.75rem;border-radius:0.4375rem;cursor:pointer}
 .menu button:hover{background:var(--menu-h)}
 main{flex:1;min-width:0}
-.top{height:84px;border-bottom:1px solid var(--line);display:flex;justify-content:flex-end;align-items:center;padding:0 36px;color:var(--mute)}
-.wrap{padding:28px 26px}
-header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:24px}
-h1{font-size:36px;font-weight:600;margin:0}
-header p{margin:4px 0 0;color:var(--mute);font-size:17px}
-.btn{background:var(--red);color:#fff;border:1px solid var(--red2);padding:14px 26px;border-radius:8px;font:500 17px 'Outfit','Tajawal',sans-serif;cursor:pointer}
+.top{height:5.25rem;border-bottom:1px solid var(--line);display:flex;justify-content:flex-end;align-items:center;padding:0 2.25rem;color:var(--mute)}
+.wrap{padding:1.75rem 1.625rem}
+header{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem}
+h1{font-size:2.25rem;font-weight:600;margin:0}
+header p{margin:0.25rem 0 0;color:var(--mute);font-size:1.0625rem}
+.btn{background:var(--red);color:var(--on-red,#fff);border:1px solid var(--red2);padding:0.875rem 1.625rem;border-radius:0.5rem;font:500 1.0625rem 'Outfit','Tajawal',sans-serif;cursor:pointer}
 .btn:hover{background:var(--red2)}
-.bar{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:20px;align-items:center}
-.tabs{display:flex;background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden}
-.tabs button{border:0;background:none;color:var(--soft);padding:12px 26px;font:500 15px 'Outfit','Tajawal',sans-serif;cursor:pointer}
-.tabs button.on{background:var(--red);color:#fff}
-input[type=search]{flex:1;min-width:180px;max-width:300px;border:1px solid var(--line);background:var(--panel);color:var(--text);padding:12px 16px;border-radius:8px;font:15px 'Outfit','Tajawal',sans-serif}
-.count{margin-inline-start:auto;color:var(--mute);font-size:14px}
+.bar{display:flex;gap:0.875rem;flex-wrap:wrap;margin-bottom:1.25rem;align-items:center}
+.tabs{display:flex;background:var(--panel);border:1px solid var(--line);border-radius:0.5rem;overflow:hidden}
+.tabs button{border:0;background:none;color:var(--soft);padding:0.75rem 1.625rem;font:500 0.9375rem 'Outfit','Tajawal',sans-serif;cursor:pointer}
+.tabs button.on{background:var(--red);color:var(--on-red,#fff)}
+input[type=search]{flex:1;min-width:11.25rem;max-width:18.75rem;border:1px solid var(--line);background:var(--panel);color:var(--text);padding:0.75rem 1rem;border-radius:0.5rem;font:0.9375rem 'Outfit','Tajawal',sans-serif}
+.count{margin-inline-start:auto;color:var(--mute);font-size:0.875rem}
 :focus-visible{outline:2px solid var(--red2);outline-offset:2px}
-.tbl{border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow-x:auto}
-.row{display:grid;grid-template-columns:190px 1fr 120px 100px 90px 100px;gap:14px;align-items:center;padding:8px 26px;min-width:760px;border-top:1px solid var(--line)}
+.tbl{border:1px solid var(--line);border-radius:0.625rem;background:var(--panel);overflow-x:auto}
+.row{display:grid;grid-template-columns:11.875rem 1fr 7.5rem 6.25rem 5.625rem 6.25rem;gap:0.875rem;align-items:center;padding:0.5rem 1.625rem;min-width:47.5rem;border-top:1px solid var(--line)}
 .row:first-child{border-top:0}
 .row:not(.head):hover{background:var(--hover);box-shadow:inset 3px 0 0 var(--red2)}
-.row.head{font-weight:600;font-size:15px;padding:18px 26px}
-.cmd{display:inline-flex;gap:12px;align-items:center;background:var(--chip);color:var(--text);padding:9px 12px;border-radius:7px;border:0;font:500 16px 'Outfit','Tajawal',sans-serif;cursor:pointer;justify-self:start}
+.row.head{font-weight:600;font-size:0.9375rem;padding:1.125rem 1.625rem}
+.cmd{display:inline-flex;gap:0.75rem;align-items:center;background:var(--chip);color:var(--text);padding:0.5625rem 0.75rem;border-radius:0.4375rem;border:0;font:500 1rem 'Outfit','Tajawal',sans-serif;cursor:pointer;justify-self:start}
 .cmd span{opacity:.6}
-.msg{font-size:16px;overflow-wrap:anywhere}
-.lvl{font-size:14px;font-weight:500;padding:6px 12px;border-radius:5px;justify-self:start}
+.msg{font-size:1rem;overflow-wrap:anywhere}
+.lvl{font-size:0.875rem;font-weight:500;padding:0.375rem 0.75rem;border-radius:0.3125rem;justify-self:start}
 .lvl.mod{background:var(--mod-bg);color:var(--mod-t)}.lvl.all{background:var(--ev-bg);color:var(--ev-t)}
 .cd{color:var(--soft)}
-.sw{width:46px;height:26px;border-radius:999px;background:var(--off);border:0;position:relative;cursor:pointer;transition:background .2s}
-.sw::after{content:"";position:absolute;top:3px;inset-inline-start:3px;width:20px;height:20px;border-radius:50%;background:#dcdce0;transition:transform .2s}
-.sw[aria-checked=true]{background:var(--red2)}.sw[aria-checked=true]::after{transform:translateX(20px)}
-.act{display:flex;gap:14px;justify-content:center}.act button{border:0;background:none;color:var(--soft);cursor:pointer;font-size:17px;padding:4px}
+.sw{width:2.875rem;height:1.625rem;border-radius:62.4375rem;background:var(--off);border:0;position:relative;cursor:pointer;transition:background .2s}
+.sw::after{content:"";position:absolute;top:3px;inset-inline-start:3px;width:1.25rem;height:1.25rem;border-radius:50%;background:#dcdce0;transition:transform .2s}
+.sw[aria-checked=true]{background:var(--red2)}.sw[aria-checked=true]::after{transform:translateX(1.25rem)}
+.act{display:flex;gap:0.875rem;justify-content:center}.act button{border:0;background:none;color:var(--soft);cursor:pointer;font-size:1.0625rem;padding:0.25rem}
 .act button{display:flex;transition:color .2s,transform .2s}.act button:hover{color:var(--text)}.act .del:hover,.act .del:focus-visible{color:#ff3b3b;transform:scale(1.15)}.act .del:active{transform:scale(.9)}
-.empty{padding:30px;text-align:center;color:var(--mute)}
-.toast{position:fixed;bottom:calc(20px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);background:var(--red);color:#fff;padding:10px 18px;border-radius:8px;opacity:0;transition:opacity .2s;pointer-events:none}
+.empty{padding:1.875rem;text-align:center;color:var(--mute)}
+.toast{position:fixed;bottom:calc(1.25rem + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);background:var(--red);color:var(--on-red,#fff);padding:0.625rem 1.125rem;border-radius:0.5rem;opacity:0;transition:opacity .2s;pointer-events:none}
 .toast.show{opacity:1}
 .view{display:none}.view.on{display:block}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-bottom:22px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:20px}
-.card span{color:var(--mute);font-size:15px}.card b{display:block;font-size:34px;font-weight:600;margin-top:6px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(12.5rem,1fr));gap:0.875rem;margin-bottom:1.375rem}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:0.625rem;padding:1.25rem}
+.card span{color:var(--mute);font-size:0.9375rem}.card b{display:block;font-size:2.125rem;font-weight:600;margin-top:0.375rem}
 .card.red{border-color:var(--red2);box-shadow:inset 3px 0 0 var(--red2)}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
-.panel h2{margin:0;padding:18px 24px;font-size:18px;font-weight:600;border-bottom:1px solid var(--line)}
-.line{display:flex;gap:16px;align-items:center;padding:14px 24px;border-top:1px solid var(--line)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:0.625rem;overflow:hidden}
+.panel h2{margin:0;padding:1.125rem 1.5rem;font-size:1.125rem;font-weight:600;border-bottom:1px solid var(--line)}
+.line{display:flex;gap:1rem;align-items:center;padding:0.875rem 1.5rem;border-top:1px solid var(--line)}
 .line:first-of-type{border-top:0}
-.line .grow{flex:1;min-width:0;overflow-wrap:anywhere}.line small{display:block;color:var(--mute);font-size:13px;margin-top:2px}
-.time{color:var(--mute);font-size:14px;min-width:64px}
-.field{display:flex;flex-direction:column;gap:6px;padding:16px 24px;border-top:1px solid var(--line)}
+.line .grow{flex:1;min-width:0;overflow-wrap:anywhere}.line small{display:block;color:var(--mute);font-size:0.8125rem;margin-top:2px}
+.time{color:var(--mute);font-size:0.875rem;min-width:4rem}
+.field{display:flex;flex-direction:column;gap:0.375rem;padding:1rem 1.5rem;border-top:1px solid var(--line)}
 .field label{font-weight:500}.field small{color:var(--mute)}
-.field input,.field select{max-width:320px;border:1px solid var(--line);background:var(--bg);color:var(--text);padding:11px 14px;border-radius:8px;font:15px 'Outfit','Tajawal',sans-serif}
-.sp{padding:16px 24px}
+.field input,.field select{max-width:20rem;border:1px solid var(--line);background:var(--bg);color:var(--text);padding:0.6875rem 0.875rem;border-radius:0.5rem;font:0.9375rem 'Outfit','Tajawal',sans-serif}
+.sp{padding:1rem 1.5rem}
 @media (max-width:900px){.mnav{display:flex!important}}
-.mnav{display:none;gap:6px;overflow-x:auto;padding:10px 14px;border-bottom:1px solid var(--line)}
-.mnav a{color:var(--soft);text-decoration:none;padding:8px 14px;border-radius:8px;white-space:nowrap;font-weight:500}.mnav a.on{background:var(--red);color:#fff}
-@media (max-width:900px){aside{display:none}.wrap{padding:20px 14px}.top{padding:0 16px;height:60px}h1{font-size:30px}.count{display:none}}
+.mnav{display:none;gap:0.375rem;overflow-x:auto;padding:0.625rem 0.875rem;border-bottom:1px solid var(--line)}
+.mnav a{color:var(--soft);text-decoration:none;padding:0.5rem 0.875rem;border-radius:0.5rem;white-space:nowrap;font-weight:500}.mnav a.on{background:var(--red);color:var(--on-red,#fff)}
+@media (max-width:900px){aside{display:none}.wrap{padding:1.25rem 0.875rem}.top{padding:0 1rem;height:3.75rem}h1{font-size:1.875rem}.count{display:none}}
 
 nav{position:relative}
 nav a{position:relative;z-index:1;transition:color .25s}
 nav a.on{background:transparent!important}
-.pill{position:absolute;left:0;right:0;top:0;height:44px;border-radius:8px;background:var(--red);box-shadow:0 4px 14px -8px var(--red2);transition:transform .45s cubic-bezier(.3,1.25,.5,1),height .3s}
+.pill{position:absolute;left:0;right:0;top:0;height:2.75rem;border-radius:0.5rem;background:var(--red);box-shadow:0 0.25rem 0.875rem -0.5rem var(--red2);transition:transform .45s cubic-bezier(.3,1.25,.5,1),height .3s}
 .ic{flex-shrink:0;overflow:visible}
 nav a .ic{transition:transform .35s cubic-bezier(.34,1.56,.64,1)}
 nav a:hover .ic{transform:scale(1.15)}
 nav a:hover .wand{transform:scale(1.15) rotate(-14deg)}
 nav a:hover .gear{transform:scale(1.15) rotate(90deg)}
-nav a:hover .clock .hand{transform-origin:12px 12px;animation:tick .8s steps(4) 1}
-.spark{transform-origin:15px 7px}.spark2{transform-origin:19px 16px}
+nav a:hover .clock .hand{transform-origin:0.75rem 0.75rem;animation:tick .8s steps(4) 1}
+.spark{transform-origin:0.9375rem 0.4375rem}.spark2{transform-origin:1.1875rem 1rem}
 nav a.on .spark{animation:twinkle 2.4s ease-in-out infinite}
 nav a.on .spark2{animation:twinkle 2.4s ease-in-out .8s infinite}
 @keyframes twinkle{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.6)}}
 @keyframes tick{to{transform:rotate(360deg)}}
 main{position:relative;overflow:hidden}
-main::before{content:"";position:absolute;width:560px;height:560px;right:-160px;top:-240px;border-radius:50%;background:radial-gradient(circle,rgba(163,18,26,.12),transparent 68%);animation:drift 16s ease-in-out infinite alternate;pointer-events:none}
+main::before{content:"";position:absolute;width:35rem;height:35rem;right:-10rem;top:-15rem;border-radius:50%;background:radial-gradient(circle,var(--glow,rgba(163,18,26,.12)),transparent 68%);animation:drift 16s ease-in-out infinite alternate;pointer-events:none}
 .top,.wrap{position:relative;z-index:1}
-@keyframes drift{to{transform:translate(-120px,90px) scale(1.15)}}
-.line{flex-wrap:wrap;transition:opacity .25s,transform .25s}.line.out{opacity:0;transform:translateX(24px)}
-.eform .grow{display:flex;flex-direction:column;gap:8px;min-width:220px}
-.eform input,.eform select{border:1px solid var(--line);background:var(--bg);color:var(--text);padding:10px 12px;border-radius:8px;font:15px 'Outfit','Tajawal',sans-serif}
-.btn.sm{padding:10px 18px;font-size:15px}
-.ghost{background:none;border:1px solid var(--line);color:var(--soft);padding:10px 16px;border-radius:8px;font:500 15px 'Outfit','Tajawal',sans-serif;cursor:pointer}.ghost:hover{color:var(--text)}
-.modal{position:fixed;inset:0;background:rgba(0,0,0,.62);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;padding:20px;z-index:50}
+@keyframes drift{to{transform:translate(-7.5rem,5.625rem) scale(1.15)}}
+.line{flex-wrap:wrap;transition:opacity .25s,transform .25s}.line.out{opacity:0;transform:translateX(1.5rem)}
+.eform .grow{display:flex;flex-direction:column;gap:0.5rem;min-width:13.75rem}
+.eform input,.eform select{border:1px solid var(--line);background:var(--bg);color:var(--text);padding:0.625rem 0.75rem;border-radius:0.5rem;font:0.9375rem 'Outfit','Tajawal',sans-serif}
+.btn.sm{padding:0.625rem 1.125rem;font-size:0.9375rem}
+.ghost{background:none;border:1px solid var(--line);color:var(--soft);padding:0.625rem 1rem;border-radius:0.5rem;font:500 0.9375rem 'Outfit','Tajawal',sans-serif;cursor:pointer}.ghost:hover{color:var(--text)}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.62);backdrop-filter:blur(0.25rem);display:none;align-items:center;justify-content:center;padding:1.25rem;z-index:50}
 .modal.open{display:flex;animation:fade .2s}
 @keyframes fade{from{opacity:0}}
-.sheet{width:100%;max-width:480px;background:var(--panel);border:1px solid var(--line);border-top:3px solid var(--red2);border-radius:12px;padding:24px;box-shadow:0 24px 60px rgba(0,0,0,.55);animation:pop2 .35s cubic-bezier(.34,1.4,.64,1)}
-@keyframes pop2{from{opacity:0;transform:translateY(18px) scale(.95)}}
-.sheet h2{margin:0 0 14px;font-size:22px;font-weight:600}
-.sheet label{display:block;font-weight:500;font-size:14px;margin:14px 0 6px}
-.sheet input,.sheet textarea,.sheet select{width:100%;border:1px solid var(--line);background:var(--bg);color:var(--text);padding:11px 14px;border-radius:8px;font:15px 'Outfit','Tajawal',sans-serif;resize:vertical}
-.sheet .two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-.mact{display:flex;justify-content:flex-end;gap:10px;margin-top:22px}
+.sheet{width:100%;max-width:30rem;background:var(--panel);border:1px solid var(--line);border-top:3px solid var(--red2);border-radius:0.75rem;padding:1.5rem;box-shadow:0 1.5rem 3.75rem rgba(0,0,0,.55);animation:pop2 .35s cubic-bezier(.34,1.4,.64,1)}
+@keyframes pop2{from{opacity:0;transform:translateY(1.125rem) scale(.95)}}
+.sheet h2{margin:0 0 0.875rem;font-size:1.375rem;font-weight:600}
+.sheet label{display:block;font-weight:500;font-size:0.875rem;margin:0.875rem 0 0.375rem}
+.sheet input,.sheet textarea,.sheet select{width:100%;border:1px solid var(--line);background:var(--bg);color:var(--text);padding:0.6875rem 0.875rem;border-radius:0.5rem;font:0.9375rem 'Outfit','Tajawal',sans-serif;resize:vertical}
+.sheet .two{display:grid;grid-template-columns:1fr 1fr;gap:0.875rem}
+.mact{display:flex;justify-content:flex-end;gap:0.625rem;margin-top:1.375rem}
 .err{border-color:var(--red2)!important}
-.sheet{max-width:560px;max-height:92vh;overflow-y:auto}
-.hint{margin:0 0 4px;color:var(--mute);font-size:13px;line-height:1.45}
-.sheet label+.hint,.sheet textarea+.hint{margin-top:10px}
+.sheet{max-width:35rem;max-height:92vh;overflow-y:auto}
+.hint{margin:0 0 0.25rem;color:var(--mute);font-size:0.8125rem;line-height:1.45}
+.sheet label+.hint,.sheet textarea+.hint{margin-top:0.625rem}
 .sub{color:var(--mute);font-weight:400}
-.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-.chip{display:inline-flex;align-items:center;gap:7px;background:var(--chip);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 10px;cursor:pointer;font:500 13px ui-monospace,Menlo,Consolas,monospace;transition:background .2s,border-color .2s,transform .15s}
-.chip i{width:8px;height:8px;border-radius:50%;display:inline-block}
+.chips{display:flex;flex-wrap:wrap;gap:0.375rem;margin-top:0.5rem}
+.chip{display:inline-flex;align-items:center;gap:0.4375rem;background:var(--chip);color:var(--text);border:1px solid var(--line);border-radius:0.375rem;padding:0.375rem 0.625rem;cursor:pointer;font:500 0.8125rem ui-monospace,Menlo,Consolas,monospace;transition:background .2s,border-color .2s,transform .15s}
+.chip i{width:0.5rem;height:0.5rem;border-radius:50%;display:inline-block}
 .chip:hover{border-color:var(--red2);transform:translateY(-1px)}.chip:active{transform:scale(.95)}
-.chip.on{background:var(--red);border-color:var(--red2);color:#fff}
-#annchips .chip{font-family:'Outfit','Tajawal',sans-serif;font-size:14px}
-.al{display:block;color:var(--mute);font-size:12px;margin-top:3px}
-.tip{position:fixed;z-index:80;max-width:260px;background:var(--text);color:var(--bg);padding:10px 12px;border-radius:8px;font-size:13px;line-height:1.4;display:flex;flex-direction:column;gap:4px;pointer-events:none;opacity:0;transform:translateY(4px) scale(.97);transition:opacity .15s,transform .2s cubic-bezier(.34,1.56,.64,1);box-shadow:0 10px 28px rgba(0,0,0,.45)}
-.tip.below{transform:translateY(-4px) scale(.97)}
+.chip.on{background:var(--red);border-color:var(--red2);color:var(--on-red,#fff)}
+#annchips .chip{font-family:'Outfit','Tajawal',sans-serif;font-size:0.875rem}
+.al{display:block;color:var(--mute);font-size:0.75rem;margin-top:3px}
+.tip{position:fixed;z-index:80;max-width:16.25rem;background:var(--text);color:var(--bg);padding:0.625rem 0.75rem;border-radius:0.5rem;font-size:0.8125rem;line-height:1.4;display:flex;flex-direction:column;gap:0.25rem;pointer-events:none;opacity:0;transform:translateY(0.25rem) scale(.97);transition:opacity .15s,transform .2s cubic-bezier(.34,1.56,.64,1);box-shadow:0 0.625rem 1.75rem rgba(0,0,0,.45)}
+.tip.below{transform:translateY(-0.25rem) scale(.97)}
 .tip.on{opacity:1;transform:none}
-.tip b{font:600 13px ui-monospace,Menlo,Consolas,monospace;color:var(--red2)}
-.tip em{font-style:normal;opacity:.7;font-size:12px}
+.tip b{font:600 0.8125rem ui-monospace,Menlo,Consolas,monospace;color:var(--red2)}
+.tip em{font-style:normal;opacity:.7;font-size:0.75rem}
 .eform .hint{margin:0}.eform .chips{margin-top:0}
 
-:root[dir=rtl]{--dx:14px}
-[dir=rtl] .sw[aria-checked=true]::after{transform:translateX(-20px)}
+:root[dir=rtl]{--dx:0.875rem}
+[dir=rtl] .sw[aria-checked=true]::after{transform:translateX(-1.25rem)}
 [dir=rtl] .row:not(.head):hover,[dir=rtl] .card.red{box-shadow:inset -3px 0 0 var(--red2)}
-[dir=rtl] main::before{right:auto;left:-160px}
-[dir=rtl] .line.out{transform:translateX(-24px)}
-[lang=ar] .brand small{letter-spacing:0;font-size:14px}
+[dir=rtl] main::before{right:auto;left:-10rem}
+[dir=rtl] .line.out{transform:translateX(-1.5rem)}
+[lang=ar] .brand small{letter-spacing:0;font-size:0.875rem}
 [lang=ar] body{line-height:1.55}
 [lang=ar] .cmd,[lang=ar] .chip{font-family:ui-monospace,Menlo,Consolas,'Tajawal',monospace}
 [lang=ar] #annchips .chip{font-family:'Outfit','Tajawal',sans-serif}
@@ -148,23 +149,23 @@ main::before{content:"";position:absolute;width:560px;height:560px;right:-160px;
 .hint.warn{color:#f59e0b}
 [hidden]{display:none!important}
 .view.on{animation:viewIn .45s cubic-bezier(.2,.8,.2,1)}
-@keyframes viewIn{from{opacity:0;transform:translateY(10px)}}
+@keyframes viewIn{from{opacity:0;transform:translateY(0.625rem)}}
 .fresh .row:not(.head){animation:rowIn .5s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--i)*40ms)}
-@keyframes rowIn{from{opacity:0;transform:translateX(var(--dx,-14px))}}
+@keyframes rowIn{from{opacity:0;transform:translateX(var(--dx,-0.875rem))}}
 .row{transition:background .2s,box-shadow .2s}
-.cmd{transition:background .2s,transform .2s}.cmd:hover{background:var(--red);color:#fff;transform:translateY(-1px)}
+.cmd{transition:background .2s,transform .2s}.cmd:hover{background:var(--red);color:var(--on-red,#fff);transform:translateY(-1px)}
 .cmd:active{transform:scale(.95)}
 .btn{transition:transform .2s,box-shadow .2s,background .2s}
-.btn:hover{transform:translateY(-2px);box-shadow:0 10px 24px -8px var(--red2)}.btn:active{transform:scale(.96)}
+.btn:hover{transform:translateY(-2px);box-shadow:0 0.625rem 1.5rem -0.5rem var(--red2)}.btn:active{transform:scale(.96)}
 .sw::after{transition:transform .35s cubic-bezier(.34,1.56,.64,1)}
-.sw[aria-checked=true]{box-shadow:0 0 8px -4px var(--red2)}
-.sw:active::after{width:24px}
+.sw[aria-checked=true]{box-shadow:0 0 0.5rem -0.25rem var(--red2)}
+.sw:active::after{width:1.5rem}
 .card{transition:transform .25s,border-color .25s}.card:hover{transform:translateY(-3px);border-color:var(--red2)}
 .dot{animation:ping 2s ease-out infinite}
-@keyframes ping{0%{box-shadow:0 0 0 0 rgba(74,222,128,.6)}100%{box-shadow:0 0 0 8px rgba(74,222,128,0)}}
+@keyframes ping{0%{box-shadow:0 0 0 0 rgba(74,222,128,.6)}100%{box-shadow:0 0 0 0.5rem rgba(74,222,128,0)}}
 .menu.open{animation:pop .22s cubic-bezier(.34,1.56,.64,1);transform-origin:bottom}
-@keyframes pop{from{opacity:0;transform:translateY(8px) scale(.94)}}
-.toast{transform:translate(-50%,12px);transition:opacity .25s,transform .3s cubic-bezier(.34,1.56,.64,1)}.toast.show{transform:translate(-50%,0)}
+@keyframes pop{from{opacity:0;transform:translateY(0.5rem) scale(.94)}}
+.toast{transform:translate(-50%,0.75rem);transition:opacity .25s,transform .3s cubic-bezier(.34,1.56,.64,1)}.toast.show{transform:translate(-50%,0)}
 @media (prefers-reduced-motion:reduce){*,*::before{transition:none!important;animation:none!important}}
 
 /* ---- linked-dashboard additions ---- */
@@ -172,19 +173,68 @@ main::before{content:"";position:absolute;width:560px;height:560px;right:-160px;
 .lvl.sub{background:#2d2250;color:#c4a8ff}.lvl.vip{background:#4a1d38;color:#ff9ccf}.lvl.bc{background:#4a1518;color:#ff9a9a}
 :root[data-theme="light"] .lvl.sub{background:#ece4ff;color:#5b34b0}:root[data-theme="light"] .lvl.vip{background:#ffe3f1;color:#a01d62}:root[data-theme="light"] .lvl.bc{background:#ffe0e0;color:#a31616}
 .row.dim .msg,.row.dim .cmd{opacity:.5}
-.row .bi{font-size:13px;color:var(--mute);justify-self:center}
+.row .bi{font-size:0.8125rem;color:var(--mute);justify-self:center}
 .who i.st-ok{color:#3fb871}.who i.st-wait{color:#f59e0b}.who i.st-off{color:var(--mute)}
 .who i.st-wait .dot,.who i.st-off .dot{animation:none}
 .menu button.neutral{color:var(--text)}.menu button.neutral:hover{background:var(--hover)}
-.banner{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:18px 26px 0;padding:12px 18px;border-radius:10px;border:1px solid var(--line);background:var(--panel);position:relative;z-index:2}
+.banner{display:flex;flex-wrap:wrap;gap:0.75rem;align-items:center;margin:1.125rem 1.625rem 0;padding:0.75rem 1.125rem;border-radius:0.625rem;border:1px solid var(--line);background:var(--panel);position:relative;z-index:2}
 .banner.bad{border-color:#b4161d;background:rgba(180,22,29,.12)}.banner.warn{border-color:#f59e0b;background:rgba(245,158,11,.1)}.banner.info{border-color:var(--red2)}
-.banner span{flex:1;min-width:200px}.banner .code{font:600 20px ui-monospace,Menlo,Consolas,monospace;letter-spacing:.15em;margin-inline:6px;padding:2px 10px;border-radius:6px;background:var(--chip);color:var(--text)}
-.bbtn{background:var(--red);color:#fff;border:1px solid var(--red2);padding:8px 16px;border-radius:8px;font:500 14px 'Outfit','Tajawal',sans-serif;cursor:pointer;text-decoration:none}
+.banner span{flex:1;min-width:12.5rem}.banner .code{font:600 1.25rem ui-monospace,Menlo,Consolas,monospace;letter-spacing:.15em;margin-inline:0.375rem;padding:2px 0.625rem;border-radius:0.375rem;background:var(--chip);color:var(--text)}
+.bbtn{background:var(--red);color:var(--on-red,#fff);border:1px solid var(--red2);padding:0.5rem 1rem;border-radius:0.5rem;font:500 0.875rem 'Outfit','Tajawal',sans-serif;cursor:pointer;text-decoration:none}
 .bbtn:hover{background:var(--red2)}
 .btn.danger{background:#b4161d;border-color:#d11f27}.btn.danger:hover{background:#d11f27}
 .btn:disabled{opacity:.6;cursor:wait}
-.sheet.small{max-width:420px}
-.evtop{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:14px}.evtop .note{margin:0;max-width:760px}
+.sheet.small{max-width:26.25rem}
+.ic{width:1.25rem;height:1.25rem}
+.supbtn .heart{width:1.125rem;height:1.125rem}.supbtn .ext{width:.875rem;height:.875rem}
+.btn.danger{color:var(--on-red,#fff)}
+.sel{border:1px solid var(--line);background:var(--bg);color:var(--text);padding:0.6875rem 0.875rem;border-radius:0.5rem;font:0.9375rem 'Outfit','Tajawal',sans-serif;min-width:12.5rem;max-width:100%}
+.line.soon{opacity:.55}.sw:disabled,.sel:disabled{cursor:not-allowed}
+.soon-tag{font-size:0.75rem;font-weight:600;color:var(--mute);background:var(--chip);border:1px solid var(--line);border-radius:62.4375rem;padding:3px 0.6875rem;margin-inline-end:1.5rem;white-space:nowrap}
+.seg{display:inline-flex;flex-wrap:wrap;gap:2px;background:var(--bg);border:1px solid var(--line);border-radius:0.625rem;padding:3px;align-self:flex-start}
+.seg button{border:0;background:none;color:var(--mute);font:500 0.875rem 'Outfit','Tajawal',sans-serif;padding:0.5rem 0.9375rem;border-radius:0.4375rem;cursor:pointer}
+.seg button:hover{color:var(--text)}
+.seg button[aria-checked=true]{background:var(--red);color:var(--on-red,#fff)}
+.preview{border:1px dashed var(--line);border-radius:0.625rem;padding:0.8125rem 1rem;color:var(--mute);font-size:0.875rem;max-width:35rem;margin-top:0.25rem}
+.preview b{color:var(--text);font-weight:500}
+.picker{display:flex;flex-direction:column;gap:1rem;width:24rem;max-width:100%;direction:ltr;margin-top:0.375rem}
+.bars{display:flex;gap:1.375rem}.bf{flex:1;min-width:0}.bf label{display:block;font-size:0.75rem;color:var(--mute);margin-bottom:0.4375rem;font-weight:400}
+.cbar{-webkit-appearance:none;appearance:none;display:block;width:100%;max-width:none!important;height:1.5rem;margin:0;padding:0!important;border:0!important;border-radius:62.4375rem;cursor:pointer;background:linear-gradient(to right,var(--from,#000),var(--to,#fff))!important}
+.cbar.hue{background:linear-gradient(to right,hsl(0 85% 60%),hsl(60 85% 58%),hsl(120 65% 50%),hsl(180 75% 50%),hsl(240 85% 66%),hsl(300 75% 62%),hsl(360 85% 60%))!important}
+.cbar::-webkit-slider-thumb{-webkit-appearance:none;width:2rem;height:2rem;border-radius:50%;background:var(--thumb,#fff);border:3px solid #fff;box-shadow:0 1px 0.3125rem rgba(0,0,0,.45)}
+.cbar::-moz-range-thumb{width:1.625rem;height:1.625rem;border-radius:50%;background:var(--thumb,#fff);border:3px solid #fff;box-shadow:0 1px 0.3125rem rgba(0,0,0,.45)}
+.cbar::-moz-range-track{background:transparent}
+.hexrow{display:flex;align-items:center;gap:0.5625rem}
+.swatch{width:2.3125rem;height:2.3125rem;border-radius:0.5625rem;border:1px solid var(--line);background:var(--red2);flex:none}
+.hexrow input{flex:1;min-width:0;max-width:none!important;text-transform:uppercase;padding:0.5625rem 0.6875rem!important}
+body.compact .wrap{padding:1.25rem 1.375rem}
+body.compact .line{padding-top:0.5625rem;padding-bottom:0.5625rem}
+body.compact .field{padding-top:0.6875rem;padding-bottom:0.6875rem}
+body.compact .panel h2{padding-top:0.75rem;padding-bottom:0.75rem}
+body.compact nav a{padding-top:0.5rem;padding-bottom:0.5rem;margin-bottom:3px}
+body.compact .row{padding-top:0.3125rem;padding-bottom:0.3125rem}
+body.compact .row.head{padding-top:0.75rem;padding-bottom:0.75rem}
+body.compact header{margin-bottom:1rem}
+body.reduce *,body.reduce *::before,body.reduce *::after{transition:none!important;animation:none!important}
+.tdot{display:inline-block;width:0.4375rem;height:0.4375rem;border-radius:50%;background:var(--off);margin-inline-end:0.5rem;vertical-align:middle;position:relative;top:-1px}
+.tdot.on{background:#3fb871}
+.brand{display:flex;align-items:center;gap:0.75rem}
+.brand .logo{width:2.75rem;height:2.75rem;flex:none;object-fit:contain;border-radius:0.625rem}
+:root[data-theme="light"] .brand .logo{background:#0a0a0a;padding:0.25rem}
+.utabs{display:flex;gap:0.25rem;margin:0 0 1.25rem;box-shadow:inset 0 -1px 0 var(--line);overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+.utabs::-webkit-scrollbar{display:none}
+.utabs button{background:none;border:0;border-bottom:2px solid transparent;color:var(--mute);font:500 1rem 'Outfit','Tajawal',sans-serif;padding:0.8125rem 1.125rem;cursor:pointer;white-space:nowrap;transition:color .2s,border-color .2s}
+.utabs button:hover{color:var(--text)}
+.utabs button[aria-selected=true]{color:var(--text);font-weight:600;border-bottom-color:var(--red2)}
+.utabs button:focus-visible{outline-offset:-2px}
+.top{justify-content:space-between;gap:1rem}
+.owned{display:inline-flex;align-items:center;gap:0.5rem;min-width:0;max-width:60%;border:1px solid var(--line);background:var(--panel);border-radius:62.4375rem;padding:0.4375rem 1rem;font-size:0.875rem;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.owned b{color:var(--text);font-weight:600;overflow:hidden;text-overflow:ellipsis}
+.supbtn{display:inline-flex;align-items:center;gap:0.625rem;flex-shrink:0;border:1px solid var(--line);background:var(--panel);color:var(--text);border-radius:0.625rem;padding:0.5625rem 1rem;font-size:0.875rem;font-weight:500;text-decoration:none;transition:border-color .2s,transform .2s}
+.supbtn:hover{border-color:var(--red2);transform:translateY(-1px)}
+.supbtn .heart{color:var(--red2)}.supbtn .ext{color:var(--mute)}
+@media (max-width:900px){.top{padding:0 0.875rem}.sup-t{display:none}.supbtn{padding:0.5625rem 0.75rem}.owned{max-width:75%}}
+.evtop{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap;margin-bottom:0.875rem}.evtop .note{margin:0;max-width:47.5rem}
 [hidden]{display:none!important}
 .sheet .chip[data-ev]{display:none}
 .sheet[data-evk=watch_streak] .chip[data-ev~=watch_streak],
@@ -194,47 +244,47 @@ main::before{content:"";position:absolute;width:560px;height:560px;right:-160px;
 .sheet[data-evk=raid] .chip[data-ev~=raid],
 .sheet[data-evk=hype_train] .chip[data-ev~=hype_train],
 .sheet[data-evk=bits] .chip[data-ev~=bits]{display:inline-flex}
-.msgbox{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px 14px;max-width:680px;white-space:pre-wrap;overflow-wrap:anywhere;margin-bottom:10px}
-.evcard{margin-bottom:16px}
+.msgbox{background:var(--bg);border:1px solid var(--line);border-radius:0.5rem;padding:0.75rem 0.875rem;max-width:42.5rem;white-space:pre-wrap;overflow-wrap:anywhere;margin-bottom:0.625rem}
+.evcard{margin-bottom:1rem}
 .warnline{color:#f59e0b}
-.field code{font-family:ui-monospace,Menlo,Consolas,monospace;background:var(--chip);padding:1px 6px;border-radius:5px;font-size:12px}
-#mmin{max-width:200px}
-.gmsg{display:flex;gap:8px;align-items:flex-start;margin-bottom:8px}.gmsg textarea{flex:1}
-.gdel{border:1px solid var(--line);background:none;color:var(--mute);border-radius:8px;width:38px;height:38px;cursor:pointer;font-size:20px;line-height:1;flex-shrink:0}.gdel:hover{color:#ff3b3b;border-color:#ff3b3b}
-.pill-b{font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:var(--chip);color:var(--soft);margin-inline-start:8px}
+.field code{font-family:ui-monospace,Menlo,Consolas,monospace;background:var(--chip);padding:1px 0.375rem;border-radius:0.3125rem;font-size:0.75rem}
+#mmin{max-width:12.5rem}
+.gmsg{display:flex;gap:0.5rem;align-items:flex-start;margin-bottom:0.5rem}.gmsg textarea{flex:1}
+.gdel{border:1px solid var(--line);background:none;color:var(--mute);border-radius:0.5rem;width:2.375rem;height:2.375rem;cursor:pointer;font-size:1.25rem;line-height:1;flex-shrink:0}.gdel:hover{color:#ff3b3b;border-color:#ff3b3b}
+.pill-b{font-size:0.75rem;font-weight:600;padding:3px 0.5625rem;border-radius:62.4375rem;background:var(--chip);color:var(--soft);margin-inline-start:0.5rem}
 .pause.grn.on span{color:#3fb871}
-.h2row{display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.h2row{display:flex;align-items:center;justify-content:space-between;gap:0.75rem;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
 .h2row h2{border:0!important;flex:1}
-.pause{display:flex;align-items:center;gap:12px;padding:0 24px;color:var(--mute);font-size:14px}
+.pause{display:flex;align-items:center;gap:0.75rem;padding:0 1.5rem;color:var(--mute);font-size:0.875rem}
 .pause.on span{color:#f59e0b}
 .av{object-fit:cover;background:var(--chip)}
 .sheet [data-for]{display:none}
 .sheet[data-kind=command] [data-for~=command],.sheet[data-kind=timer] [data-for~=timer],.sheet[data-kind=greeting] [data-for~=greeting],.sheet[data-kind=alert] [data-for~=alert]{display:block}
-.cnt{font-size:12px;color:var(--mute);text-align:end;margin-top:4px}.cnt.over{color:#ff6b6b}
-.merr{color:#ff6b6b;margin:14px 0 0;font-size:14px}
-.cards{grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}
-.card small{display:block;color:var(--mute);font-size:13px;margin-top:4px}
-.card b.s{font-size:22px;margin-top:12px}
-.tags{display:flex;flex-wrap:wrap;gap:8px;padding:16px 24px 20px}
-.tag{display:inline-flex;align-items:center;gap:8px;background:var(--chip);border:1px solid var(--line);border-radius:999px;padding:6px 8px 6px 14px;font-size:14px}
-[dir=rtl] .tag{padding:6px 14px 6px 8px}
-.tag button{border:0;background:none;color:var(--mute);cursor:pointer;font-size:16px;line-height:1;padding:2px 6px;border-radius:50%}
+.cnt{font-size:0.75rem;color:var(--mute);text-align:end;margin-top:0.25rem}.cnt.over{color:#ff6b6b}
+.merr{color:#ff6b6b;margin:0.875rem 0 0;font-size:0.875rem}
+.cards{grid-template-columns:repeat(auto-fit,minmax(13.125rem,1fr))}
+.card small{display:block;color:var(--mute);font-size:0.8125rem;margin-top:0.25rem}
+.card b.s{font-size:1.375rem;margin-top:0.75rem}
+.tags{display:flex;flex-wrap:wrap;gap:0.5rem;padding:1rem 1.5rem 1.25rem}
+.tag{display:inline-flex;align-items:center;gap:0.5rem;background:var(--chip);border:1px solid var(--line);border-radius:62.4375rem;padding:0.375rem 0.5rem 0.375rem 0.875rem;font-size:0.875rem}
+[dir=rtl] .tag{padding:0.375rem 0.875rem 0.375rem 0.5rem}
+.tag button{border:0;background:none;color:var(--mute);cursor:pointer;font-size:1rem;line-height:1;padding:2px 0.375rem;border-radius:50%}
 .tag button:hover{color:#ff3b3b}
-.addrow{display:flex;gap:10px;padding:16px 24px 0}
-.addrow input{flex:1;max-width:340px;border:1px solid var(--line);background:var(--bg);color:var(--text);padding:10px 14px;border-radius:8px;font:15px 'Outfit','Tajawal',sans-serif}
-.pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
-.pill-b{font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:var(--chip);color:var(--soft);margin-inline-start:8px}
-.field input[type=number]{max-width:180px}
-.note{color:var(--mute);margin:-8px 0 16px;font-size:14px}
-.loading{padding:30px;text-align:center;color:var(--mute)}
+.addrow{display:flex;gap:0.625rem;padding:1rem 1.5rem 0}
+.addrow input{flex:1;max-width:21.25rem;border:1px solid var(--line);background:var(--bg);color:var(--text);padding:0.625rem 0.875rem;border-radius:0.5rem;font:0.9375rem 'Outfit','Tajawal',sans-serif}
+.pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(18.75rem,1fr));gap:1rem}
+.pill-b{font-size:0.75rem;font-weight:600;padding:3px 0.5625rem;border-radius:62.4375rem;background:var(--chip);color:var(--soft);margin-inline-start:0.5rem}
+.field input[type=number]{max-width:11.25rem}
+.note{color:var(--mute);margin:-0.5rem 0 1rem;font-size:0.875rem}
+.loading{padding:1.875rem;text-align:center;color:var(--mute)}
 .cmd{max-width:100%}.cmd .tt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .cmd.static{cursor:default}.cmd.static:hover{background:var(--chip);color:var(--text);transform:none}
-@media (max-width:900px){.banner{margin:14px}.row{min-width:900px}}
+@media (max-width:900px){.banner{margin:0.875rem}.row{min-width:56.25rem}}
 </style>
 </head>
 <body>
 <aside>
-  <div class="brand">FQPN's<small data-i18n="brand_sub"></small></div>
+  <div class="brand"><img class="logo" src="/icon.ico" alt="" onerror="this.remove()"><div class="bname">FQPN's<small data-i18n="brand_sub"></small></div></div>
   <nav id="nav"><span class="pill" id="pill"></span>
     <a href="#dashboard" data-v="dashboard"><svg class="ic " width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11 12 3l9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg><span data-i18n="nav_dashboard"></span></a><a href="#commands" data-v="commands" class="on"><svg class="ic wand" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20 14 10"/><path class="spark" d="m15 3 1.2 2.8L19 7l-2.8 1.2L15 11l-1.2-2.8L11 7l2.8-1.2z"/><path class="spark2" d="M19 14v4M17 16h4"/></svg><span data-i18n="nav_commands"></span></a><a href="#timers" data-v="timers"><svg class="ic clock" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path class="hand" d="M12 7v5l3 2"/></svg><span data-i18n="nav_timers"></span></a><a href="#events" data-v="events"><svg class="ic " width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg><span data-i18n="nav_events"></span></a><a href="#blocklist" data-v="blocklist"><svg class="ic " width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/></svg><span data-i18n="nav_blocklist"></span></a><a href="#logs" data-v="logs"><svg class="ic " width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg><span data-i18n="nav_logs"></span></a><a href="#settings" data-v="settings"><svg class="ic gear" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg><span data-i18n="nav_settings"></span></a>
   </nav>
@@ -249,7 +299,7 @@ main::before{content:"";position:absolute;width:560px;height:560px;right:-160px;
   </div>
 </aside>
 <main>
-  <div class="top"></div>
+  <div class="top"><div class="owned"><span data-i18n="owned_by"></span> <b dir="ltr">FQPN_ | 1asoom</b></div><a class="supbtn" id="support" href="https://github.com/FQPN/FQPN-Chat-Bot" target="_blank" rel="noopener noreferrer"><svg class="heart" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1.1L12 21l7.8-7.5 1-1.1a5.5 5.5 0 0 0 0-7.8z"/></svg><span class="sup-t" data-i18n="support_btn"></span><svg class="ext" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg></a></div>
   <div class="mnav" id="mnav"><a href="#dashboard" data-v="dashboard" data-i18n="nav_dashboard"></a><a href="#commands" data-v="commands" class="on" data-i18n="nav_commands"></a><a href="#timers" data-v="timers" data-i18n="nav_timers"></a><a href="#events" data-v="events" data-i18n="nav_events"></a><a href="#blocklist" data-v="blocklist" data-i18n="nav_blocklist"></a><a href="#logs" data-v="logs" data-i18n="nav_logs"></a><a href="#settings" data-v="settings" data-i18n="nav_settings"></a></div>
   <div class="banner" id="banner" hidden></div>
 
@@ -264,8 +314,11 @@ main::before{content:"";position:absolute;width:560px;height:560px;right:-160px;
       <div><h1 data-i18n="cmd_title"></h1><p data-i18n="cmd_sub"></p></div>
       <button class="btn" id="new" data-i18n="new_cmd"></button>
     </header>
+    <div class="utabs" id="cmdtabs" role="tablist" data-i18n-aria="cmd_tabs_aria">
+      <button type="button" role="tab" aria-selected="true" data-t="custom" data-i18n="tab_custom"></button>
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" data-t="default" data-i18n="tab_default"></button>
+    </div>
     <div class="bar">
-      <div class="tabs"><button class="on" data-t="custom" data-i18n="tab_custom"></button><button data-t="default" data-i18n="tab_default"></button></div>
       <input type="search" id="q" data-i18n-ph="search_ph" data-i18n-aria="search_ph">
       <span class="count" id="count"></span>
     </div>
@@ -280,7 +333,7 @@ main::before{content:"";position:absolute;width:560px;height:560px;right:-160px;
 
   <div class="wrap view" id="v-events">
     <header><div><h1 data-i18n="events_title"></h1><p data-i18n="events_sub"></p></div></header>
-    <div class="bar"><div class="tabs" id="evtabs"><button class="on" data-x="g" data-i18n="nav_greetings"></button><button data-x="e" data-i18n="ev_tab_events"></button></div></div>
+    <div class="utabs" id="evtabs" role="tablist" data-i18n-aria="ev_tabs_aria"></div>
 
     <div id="paneG">
       <div class="evtop"><p class="note" data-i18n="greet_note"></p><button class="btn" id="newgr" data-i18n="new_greeting"></button></div>
@@ -306,17 +359,56 @@ main::before{content:"";position:absolute;width:560px;height:560px;right:-160px;
 
   <div class="wrap view" id="v-settings">
     <header><div><h1 data-i18n="set_title"></h1><p data-i18n="set_sub"></p></div></header>
-    <div class="panel">
+    <div class="utabs" id="settabs" role="tablist" data-i18n-aria="set_tabs_aria">
+      <button type="button" role="tab" id="stab-a" aria-controls="spane-a" aria-selected="true" data-st="a" data-i18n="set_tab_appearance"></button>
+      <button type="button" role="tab" id="stab-app" aria-controls="spane-app" aria-selected="false" tabindex="-1" data-st="app" data-i18n="set_tab_app"></button>
+      <button type="button" role="tab" id="stab-b" aria-controls="spane-b" aria-selected="false" tabindex="-1" data-st="b" data-i18n="set_tab_bot"></button>
+      <button type="button" role="tab" id="stab-n" aria-controls="spane-n" aria-selected="false" tabindex="-1" data-st="n" data-i18n="set_tab_notif"></button>
+      <button type="button" role="tab" id="stab-l" aria-controls="spane-l" aria-selected="false" tabindex="-1" data-st="l" data-i18n="set_tab_logs"></button>
+    </div>
+
+    <div class="panel" id="spane-a" role="tabpanel" aria-labelledby="stab-a">
       <h2 data-i18n="general"></h2>
       <div class="line" style="border-top:0"><div class="grow"><span data-i18n="dark"></span><small data-i18n="dark_s"></small></div><button class="sw" id="dmsw" role="switch" aria-checked="true" data-i18n-aria="dark"></button></div>
       <div class="field" style="border-top:1px solid var(--line)"><label for="lg" data-i18n="language"></label><select id="lg"><option value="en">English</option><option value="ar">العربية</option></select></div>
-      <div class="h2row"><h2 data-i18n="bot_settings"></h2><div class="pause" id="pausebox"><span id="pausetxt"></span><button class="sw" id="pausesw" role="switch" aria-checked="false" data-i18n-aria="pause_aria"></button></div></div>
+      <div class="field" style="border-top:1px solid var(--line)"><label data-i18n="font_size"></label><small data-i18n="font_size_s"></small>
+        <div class="seg" id="fsseg" role="radiogroup" data-i18n-aria="font_size">
+          <button type="button" role="radio" aria-checked="false" data-fs="small" data-i18n="fs_small"></button><button type="button" role="radio" aria-checked="false" data-fs="medium" data-i18n="fs_medium"></button><button type="button" role="radio" aria-checked="false" data-fs="large" data-i18n="fs_large"></button><button type="button" role="radio" aria-checked="false" data-fs="xlarge" data-i18n="fs_xlarge"></button>
+        </div>
+        <div class="preview"><b data-i18n="fs_preview"></b> <span data-i18n="fs_sample"></span></div>
+      </div>
+      <div class="field" style="border-top:1px solid var(--line)"><label data-i18n="accent"></label><small data-i18n="accent_s"></small>
+        <div class="picker">
+          <div class="bars"><div class="bf"><label for="hue" data-i18n="acc_color"></label><input type="range" id="hue" class="cbar hue" min="0" max="360" step="1"></div><div class="bf"><label for="val" data-i18n="acc_bright"></label><input type="range" id="val" class="cbar" min="20" max="100" step="1"></div></div>
+          <div class="hexrow"><span class="swatch" id="accsw"></span><input id="hex" type="text" maxlength="7" spellcheck="false" dir="ltr" data-i18n-aria="accent"><button class="ghost" id="accdef" type="button" data-i18n="acc_default"></button></div>
+        </div>
+      </div>
+      <div class="line"><div class="grow"><span data-i18n="compact"></span><small data-i18n="compact_s"></small></div><button class="sw" id="cpsw" role="switch" aria-checked="false" data-i18n-aria="compact"></button></div>
+      <div class="line"><div class="grow"><span data-i18n="reduce"></span><small data-i18n="reduce_s"></small></div><button class="sw" id="rmsw" role="switch" aria-checked="false" data-i18n-aria="reduce"></button></div>
+    </div>
+
+    <div class="panel" id="spane-app" role="tabpanel" aria-labelledby="stab-app" hidden>
+      <h2 data-i18n="app_title"></h2><div class="field" id="appnote" style="border-top:0" hidden><small id="appnote-t"></small></div><div class="line"><div class="grow"><span data-i18n="startup"></span><small data-i18n="startup_s"></small></div><button class="sw" type="button" role="switch" aria-checked="false" data-pref="startup" data-i18n-aria="startup"></button></div><div class="line"><div class="grow"><span data-i18n="start_min"></span><small data-i18n="start_min_s"></small></div><button class="sw" type="button" role="switch" aria-checked="false" data-pref="start_minimized" data-i18n-aria="start_min"></button></div><div class="line"><div class="grow"><span data-i18n="on_close"></span><small data-i18n="on_close_s"></small></div><select class="sel" data-pref="on_close" data-i18n-aria="on_close"><option value="quit" data-i18n="opt_quit"></option><option value="tray" data-i18n="opt_tray"></option></select></div><div class="line"><div class="grow"><span data-i18n="auto_recon"></span><small data-i18n="auto_recon_s"></small></div><button class="sw" type="button" role="switch" aria-checked="false" data-pref="auto_reconnect" data-i18n-aria="auto_recon"></button></div><div class="line"><div class="grow"><span data-i18n="auto_upd"></span><small data-i18n="auto_upd_s"></small></div><button class="sw" type="button" role="switch" aria-checked="false" data-pref="auto_update" data-i18n-aria="auto_upd"></button></div><div class="line"><div class="grow"><span data-i18n="upd_title"></span><small id="updtxt"></small></div><button class="ghost" id="updbtn" type="button"></button></div>
+    </div>
+
+    <div class="panel" id="spane-b" role="tabpanel" aria-labelledby="stab-b" hidden>
+      <div class="h2row" style="border-top:0"><h2 data-i18n="bot_settings"></h2><div class="pause" id="pausebox"><span id="pausetxt"></span><button class="sw" id="pausesw" role="switch" aria-checked="false" data-i18n-aria="pause_aria"></button></div></div>
+      <div class="line"><div class="grow"><span data-i18n="start_active"></span><small data-i18n="start_active_s"></small></div><button class="sw" id="sasw" role="switch" aria-checked="true" data-i18n-aria="start_active"></button></div>
       <div class="line"><div class="grow"><span data-i18n="only_live"></span><small data-i18n="only_live_s"></small></div><button class="sw" id="owsw" role="switch" aria-checked="true" data-i18n-aria="only_live"></button></div>
       <div class="field" style="border-top:1px solid var(--line)"><label for="lcs" data-i18n="live_check"></label><input id="lcs" type="number" min="15" max="3600" step="1"><small data-i18n="live_check_s"></small></div>
       <div class="field"><label for="cu" data-i18n="cmds_url"></label><input id="cu" dir="ltr" maxlength="300" placeholder="https://…" style="max-width:420px"><small data-i18n="cmds_url_s"></small></div>
       <div class="sp"><button class="btn" id="save" data-i18n="save_changes"></button></div>
     </div>
+
+    <div class="panel" id="spane-n" role="tabpanel" aria-labelledby="stab-n" hidden>
+      <h2 data-i18n="notif_title"></h2><div class="field" id="notenote" style="border-top:0" hidden><small id="notenote-t"></small></div><div class="line"><div class="grow"><span data-i18n="notif_desktop"></span><small data-i18n="notif_desktop_s"></small></div><button class="sw" type="button" role="switch" aria-checked="false" data-pref="notify" data-i18n-aria="notif_desktop"></button></div><div class="line"><div class="grow"><span data-i18n="notif_sound"></span><small data-i18n="notif_sound_s"></small></div><button class="sw" type="button" role="switch" aria-checked="false" data-pref="notify_sound" data-i18n-aria="notif_sound"></button></div><div class="line"><div class="grow"><span data-i18n="notif_test"></span><small data-i18n="notif_test_s"></small></div><button class="ghost" id="notifytest" type="button" data-i18n="notif_test_btn"></button></div>
+    </div>
+
+    <div class="panel" id="spane-l" role="tabpanel" aria-labelledby="stab-l" hidden>
+      <h2 data-i18n="logs_data"></h2><div class="field" id="lognote" style="border-top:0" hidden><small id="lognote-t"></small></div><div class="line"><div class="grow"><span data-i18n="keep_logs"></span><small data-i18n="keep_logs_s"></small></div><select class="sel" data-pref="log_days" data-i18n-aria="keep_logs"><option value="7" data-i18n="keep_7"></option><option value="30" data-i18n="keep_30"></option><option value="90" data-i18n="keep_90"></option><option value="0" data-i18n="keep_forever"></option></select></div><div class="line"><div class="grow"><span data-i18n="log_chat"></span><small data-i18n="log_chat_s"></small></div><button class="sw" type="button" role="switch" aria-checked="false" data-pref="log_chat" data-i18n-aria="log_chat"></button></div><div class="line"><div class="grow"><span data-i18n="reset_all"></span><small data-i18n="reset_all_s"></small></div><button class="btn danger sm" id="resetbtn" type="button" data-i18n="reset_btn"></button></div>
+    </div>
   </div>
+
 </main>
 
 <div class="modal" id="modal"><div class="sheet" id="sheet" data-kind="command" role="dialog" aria-modal="true" aria-labelledby="mt">
@@ -370,7 +462,7 @@ lvl_everyone:"Everyone",lvl_subscriber:"Subscriber",lvl_vip:"VIP",lvl_moderator:
 copy_title:"Copy command",copied:"Copied {c}",also:"Also: ",edit_aria:"Edit {n}",delete_aria:"Delete {n}",enable_aria:"Enable {n}",
 dash_title:"Dashboard",dash_sub:"A quick look at your bot and your chat.",card_cmds:"Commands",card_cmds_sub:"{n} enabled",card_timers:"Active timers",card_status:"Bot status",
 st_live:"Live · {d}",st_off:"Connected · offline",st_none:"Not connected",recent:"Recent activity",
-logs_title:"Logs",logs_sub:"See which commands viewers used and when.",log_empty:"Nothing yet. Activity shows up when viewers use your commands.",log_note:"This list is kept in memory and clears when the bot restarts.",
+logs_title:"Logs",logs_sub:"See which commands viewers used and when.",log_empty:"Nothing yet. Activity shows up when viewers use your commands.",log_note:"Activity is saved on this computer and kept as long as you chose in Settings > Logs and data.",
 ago_s:"{n}s ago",ago_m:"{n}m ago",ago_h:"{n}h ago",log_cmd:"used by {u}",log_timer:"timer sent",log_manage:"by {u}",refresh:"Refresh",
 nav_greetings:"Greetings",greet_title:"Greetings",greet_sub:"Greet a chosen person with a message of your choice.",greet_note:"The bot greets each person once per stream, 3 seconds after their first message in chat. It only works while you're live. If a person has several messages, the bot picks one at random each stream.",greet_on:"Greetings are on",greet_off:"Greetings are off",greet_on_toast:"Greetings turned on",greet_off_toast:"Greetings turned off",new_greeting:"+ New Greeting",your_greetings:"People to greet",no_greetings:"No greetings yet. Select New Greeting to add one.",t_new_greeting:"New greeting",t_edit_greeting:"Edit greeting",m_hint_greet:"The bot greets this person once per stream, 3 seconds after their first message in chat.",lbl_gname:"Twitch username",gname_ph:"username",lbl_gmsgs:"Messages (one is picked at random each stream)",add_msg:"+ Add another message",remove_msg_aria:"Remove this message",err_gname:"Enter a Twitch username (letters, numbers and underscores only).",err_gmsg:"Add at least one message.",err_gdup:"{n} already has a greeting. Add more messages to it instead.",msgs_n:function(p){return p.n==1?"1 message":p.n+" messages"},more_msgs:"+{n} more",log_greet:"greeted",nav_events:"Events",events_title:"Events",events_sub:"Automatic replies when something happens in your chat.",ws_title:"Watch streak",ws_on:"Reply is on",ws_off:"Reply is off",ws_desc:"When a viewer shares their Watch Streak in chat, the bot replies with the message below. Twitch only announces a streak when the viewer chooses to share it (from about their 3rd stream in a row).",ws_reply:"Reply",ws_edit:"Edit reply",ws_example:"Example for a 604-stream streak:",ws_min:"Only reply for streaks of at least",ws_min_s:"Streams in a row. Use 1 to reply every time someone shares.",t_edit_streak:"Watch streak reply",m_hint_streak:"Use $(streak) (or {streak}) for the viewer's streak number and $(user) for their name.",log_event:"reply to {u}",ws_on_toast:"Watch streak reply turned on",ws_off_toast:"Watch streak reply turned off",err_min:"Enter a whole number of 1 or more.",ev_tab_events:"Twitch events",ev_on:"Reply is on",ev_off:"Reply is off",ev_on_toast:"{n} reply turned on",ev_off_toast:"{n} reply turned off",
 ev_t_follow:"Follow",ev_d_follow:"When someone follows your channel.",
@@ -384,7 +476,20 @@ ev_u_streak:"Streams in a row",ev_u_months:"Months",ev_u_gifts:"Gifts",ev_u_view
 ev_from:"{u}: {n}+",ev_add:"+ Add another reply",ev_new_reply:"New reply",ev_edit_reply:"Edit reply",ev_lbl_min:"Use this reply from ({u})",
 ev_perm:"Needs the {p} permission (add it to auth.py, then reconnect Twitch once).",ev_refused:"Twitch refused this one when the bot started: the permission is missing. Add it, reconnect, then restart the bot.",
 m_hint_alert:"The bot answers with the reply whose number is the highest one the event reaches. Hover over a variable button to see what it does.",
-err_dupmin:"Another reply already starts at {n}.",err_lasttier:"An event needs at least one reply. Turn it off instead.",pause_aria:"Pause bot",pause_on:"Bot is paused",pause_off:"Bot is active",paused_toast:"Bot paused",resumed_toast:"Bot resumed",st_paused:"Paused",ban_paused:"The bot is paused and won't reply to anyone or send timers.",resume:"Resume",timers_title:"Timers",timers_sub:"Send messages to your chat automatically on a schedule.",new_timer:"+ New Timer",your_timers:"Your timers",no_timers:"No timers yet. Select New Timer to add one.",
+err_dupmin:"Another reply already starts at {n}.",err_lasttier:"An event needs at least one reply. Turn it off instead.",owned_by:"Owned by:",support_btn:"Support the project",set_tab_appearance:"Appearance",set_tab_bot:"Bot",set_tabs_aria:"Settings sections",cmd_tabs_aria:"Command types",ev_tabs_aria:"Event types",set_tab_app:"App",set_tab_notif:"Notifications",set_tab_logs:"Logs and data",
+font_size:"Font size",font_size_s:"Makes all text in the dashboard larger or smaller.",fs_small:"Small",fs_medium:"Medium",fs_large:"Large",fs_xlarge:"Extra large",fs_preview:"Preview:",fs_sample:"Thanks for the follow, @viewer! Type !commands to see what I can do.",
+accent:"Accent color",accent_s:"Slide the bars to pick a color. It also tints the glow behind the page, the buttons, switches and the active menu item.",acc_color:"Color",acc_bright:"Brightness",acc_default:"Use default",
+compact:"Compact layout",compact_s:"Tighter spacing so more settings fit on screen.",reduce:"Reduce motion",reduce_s:"Turns off animations in the dashboard.",
+start_active:"Start the bot when the app opens",start_active_s:"Turns \"Bot is active\" on at launch. When this is off, the bot starts paused.",
+soon:"Coming soon",soon_note:"These options need features that aren't built into the app yet, so they can't be changed for now.",
+app_title:"App",startup:"Run on startup",startup_s:"Open FQPN's Chat Bot when you sign in to your computer.",start_min:"Start minimized",start_min_s:"Open in the system tray instead of showing the window.",on_close:"When I close the window",on_close_s:"Keeping the bot in the tray means chat commands keep working.",opt_tray:"Keep running in the tray",opt_quit:"Quit the app",auto_recon:"Reconnect to Twitch automatically",auto_recon_s:"Rejoin chat if the connection drops.",auto_upd:"Check for updates automatically",auto_upd_s:"Download new versions in the background.",
+notif_title:"Notifications",notif_desktop:"Desktop notifications",notif_desktop_s:"Show a popup for follows, subs, raids and bot errors.",notif_sound:"Play a sound",notif_sound_s:"Plays a short sound with each notification.",
+logs_data:"Logs and data",keep_logs:"Keep logs for",keep_logs_s:"Older entries are deleted automatically.",keep_7:"7 days",keep_30:"30 days",keep_90:"90 days",keep_forever:"Forever",log_chat:"Log chat messages",log_chat_s:"Saves viewer messages as well as bot actions.",
+reset_all:"Reset all settings",reset_all_s:"Puts the settings on all these tabs back to their defaults. Your language, commands, timers, greetings, events and logs stay as they are.",reset_btn:"Reset to defaults",reset_q:"Reset the settings?",reset_body:"Every setting on the Appearance, App, Bot, Notifications and Logs and data tabs goes back to its default. Your language, commands, timers, greetings, events and logs are not touched.",reset_done:"Settings restored to their defaults",only_installed:"These options only work in the installed app, so they are switched off while running from source.",note_no_tray:"The tray icon couldn't start on this computer, so the options that need it are switched off.",
+upd_title:"App updates",upd_version:"Version {v}",upd_check:"Check for updates",upd_download:"Download update",upd_install:"Restart and update",upd_dev:"running from source, so updates are off",upd_checking:"checking…",upd_uptodate:"you have the latest version",upd_available:"version {v} is available",upd_downloading:"downloading the update… {p}%",upd_ready:"version {v} is ready to install",upd_installing:"installing the update…",upd_error:"couldn't check: {m}",
+upd_confirm_q:"Install the update now?",upd_confirm_body:"The app closes for a moment and opens again with the new version. Your commands, timers and Twitch login are kept.",
+ban_upd_ready:"Version {v} is ready to install.",ban_upd_avail:"Version {v} is available.",ban_upd_dl:"Downloading the update… {p}%",ban_lost:"The connection to Twitch was lost.",ban_reconnect:"Reconnect",
+notif_test:"Send a test notification",notif_test_s:"Shows a pop-up now so you can see how it looks.",notif_test_btn:"Send test",notif_test_ok:"Test notification sent",notif_test_fail:"No pop-up could be shown (is the tray icon running?)",log_chat_by:"said by {u}",pause_aria:"Pause bot",pause_on:"Bot is paused",pause_off:"Bot is active",paused_toast:"Bot paused",resumed_toast:"Bot resumed",st_paused:"Paused",ban_paused:"The bot is paused and won't reply to anyone or send timers.",resume:"Resume",timers_title:"Timers",timers_sub:"Send messages to your chat automatically on a schedule.",new_timer:"+ New Timer",your_timers:"Your timers",no_timers:"No timers yet. Select New Timer to add one.",
 every:"Every {t}",mins:function(p){return p.n+" min"},timer_live_note:"Timers only send while you're live. You can change this in Settings.",
 
 bl_title:"Blocklist",bl_sub:"The bot ignores messages from blocked users and messages that contain blocked words.",bl_users:"Blocked users",bl_words:"Blocked words",bl_add:"Add",bl_user_ph:"username",bl_word_ph:"word or phrase",bl_empty:"Nothing blocked yet.",remove_aria:"Remove {n}",
@@ -415,7 +520,7 @@ lvl_everyone:"الجميع",lvl_subscriber:"مشترك",lvl_vip:"VIP",lvl_modera
 copy_title:"نسخ الأمر",copied:"تم نسخ {c}",also:"ويُستخدم أيضًا: ",edit_aria:"تعديل {n}",delete_aria:"حذف {n}",enable_aria:"تفعيل {n}",
 dash_title:"لوحة التحكم",dash_sub:"نظرة سريعة على البوت والدردشة.",card_cmds:"الأوامر",card_cmds_sub:"المفعّل: {n}",card_timers:"المؤقتات النشطة",card_status:"حالة البوت",
 st_live:"مباشر · {d}",st_off:"متصل · غير مباشر",st_none:"غير متصل",recent:"آخر النشاطات",
-logs_title:"السجلات",logs_sub:"اطّلع على الأوامر التي استخدمها المشاهدون ومتى.",log_empty:"لا شيء بعد. يظهر النشاط عندما يستخدم المشاهدون أوامرك.",log_note:"هذه القائمة محفوظة في الذاكرة وتُمسح عند إعادة تشغيل البوت.",
+logs_title:"السجلات",logs_sub:"اطّلع على الأوامر التي استخدمها المشاهدون ومتى.",log_empty:"لا شيء بعد. يظهر النشاط عندما يستخدم المشاهدون أوامرك.",log_note:"يُحفظ النشاط على هذا الجهاز ويبقى للمدة التي اخترتها في الإعدادات > السجلات والبيانات.",
 ago_s:"منذ {n} ث",ago_m:"منذ {n} د",ago_h:"منذ {n} س",log_cmd:"استخدمه {u}",log_timer:"أُرسل المؤقت",log_manage:"بواسطة {u}",refresh:"تحديث",
 nav_greetings:"التحيات",greet_title:"التحيات",greet_sub:"رحّب بشخص تختاره برسالة من اختيارك.",greet_note:"يرحّب البوت بكل شخص مرة واحدة في كل بث، بعد 3 ثوانٍ من أول رسالة يكتبها في الدردشة. يعمل فقط أثناء البث المباشر. إذا كان للشخص عدة رسائل، يختار البوت واحدة عشوائيًا في كل بث.",greet_on:"التحيات مفعّلة",greet_off:"التحيات متوقفة",greet_on_toast:"تم تفعيل التحيات",greet_off_toast:"تم إيقاف التحيات",new_greeting:"+ تحية جديدة",your_greetings:"الأشخاص المراد الترحيب بهم",no_greetings:"لا توجد تحيات بعد. اضغط «تحية جديدة» لإضافة واحدة.",t_new_greeting:"تحية جديدة",t_edit_greeting:"تعديل التحية",m_hint_greet:"يرحّب البوت بهذا الشخص مرة واحدة في كل بث، بعد 3 ثوانٍ من أول رسالة يكتبها في الدردشة.",lbl_gname:"اسم المستخدم في تويتش",gname_ph:"اسم المستخدم",lbl_gmsgs:"الرسائل (تُختار واحدة عشوائيًا في كل بث)",add_msg:"+ إضافة رسالة أخرى",remove_msg_aria:"إزالة هذه الرسالة",err_gname:"أدخل اسم مستخدم تويتش (أحرف إنجليزية وأرقام وشرطة سفلية فقط).",err_gmsg:"أضف رسالة واحدة على الأقل.",err_gdup:"{n} لديه تحية بالفعل. أضف مزيدًا من الرسائل إليها بدلًا من ذلك.",msgs_n:function(p){var n=p.n;return n==1?"رسالة واحدة":n==2?"رسالتان":n<=10?n+" رسائل":n+" رسالة"},more_msgs:"+{n} أخرى",log_greet:"تمت التحية",nav_events:"الأحداث",events_title:"الأحداث",events_sub:"ردود تلقائية عندما يحدث شيء في دردشتك.",ws_title:"سلسلة المشاهدة",ws_on:"الرد مفعّل",ws_off:"الرد متوقف",ws_desc:"عندما يشارك مشاهد سلسلة مشاهدته في الدردشة، يرد البوت بالرسالة أدناه. لا تعلن تويتش عن السلسلة إلا إذا اختار المشاهد مشاركتها (تبدأ تقريبًا من البث الثالث على التوالي).",ws_reply:"الرد",ws_edit:"تعديل الرد",ws_example:"مثال لسلسلة من 604 بثًا:",ws_min:"الرد فقط عند سلسلة لا تقل عن",ws_min_s:"عدد البثوث المتتالية. استخدم 1 للرد في كل مرة يشارك فيها أحدهم.",t_edit_streak:"رد سلسلة المشاهدة",m_hint_streak:"استخدم $(streak) (أو {streak}) لرقم سلسلة المشاهد، و$(user) لاسمه.",log_event:"رد على {u}",ws_on_toast:"تم تفعيل رد سلسلة المشاهدة",ws_off_toast:"تم إيقاف رد سلسلة المشاهدة",err_min:"أدخل عددًا صحيحًا لا يقل عن 1.",ev_tab_events:"أحداث تويتش",ev_on:"الرد مفعّل",ev_off:"الرد متوقف",ev_on_toast:"تم تفعيل رد {n}",ev_off_toast:"تم إيقاف رد {n}",
 ev_t_follow:"المتابعة",ev_d_follow:"عندما يتابع أحدهم قناتك.",
@@ -429,7 +534,20 @@ ev_u_streak:"بثوث متتالية",ev_u_months:"أشهر",ev_u_gifts:"إهد�
 ev_from:"{u}: {n}+",ev_add:"+ إضافة رد آخر",ev_new_reply:"رد جديد",ev_edit_reply:"تعديل الرد",ev_lbl_min:"استخدم هذا الرد ابتداءً من ({u})",
 ev_perm:"يحتاج إلى صلاحية {p} (أضفها إلى auth.py ثم أعد ربط تويتش مرة واحدة).",ev_refused:"رفضت تويتش هذا الحدث عند تشغيل البوت: الصلاحية ناقصة. أضفها وأعد الربط ثم أعد تشغيل البوت.",
 m_hint_alert:"يرد البوت بالرد الذي رقمه هو الأعلى بين ما وصل إليه الحدث. مرّر المؤشر فوق زر متغير لترى ما يفعله.",
-err_dupmin:"هناك رد آخر يبدأ من {n} بالفعل.",err_lasttier:"يحتاج الحدث إلى رد واحد على الأقل. أوقفه بدلًا من ذلك.",pause_aria:"إيقاف البوت مؤقتًا",pause_on:"البوت متوقف مؤقتًا",pause_off:"البوت يعمل",paused_toast:"تم إيقاف البوت مؤقتًا",resumed_toast:"تم استئناف البوت",st_paused:"متوقف مؤقتًا",ban_paused:"البوت متوقف مؤقتًا ولن يرد على أحد ولن يرسل المؤقتات.",resume:"استئناف",timers_title:"المؤقتات",timers_sub:"أرسل رسائل إلى الدردشة تلقائيًا حسب جدول زمني.",new_timer:"+ مؤقت جديد",your_timers:"مؤقتاتك",no_timers:"لا توجد مؤقتات بعد. اضغط «مؤقت جديد» لإضافة واحد.",
+err_dupmin:"هناك رد آخر يبدأ من {n} بالفعل.",err_lasttier:"يحتاج الحدث إلى رد واحد على الأقل. أوقفه بدلًا من ذلك.",owned_by:"المالكون:",support_btn:"ادعم المشروع",set_tab_appearance:"المظهر",set_tab_bot:"البوت",set_tabs_aria:"أقسام الإعدادات",cmd_tabs_aria:"أنواع الأوامر",ev_tabs_aria:"أنواع الأحداث",set_tab_app:"التطبيق",set_tab_notif:"الإشعارات",set_tab_logs:"السجلات والبيانات",
+font_size:"حجم الخط",font_size_s:"يكبّر كل النصوص في لوحة التحكم أو يصغّرها.",fs_small:"صغير",fs_medium:"متوسط",fs_large:"كبير",fs_xlarge:"كبير جدًا",fs_preview:"معاينة:",fs_sample:"شكرًا على المتابعة يا @viewer! اكتب !commands لتعرف ما أستطيع فعله.",
+accent:"لون التمييز",accent_s:"حرّك الشريطين لاختيار لون. يلوّن أيضًا الوهج خلف الصفحة والأزرار والمفاتيح وعنصر القائمة النشط.",acc_color:"اللون",acc_bright:"السطوع",acc_default:"استخدام الافتراضي",
+compact:"تخطيط مضغوط",compact_s:"مسافات أضيق ليتسع المزيد من الإعدادات على الشاشة.",reduce:"تقليل الحركة",reduce_s:"يوقف الحركات المتحركة في لوحة التحكم.",
+start_active:"تشغيل البوت عند فتح التطبيق",start_active_s:"يفعّل «البوت يعمل» عند التشغيل. وعند إيقاف هذا الخيار يبدأ البوت متوقفًا مؤقتًا.",
+soon:"قريبًا",soon_note:"هذه الخيارات تحتاج إلى ميزات لم تُبنَ في التطبيق بعد، لذلك لا يمكن تغييرها حاليًا.",
+app_title:"التطبيق",startup:"التشغيل عند بدء ويندوز",startup_s:"افتح بوت FQPN عند تسجيل الدخول إلى جهازك.",start_min:"البدء مصغّرًا",start_min_s:"افتح في علبة النظام بدل إظهار النافذة.",on_close:"عند إغلاق النافذة",on_close_s:"إبقاء البوت في علبة النظام يعني استمرار عمل أوامر الدردشة.",opt_tray:"استمر بالعمل في علبة النظام",opt_quit:"أغلق التطبيق",auto_recon:"إعادة الاتصال بتويتش تلقائيًا",auto_recon_s:"العودة إلى الدردشة إذا انقطع الاتصال.",auto_upd:"البحث عن التحديثات تلقائيًا",auto_upd_s:"تنزيل الإصدارات الجديدة في الخلفية.",
+notif_title:"الإشعارات",notif_desktop:"إشعارات سطح المكتب",notif_desktop_s:"إظهار نافذة منبثقة عند المتابعات والاشتراكات والغارات وأخطاء البوت.",notif_sound:"تشغيل صوت",notif_sound_s:"يشغّل صوتًا قصيرًا مع كل إشعار.",
+logs_data:"السجلات والبيانات",keep_logs:"الاحتفاظ بالسجلات لمدة",keep_logs_s:"تُحذف الإدخالات الأقدم تلقائيًا.",keep_7:"7 أيام",keep_30:"30 يومًا",keep_90:"90 يومًا",keep_forever:"دائمًا",log_chat:"تسجيل رسائل الدردشة",log_chat_s:"يحفظ رسائل المشاهدين إضافةً إلى إجراءات البوت.",
+reset_all:"إعادة ضبط كل الإعدادات",reset_all_s:"يعيد إعدادات كل هذه التبويبات إلى قيمها الافتراضية. تبقى اللغة والأوامر والمؤقتات والتحيات والأحداث والسجلات كما هي.",reset_btn:"إعادة الضبط",reset_q:"إعادة ضبط الإعدادات؟",reset_body:"ستعود كل الإعدادات في تبويبات المظهر والتطبيق والبوت والإشعارات والسجلات والبيانات إلى قيمها الافتراضية. لن تتأثر لغتك ولا أوامرك ولا مؤقتاتك ولا تحياتك ولا أحداثك ولا سجلاتك.",reset_done:"تمت استعادة الإعدادات الافتراضية",only_installed:"هذه الخيارات تعمل في التطبيق المثبّت فقط، لذلك هي معطّلة أثناء التشغيل من الشيفرة المصدرية.",note_no_tray:"تعذّر تشغيل أيقونة علبة النظام على هذا الجهاز، لذلك الخيارات التي تحتاجها معطّلة.",
+upd_title:"تحديثات التطبيق",upd_version:"الإصدار {v}",upd_check:"البحث عن تحديثات",upd_download:"تنزيل التحديث",upd_install:"إعادة التشغيل والتحديث",upd_dev:"يعمل من الشيفرة المصدرية، لذلك التحديثات متوقفة",upd_checking:"جارٍ البحث…",upd_uptodate:"لديك أحدث إصدار",upd_available:"الإصدار {v} متاح",upd_downloading:"جارٍ تنزيل التحديث… {p}%",upd_ready:"الإصدار {v} جاهز للتثبيت",upd_installing:"جارٍ تثبيت التحديث…",upd_error:"تعذّر البحث: {m}",
+upd_confirm_q:"تثبيت التحديث الآن؟",upd_confirm_body:"يُغلق التطبيق لحظة ثم يفتح من جديد بالإصدار الجديد. تبقى أوامرك ومؤقتاتك وحساب تويتش كما هي.",
+ban_upd_ready:"الإصدار {v} جاهز للتثبيت.",ban_upd_avail:"الإصدار {v} متاح.",ban_upd_dl:"جارٍ تنزيل التحديث… {p}%",ban_lost:"انقطع الاتصال بتويتش.",ban_reconnect:"إعادة الاتصال",
+notif_test:"إرسال إشعار تجريبي",notif_test_s:"يعرض نافذة منبثقة الآن لترى شكلها.",notif_test_btn:"إرسال تجربة",notif_test_ok:"تم إرسال الإشعار التجريبي",notif_test_fail:"تعذّر عرض إشعار (هل أيقونة علبة النظام تعمل؟)",log_chat_by:"كتبه {u}",pause_aria:"إيقاف البوت مؤقتًا",pause_on:"البوت متوقف مؤقتًا",pause_off:"البوت يعمل",paused_toast:"تم إيقاف البوت مؤقتًا",resumed_toast:"تم استئناف البوت",st_paused:"متوقف مؤقتًا",ban_paused:"البوت متوقف مؤقتًا ولن يرد على أحد ولن يرسل المؤقتات.",resume:"استئناف",timers_title:"المؤقتات",timers_sub:"أرسل رسائل إلى الدردشة تلقائيًا حسب جدول زمني.",new_timer:"+ مؤقت جديد",your_timers:"مؤقتاتك",no_timers:"لا توجد مؤقتات بعد. اضغط «مؤقت جديد» لإضافة واحد.",
 every:"كل {t}",mins:function(p){var n=p.n;return n==1?"دقيقة":n==2?"دقيقتين":n<=10?n+" دقائق":n+" دقيقة"},timer_live_note:"لا تُرسل المؤقتات إلا أثناء البث المباشر. يمكنك تغيير ذلك من الإعدادات.",
 
 bl_title:"قائمة الحظر",bl_sub:"يتجاهل البوت رسائل المستخدمين المحظورين والرسائل التي تحتوي على كلمات محظورة.",bl_users:"المستخدمون المحظورون",bl_words:"الكلمات المحظورة",bl_add:"إضافة",bl_user_ph:"اسم المستخدم",bl_word_ph:"كلمة أو عبارة",bl_empty:"لا يوجد شيء محظور بعد.",remove_aria:"إزالة {n}",
@@ -456,8 +574,8 @@ function copyText(txt){
   try{navigator.clipboard.writeText(txt).catch(fallback)}catch(e){fallback()}}
 
 /* ===================== state ===================== */
-var D={commands:{},timers:[],greetings:{enabled:true,users:[]},events:{},blocklist:{users:[],words:[]},settings:{paused:false,only_when_live:true,live_check_seconds:60,commands_url:""}};
-var S={account:null,connected:false,live:false,uptime_seconds:null,login:{status:"idle"},problem:null,avatar:null};
+var D={commands:{},timers:[],greetings:{enabled:true,users:[]},events:{},ui:null,prefs:null,blocklist:{users:[],words:[]},settings:{paused:false,start_active:true,only_when_live:true,live_check_seconds:60,commands_url:""}};
+var S={account:null,connected:false,live:false,uptime_seconds:null,login:{status:"idle"},problem:null,avatar:null,lost:false,caps:{},update:{status:"idle"}};
 var LOGS=[],offline=false,loaded=false,tab="custom",curView="commands",anim=true,lastSig="",settingsDirty=false;
 var LEVELS=["everyone","subscriber","vip","moderator","broadcaster"],LVCLS={everyone:"all",subscriber:"sub",vip:"vip",moderator:"mod",broadcaster:"bc"};
 function lvText(l){return t("lvl_"+(LVCLS[l]?l:"everyone"))}
@@ -486,8 +604,8 @@ var toastT=null;
 function say(msg,err){var el=$("toast");el.textContent=msg;el.style.background=err?"#b4161d":"";el.classList.add("show");clearTimeout(toastT);toastT=setTimeout(function(){el.classList.remove("show")},err?4200:1600)}
 async function fail(e){say(e.message||String(e),true);if(e.gone){await loadSections();renderAll()}}
 async function loadSections(){
-  try{var r=await Promise.all(["commands","timers","blocklist","settings","greetings","events"].map(function(s){return API.get(s)}));
-    D.commands=r[0];D.timers=r[1];D.blocklist=r[2];D.settings=r[3];D.greetings=r[4];D.events=r[5];loaded=true;return true}catch(e){offline=true;return false}}
+  try{var r=await Promise.all(["commands","timers","blocklist","settings","greetings","events","ui","prefs"].map(function(s){return API.get(s)}));
+    D.commands=r[0];D.timers=r[1];D.blocklist=r[2];D.settings=r[3];D.greetings=r[4];D.events=r[5];D.ui=r[6];D.prefs=r[7];loaded=true;return true}catch(e){offline=true;return false}}
 async function loadStatus(){try{S=await API.get("status");offline=false}catch(e){offline=true}}
 async function loadLogs(){try{LOGS=await API.get("logs")}catch(e){}}
 
@@ -552,7 +670,7 @@ function renderGreetings(){
   var h=us.length?"":'<div class="empty">'+t("no_greetings")+'</div>';
   us.forEach(function(u,i){var ms=u.messages||[],shown=ms.slice(0,3).map(function(m){return '<small dir="auto">• '+esc(m)+'</small>'}).join("")+(ms.length>3?'<small>'+t("more_msgs",{n:ms.length-3})+'</small>':"");
     h+='<div class="line" data-i="'+i+'"><div class="grow"><b dir="ltr">'+esc(u.user)+'</b><span class="pill-b">'+t("msgs_n",{n:ms.length})+'</span>'+shown+'</div>'+swBtn(u.enabled,u.user)+actBtns(u.user)+'</div>'});
-  $("gr-list").innerHTML=h}
+  $("gr-list").innerHTML=h;renderEvTabs()}
 var EVM={watch_streak:{t:"ws_title",d:"ev_d_streak",u:"ev_u_streak",single:true},follow:{t:"ev_t_follow",d:"ev_d_follow",single:true,perm:"moderator:read:followers"},
   subscription:{t:"ev_t_sub",d:"ev_d_sub",u:"ev_u_months"},gift_sub:{t:"ev_t_gift",d:"ev_d_gift",u:"ev_u_gifts"},raid:{t:"ev_t_raid",d:"ev_d_raid",u:"ev_u_viewers"},
   hype_train:{t:"ev_t_hype",d:"ev_d_hype",u:"ev_u_level",perm:"channel:read:hype_train"},bits:{t:"ev_t_bits",d:"ev_d_bits",u:"ev_u_bits"}};
@@ -560,6 +678,7 @@ var EVORDER=["follow","subscription","gift_sub","raid","hype_train","bits","watc
 function renderEvents(){
   var h="";
   EVORDER.forEach(function(k){
+    if(k!=evSel)return;   // only the chosen event is shown
     var m=EVM[k],ev=(D.events&&D.events[k])||{enabled:false,tiers:[]},on=ev.enabled!==false,tiers=ev.tiers||[],p=(S.event_problems||{})[k];
     h+='<div class="panel evcard" data-k="'+k+'"><div class="h2row" style="border-top:0"><h2>'+t(m.t)+'</h2><div class="pause grn'+(on?" on":"")+'"><span>'+t(on?"ev_on":"ev_off")+'</span><button class="sw" data-evsw="'+k+'" role="switch" aria-checked="'+on+'" aria-label="'+attr(t(m.t))+'"></button></div></div>';
     h+='<div class="field" style="border-top:0"><small>'+t(m.d)+'</small>';
@@ -570,7 +689,7 @@ function renderEvents(){
         +'<div class="act"><button class="edit" aria-label="'+attr(t("edit_aria",{n:t(m.t)}))+'">'+EDIT_SVG+'</button>'+(tiers.length>1?'<button class="del" aria-label="'+attr(t("delete_aria",{n:t(m.t)}))+'">'+DEL_SVG+'</button>':'')+'</div></div>'});
     if(!m.single)h+='<div class="sp" style="border-top:1px solid var(--line)"><button class="ghost addtier" type="button" data-k="'+k+'">'+t("ev_add")+'</button></div>';
     h+='</div>'});
-  $("ev-cards").innerHTML=h}
+  $("ev-cards").innerHTML=h;renderEvTabs()}
 function askTierDelete(k,i){var x=((D.events[k]||{}).tiers||[])[i];if(!x)return;
   confirmBox({title:t("confirm_del_q",{n:t(EVM[k].t)}),body:t("confirm_del_body"),ok:t("delete"),danger:true,run:async function(){
     await mutate("events",function(e){var ev=e[k];if(!ev||!ev.tiers)throw Gone();if(ev.tiers.length<=1)throw new Error(t("err_lasttier"));
@@ -582,6 +701,7 @@ function logRow(l){var title,sub;
   if(l.kind=="command"){title=esc(l.name);sub=t("log_cmd",{u:"<bdi>"+esc(l.user)+"</bdi>"})}
   else if(l.kind=="event"){title=esc(l.name);sub=t("log_event",{u:"<bdi>"+esc(l.user)+"</bdi>"})}
   else if(l.kind=="greeting"){title=esc(l.name);sub=t("log_greet")}
+  else if(l.kind=="chat"){title=esc(l.name);sub=t("log_chat_by",{u:"<bdi>"+esc(l.user)+"</bdi>"})}
   else if(l.kind=="timer"){title=esc(l.name);sub=t("log_timer")}
   else{title=esc(l.name);sub=t("log_manage",{u:"<bdi>"+esc(l.user)+"</bdi>"})}
   return '<div class="line"><span class="time">'+fmtAgo(l.time)+'</span><div class="grow"><b dir="auto">'+title+'</b><small>'+sub+'</small></div></div>'}
@@ -591,7 +711,7 @@ function renderDashboard(){
   var cs=Object.keys(D.commands),en=cs.filter(function(k){return D.commands[k].enabled!==false}).length,total=cs.length,tm=D.timers.filter(function(x){return x.enabled!==false}).length,stc,stk;
   if(!S.account||offline){stk=t("st_none");stc="#9b9ba1"}else if(S.connected&&D.settings.paused){stk=t("st_paused");stc="#f59e0b"}else if(S.connected&&S.live){stk=t("st_live",{d:fmtDur(S.uptime_seconds||0)});stc="#3fb871"}else if(S.connected){stk=t("st_off");stc="#3fb871"}else{stk=t("connecting");stc="#f59e0b"}
   $("d-cards").innerHTML='<div class="card red"><span>'+t("card_cmds")+'</span><b data-n="'+total+'">'+total+'</b><small>'+t("card_cmds_sub",{n:en})+'</small></div><div class="card"><span>'+t("card_timers")+'</span><b data-n="'+tm+'">'+tm+'</b></div><div class="card"><span>'+t("card_status")+'</span><b class="s" style="color:'+stc+'">'+esc(stk)+'</b></div>'}
-function fillSettings(force){if(settingsDirty&&!force)return;var s=D.settings;$("owsw").setAttribute("aria-checked",s.only_when_live!==false);$("lcs").value=s.live_check_seconds;$("cu").value=s.commands_url||""}
+function fillSettings(force){if(settingsDirty&&!force)return;var s=D.settings;$("sasw").setAttribute("aria-checked",s.start_active!==false);$("owsw").setAttribute("aria-checked",s.only_when_live!==false);$("lcs").value=s.live_check_seconds;$("cu").value=s.commands_url||""}
 function renderPause(){var on=!!D.settings.paused;$("pausesw").setAttribute("aria-checked",on);$("pausetxt").textContent=t(on?"pause_on":"pause_off");$("pausebox").classList.toggle("on",on)}
 async function setPaused(on){
   var sw=$("pausesw");sw.setAttribute("aria-checked",on);
@@ -611,9 +731,13 @@ function renderBanner(){
     h=L.code?'<span>'+t("ban_login")+' <b class="code" dir="ltr">'+esc(L.code)+'</b></span>'+(safe?'<a class="bbtn" href="'+attr(L.uri)+'" target="_blank" rel="noopener">'+t("ban_open")+'</a>':'')+'<button class="bbtn" data-a="copycode">'+t("ban_copy")+'</button>':'<span>'+t("ban_starting")+'</span>';cls="info"}
   else if(L.status=="error"){h='<span>'+t("ban_err",{m:esc(L.message||"")})+'</span><button class="bbtn" data-a="connect">'+t("retry")+'</button>';cls="bad"}
   else if(!S.account){h='<span>'+t(S.problem=="permissions"?"ban_perm":"ban_none")+'</span><button class="bbtn" data-a="connect">'+t("connect")+'</button>';cls="warn"}
+  else if(S.lost){h='<span>'+t("ban_lost")+'</span><button class="bbtn" data-a="reconnect">'+t("ban_reconnect")+'</button>';cls="warn"}
+  else if((S.update||{}).status=="ready"){h='<span>'+t("ban_upd_ready",{v:esc(S.update.latest)})+'</span><button class="bbtn" data-a="upd_install">'+t("upd_install")+'</button>';cls="info"}
+  else if((S.update||{}).status=="available"){h='<span>'+t("ban_upd_avail",{v:esc(S.update.latest)})+'</span><button class="bbtn" data-a="upd_download">'+t("upd_download")+'</button>';cls="info"}
+  else if((S.update||{}).status=="downloading"){h='<span>'+t("ban_upd_dl",{p:S.update.progress||0})+'</span>';cls="info"}
   else if(D.settings.paused){h='<span>'+t("ban_paused")+'</span><button class="bbtn" data-a="resume">'+t("resume")+'</button>';cls="warn"}
   b.hidden=!h;b.className="banner "+cls;b.innerHTML=h}
-function renderAll(){renderDashboard();renderCommands();renderTimers();renderGreetings();renderEvents();renderBlocklist();renderLogs();fillSettings(false);renderPause();renderAccount();renderBanner()}
+function renderAll(){renderDashboard();renderCommands();renderTimers();renderGreetings();renderEvents();renderBlocklist();renderLogs();fillSettings(false);renderPause();renderPrefs();renderAccount();renderBanner()}
 
 /* ===================== edit window (commands / timers / triggers) ===================== */
 var M=null,lastFocus=null,sheet=$("sheet");
@@ -730,7 +854,8 @@ $("ev-cards").addEventListener("click",function(e){
   var ad=e.target.closest(".addtier");if(ad)openEdit("alert",ad.dataset.k+":new")});
 $("grsw").onclick=async function(){var sw=this,on=sw.getAttribute("aria-checked")!="true";sw.setAttribute("aria-checked",on);
   try{await mutate("greetings",function(g){g.enabled=on});renderGreetings();say(t(on?"greet_on_toast":"greet_off_toast"))}catch(e){sw.setAttribute("aria-checked",!on);fail(e)}};
-document.querySelectorAll("#v-commands .tabs button").forEach(function(b){b.onclick=function(){document.querySelectorAll("#v-commands .tabs button").forEach(function(x){x.classList.remove("on")});b.classList.add("on");tab=b.dataset.t;anim=true;renderCommands()}});
+function setCmdTab(x){tab=x;document.querySelectorAll("#cmdtabs button").forEach(function(b){var on=b.dataset.t==x;b.setAttribute("aria-selected",on);b.tabIndex=on?0:-1});anim=true;renderCommands()}
+$("cmdtabs").addEventListener("click",function(e){var b=e.target.closest("button");if(b)setCmdTab(b.dataset.t)});
 $("q").oninput=function(){anim=false;renderCommands();anim=true};
 $("new").onclick=function(){openEdit("command",null)};$("newt").onclick=function(){openEdit("timer",null)};
 $("lrefresh").onclick=async function(){await loadLogs();renderLogs()};
@@ -743,16 +868,105 @@ document.querySelectorAll("[data-add]").forEach(function(b){b.onclick=function()
   mutate("blocklist",function(o){o[k]=(o[k]||[]).filter(function(x){return x!==v})}).then(function(){renderBlocklist()}).catch(fail)})});
 /* settings */
 ["lcs","cu"].forEach(function(id){$(id).addEventListener("input",function(){settingsDirty=true})});
-$("owsw").onclick=function(){this.setAttribute("aria-checked",this.getAttribute("aria-checked")!="true");settingsDirty=true};
+["owsw","sasw"].forEach(function(id){$(id).onclick=function(){this.setAttribute("aria-checked",this.getAttribute("aria-checked")!="true");settingsDirty=true}});
 $("save").onclick=async function(){
   try{var lc=num("lcs",15,3600),url=$("cu").value.trim();if(url&&!/^https?:\/\//i.test(url))throw new Error(t("err_url"));
-    var ow=$("owsw").getAttribute("aria-checked")=="true";
-    await mutate("settings",function(s){s.only_when_live=ow;s.live_check_seconds=Math.round(lc);s.commands_url=url});
+    var ow=$("owsw").getAttribute("aria-checked")=="true",sa=$("sasw").getAttribute("aria-checked")=="true";
+    await mutate("settings",function(s){s.start_active=sa;s.only_when_live=ow;s.live_check_seconds=Math.round(lc);s.commands_url=url});
     settingsDirty=false;fillSettings(true);anim=false;renderAll();anim=true;say(t("settings_saved"))}catch(e){fail(e)}};
 var dm=$("dmsw");
 function setTheme(dark,save){document.documentElement.setAttribute("data-theme",dark?"dark":"light");dm.setAttribute("aria-checked",dark);if(save){try{localStorage.setItem("fqpn-theme",dark?"dark":"light")}catch(e){}}}
-dm.onclick=function(){setTheme(this.getAttribute("aria-checked")!="true",true)};
-$("lg").onchange=function(){setLang(this.value,true)};
+/* ===== how the dashboard looks: saved on the bot, so it also sticks inside the installed app ===== */
+var UI_DEF={dark:true,language:"en",fontSize:"medium",accent:"#9a1118",compact:false,reduceMotion:false},UI=Object.assign({},UI_DEF),uiTimer=null,pick={h:357,s:.89,v:.6};
+var SIZES={small:"14px",medium:"16px",large:"18px",xlarge:"20px"},DEF_ACCENT="#9a1118";
+function cleanUi(u){u=Object.assign({},UI_DEF,u||{});if(!SIZES[u.fontSize])u.fontSize="medium";if(u.language!="ar")u.language="en";
+  u.accent=/^#[0-9a-f]{6}$/i.test(u.accent)?String(u.accent).toLowerCase():DEF_ACCENT;u.dark=u.dark!==false;u.compact=!!u.compact;u.reduceMotion=!!u.reduceMotion;return u}
+function hex2rgb(h){return[1,3,5].map(function(i){return parseInt(h.substr(i,2),16)})}
+function rgb2hex(a){return"#"+a.map(function(n){return("0"+n.toString(16)).slice(-2)}).join("")}
+function hsv2rgb(h,s,v){var c=v*s,x=c*(1-Math.abs((h/60)%2-1)),m=v-c,r=0,g=0,b=0;
+  if(h<60){r=c;g=x}else if(h<120){r=x;g=c}else if(h<180){g=c;b=x}else if(h<240){g=x;b=c}else if(h<300){r=x;b=c}else{r=c;b=x}
+  return[Math.round((r+m)*255),Math.round((g+m)*255),Math.round((b+m)*255)]}
+function rgb2hsv(a){var r=a[0]/255,g=a[1]/255,b=a[2]/255,mx=Math.max(r,g,b),mn=Math.min(r,g,b),d=mx-mn,h=0;
+  if(d){if(mx===r)h=((g-b)/d)%6;else if(mx===g)h=(b-r)/d+2;else h=(r-g)/d+4;h*=60;if(h<0)h+=360}
+  return{h:h,s:mx?d/mx:0,v:mx}}
+function lumOf(a){var f=a.map(function(n){n/=255;return n<=.03928?n/12.92:Math.pow((n+.055)/1.055,2.4)});return .2126*f[0]+.7152*f[1]+.0722*f[2]}
+function applyAccent(hex){var st=document.documentElement.style;
+  if(hex==DEF_ACCENT){["--red","--red2","--on-red","--glow"].forEach(function(p){st.removeProperty(p)});return}   // the original look, untouched
+  var rgb=hex2rgb(hex),hv=rgb2hsv(rgb),dk=hsv2rgb(hv.h,hv.s,hv.v*.82);
+  st.setProperty("--red2",hex);st.setProperty("--red",rgb2hex(dk));st.setProperty("--on-red",lumOf(dk)>.45?"#111":"#fff");st.setProperty("--glow","rgba("+rgb.join(",")+",.12)")}
+function syncPicker(){
+  if(rgb2hex(hsv2rgb(pick.h,pick.s,pick.v))!==UI.accent)pick=rgb2hsv(hex2rgb(UI.accent));
+  var hx=function(h,s,v){return rgb2hex(hsv2rgb(h,s,v))};
+  $("hue").value=Math.round(pick.h);$("val").value=Math.max(20,Math.round(pick.v*100));
+  $("val").style.setProperty("--from",hx(pick.h,pick.s,.2));$("val").style.setProperty("--to",hx(pick.h,pick.s,1));
+  $("hue").style.setProperty("--thumb",hx(pick.h,1,1));$("val").style.setProperty("--thumb",UI.accent);
+  $("accsw").style.background=UI.accent;if(document.activeElement!==$("hex"))$("hex").value=UI.accent}
+function applyUi(){
+  setTheme(UI.dark,false);if(lang!=UI.language)setLang(UI.language,false);
+  document.documentElement.style.fontSize=SIZES[UI.fontSize];applyAccent(UI.accent);
+  document.body.classList.toggle("compact",UI.compact);document.body.classList.toggle("reduce",UI.reduceMotion);
+  $("cpsw").setAttribute("aria-checked",UI.compact);$("rmsw").setAttribute("aria-checked",UI.reduceMotion);
+  document.querySelectorAll("#fsseg button").forEach(function(b){b.setAttribute("aria-checked",b.dataset.fs==UI.fontSize)});
+  $("lg").value=UI.language;syncPicker();placePill()}
+function saveUi(now){try{localStorage.setItem("fqpn-ui",JSON.stringify(UI))}catch(e){}
+  clearTimeout(uiTimer);var go=function(){API.put("ui",UI).catch(function(e){say(e.message,true)})};if(now)go();else uiTimer=setTimeout(go,500)}
+function setUi(k,v){UI[k]=v;applyUi();saveUi()}
+dm.onclick=function(){setUi("dark",this.getAttribute("aria-checked")!="true")};
+$("lg").onchange=function(){setUi("language",this.value)};
+$("fsseg").addEventListener("click",function(e){var b=e.target.closest("button");if(b)setUi("fontSize",b.dataset.fs)});
+$("cpsw").onclick=function(){setUi("compact",this.getAttribute("aria-checked")!="true")};
+$("rmsw").onclick=function(){setUi("reduceMotion",this.getAttribute("aria-checked")!="true")};
+function pickColor(){setUi("accent",rgb2hex(hsv2rgb(pick.h,pick.s,pick.v)))}
+$("hue").oninput=function(){pick.h=+this.value;if(pick.s<.1)pick.s=.85;pickColor()};
+$("val").oninput=function(){pick.v=+this.value/100;pickColor()};
+$("hex").oninput=function(){var v=this.value.trim();if(v.charAt(0)!="#")v="#"+v;if(/^#[0-9a-f]{6}$/i.test(v))setUi("accent",v.toLowerCase())};
+$("hex").onblur=function(){this.value=UI.accent};
+$("accdef").onclick=function(){setUi("accent",DEF_ACCENT)};
+/* ===== App, Notifications and Logs: instant settings, plus app updates ===== */
+var PREF_DEF={startup:false,start_minimized:false,on_close:"quit",auto_reconnect:true,auto_update:true,notify:true,notify_sound:false,log_days:30,log_chat:false};
+function prefs(){return Object.assign({},PREF_DEF,D.prefs||{})}
+function renderPrefs(){
+  var p=prefs(),c=S.caps||{};
+  document.querySelectorAll("[data-pref]").forEach(function(el){var k=el.dataset.pref;if(el.tagName=="SELECT")el.value=String(p[k]);else el.setAttribute("aria-checked",!!p[k])});
+  var dis={startup:!c.startup,start_minimized:!c.tray||!p.startup,on_close:!c.tray,auto_update:!c.updates,notify:!c.notify,notify_sound:!c.notify||!p.notify||!c.sound};
+  document.querySelectorAll("[data-pref]").forEach(function(el){var off=!!dis[el.dataset.pref];el.disabled=off;el.setAttribute("aria-disabled",off);var ln=el.closest(".line");if(ln)ln.classList.toggle("soon",off)});
+  var why=t(c.installed?"note_no_tray":"only_installed");
+  $("appnote").hidden=!!(c.startup&&c.tray&&c.updates);$("appnote-t").textContent=why;
+  $("notenote").hidden=!!c.notify;$("notenote-t").textContent=why;
+  $("notifytest").disabled=!c.notify;
+  renderUpdate()}
+function renderUpdate(){
+  var u=S.update||{status:"idle"},c=S.caps||{},txt="",a="",v=u.current||"";
+  if(!c.updates||u.status=="dev"){txt=t("upd_dev")}
+  else if(u.status=="checking")txt=t("upd_checking");
+  else if(u.status=="uptodate"){txt=t("upd_uptodate");a="check"}
+  else if(u.status=="available"){txt=t("upd_available",{v:u.latest});a="download"}
+  else if(u.status=="downloading")txt=t("upd_downloading",{p:u.progress||0});
+  else if(u.status=="ready"){txt=t("upd_ready",{v:u.latest});a="install"}
+  else if(u.status=="installing")txt=t("upd_installing");
+  else if(u.status=="error"){txt=t("upd_error",{m:u.error||""});a="check"}
+  else a="check";
+  $("updtxt").textContent=t("upd_version",{v:v})+(txt?" · "+txt:"");
+  var bt=$("updbtn");bt.hidden=!a;bt.dataset.a=a;bt.textContent=a?t("upd_"+a):""}
+async function savePref(el){var k=el.dataset.pref,v;
+  if(el.tagName=="SELECT")v=k=="log_days"?Number(el.value):el.value;else v=el.getAttribute("aria-checked")!="true";
+  try{await mutate("prefs",function(p){p[k]=v});renderPrefs();say(t("saved"))}catch(e){renderPrefs();fail(e)}}
+document.querySelectorAll("[data-pref]").forEach(function(el){if(el.tagName=="SELECT")el.onchange=function(){savePref(el)};else el.onclick=function(){if(!el.disabled)savePref(el)}});
+var updFastOn=false;
+async function updFast(){   // while a check or download is running, look every second so the progress moves
+  if(updFastOn)return;updFastOn=true;
+  try{for(var i=0;i<900;i++){await new Promise(function(r){setTimeout(r,1000)});await loadStatus();renderPrefs();renderBanner();var s=(S.update||{}).status;if(s!="checking"&&s!="downloading")break}}finally{updFastOn=false}}
+function startInstall(){confirmBox({title:t("upd_confirm_q"),body:t("upd_confirm_body"),ok:t("upd_install"),danger:false,run:async function(){await API.post("/api/update/install");S.update=Object.assign({},S.update,{status:"installing"});renderPrefs();renderBanner();say(t("upd_installing"))}})}
+$("updbtn").onclick=async function(){var a=this.dataset.a;if(a=="install"){startInstall();return}
+  try{if(a=="check"){S.update=Object.assign({},S.update,{status:"checking"});renderPrefs();renderBanner();updFast();await API.post("/api/update/check")}
+    else if(a=="download"){S.update=Object.assign({},S.update,{status:"downloading",progress:0});renderPrefs();renderBanner();updFast();await API.post("/api/update/download")}
+    await loadStatus();renderPrefs();renderBanner()}catch(e){await loadStatus();renderPrefs();renderBanner();fail(e)}};
+$("notifytest").onclick=async function(){try{var r=await API.post("/api/notify/test");say(t(r.ok?"notif_test_ok":"notif_test_fail"),!r.ok)}catch(e){fail(e)}};
+$("resetbtn").onclick=function(){confirmBox({title:t("reset_q"),body:t("reset_body"),ok:t("reset_btn"),danger:true,run:async function(){
+  await mutate("settings",function(s){s.start_active=true;s.only_when_live=true;s.live_check_seconds=60;s.commands_url=""});
+  await mutate("prefs",function(p){Object.assign(p,PREF_DEF)});
+  UI=Object.assign({},UI_DEF,{language:UI.language});applyUi();saveUi(true);
+  settingsDirty=false;fillSettings(true);anim=false;renderAll();anim=true;say(t("reset_done"))}})};
 
 /* account menu + banner */
 var me=$("me"),menu=$("menu");
@@ -771,18 +985,37 @@ $("menubtn").onclick=function(){closeMenu();
 $("banner").addEventListener("click",function(e){var b=e.target.closest("[data-a]");if(!b)return;
   if(b.dataset.a=="connect")doConnect();
   else if(b.dataset.a=="resume")setPaused(false);
+  else if(b.dataset.a=="reconnect"){API.post("/api/reconnect").then(function(){return loadStatus()}).then(function(){renderAccount();renderBanner()}).catch(fail)}
+  else if(b.dataset.a=="upd_install")startInstall();
+  else if(b.dataset.a=="upd_download"){S.update=Object.assign({},S.update,{status:"downloading",progress:0});renderBanner();updFast();API.post("/api/update/download").catch(fail)}
   else if(b.dataset.a=="copycode"){copyText((S.login||{}).code||"");say(t("ban_copied"))}});
 
 /* ===================== views, language, polling ===================== */
 function placePill(){var a=document.querySelector("#nav a.on"),pl=$("pill");if(a){pl.style.transform="translateY("+a.offsetTop+"px)";pl.style.height=a.offsetHeight+"px"}}
 function countUp(el,to){var t0=null;function f(ts){if(!t0)t0=ts;var k=Math.min((ts-t0)/700,1);el.textContent=Math.round(to*(1-Math.pow(1-k,3)));if(k<1)requestAnimationFrame(f)}requestAnimationFrame(f)}
-function evTab(x){document.querySelectorAll("#evtabs button").forEach(function(b){b.classList.toggle("on",b.dataset.x==x)});$("paneG").hidden=x!="g";$("paneE").hidden=x!="e"}
+var SPANES={a:"spane-a",app:"spane-app",b:"spane-b",n:"spane-n",l:"spane-l"};
+function setTab(x){document.querySelectorAll("#settabs button").forEach(function(b){var on=b.dataset.st==x;b.setAttribute("aria-selected",on);b.tabIndex=on?0:-1});Object.keys(SPANES).forEach(function(k){$(SPANES[k]).hidden=k!=x})}
+$("settabs").addEventListener("click",function(e){var b=e.target.closest("button");if(b)setTab(b.dataset.st)});
+["settabs","cmdtabs","evtabs"].forEach(function(id){$(id).addEventListener("keydown",function(e){if(e.key!="ArrowRight"&&e.key!="ArrowLeft")return;
+  var bs=[].slice.call($(id).querySelectorAll("button")),i=bs.findIndex(function(b){return b.getAttribute("aria-selected")=="true"}),rtl=document.documentElement.dir=="rtl",step=(e.key=="ArrowRight")!=rtl?1:-1,n=bs[(i+step+bs.length)%bs.length];
+  n.click();n.focus()})});
+var evSel="g",evSig="";
+function renderEvTabs(){   // Greetings first, then one tab per Twitch event; a green dot means that reply is on
+  var box=$("evtabs"),on=function(k){return k=="g"?((D.greetings||{}).enabled!==false):(((D.events||{})[k]||{}).enabled!==false&&!!(D.events||{})[k])},
+      keys=["g"].concat(EVORDER),sig=lang+"|"+keys.map(function(k){return on(k)?1:0}).join("");
+  if(sig!==evSig){evSig=sig;var had=box.contains(document.activeElement);
+    box.innerHTML=keys.map(function(k){return '<button type="button" role="tab" aria-selected="false" tabindex="-1" data-x="'+k+'"><i class="tdot'+(on(k)?" on":"")+'" aria-hidden="true"></i>'+t(k=="g"?"nav_greetings":EVM[k].t)+'</button>'}).join("");
+    if(had){var s=box.querySelector('[data-x="'+evSel+'"]');if(s)s.focus()}}
+  box.querySelectorAll("button").forEach(function(b){var sel=b.dataset.x==evSel;b.setAttribute("aria-selected",sel);b.tabIndex=sel?0:-1;if(sel&&b.scrollIntoView)b.scrollIntoView({block:"nearest",inline:"nearest"})})}   // on a phone, bring the chosen tab into view
+function evTab(x){evSel=(x=="g"||EVM[x])?x:"g";$("paneG").hidden=evSel!="g";$("paneE").hidden=evSel=="g";renderEvents()}
 $("evtabs").addEventListener("click",function(e){var b=e.target.closest("button");if(b)evTab(b.dataset.x)});
 async function show(){
   var v=(location.hash||"#commands").slice(1);
-  if(v=="greetings"){v="events";evTab("g");try{history.replaceState(null,"","#events")}catch(e){}}   // Greetings now lives inside Eventsif(!$("v-"+v))v="commands";curView=v;
+  if(v=="greetings"){v="events";evTab("g");try{history.replaceState(null,"","#events")}catch(e){}}   // Greetings now lives inside Events
+  if(!$("v-"+v))v="commands";curView=v;
   document.querySelectorAll(".view").forEach(function(x){x.classList.toggle("on",x.id=="v-"+v)});
   document.querySelectorAll("#nav a,#mnav a").forEach(function(a){a.classList.toggle("on",a.dataset.v==v)});placePill();
+  if(v=="events")renderEvTabs();   // a hidden page forgets its tab-bar scroll position: bring the chosen tab back into view
   if(v=="commands"){anim=true;renderCommands()}
   if(v=="dashboard"||v=="logs"){await loadLogs();renderLogs();renderDashboard();if(v=="dashboard")document.querySelectorAll("#d-cards b[data-n]").forEach(function(el){countUp(el,+el.dataset.n)})}
   window.scrollTo(0,0)}
@@ -798,9 +1031,12 @@ async function tick(){
   setTimeout(tick,(S.login&&S.login.status=="waiting")?2000:6000)}
 window.addEventListener("hashchange",show);
 (async function boot(){
-  var th=null,lg=null;try{th=localStorage.getItem("fqpn-theme");lg=localStorage.getItem("fqpn-lang")}catch(e){}
-  setTheme(th!="light",false);setLang(lg=="ar"?"ar":"en",false);
-  await loadStatus();await loadSections();lastSig=JSON.stringify([D,S,LOGS,offline]);anim=true;renderAll();await show();tick()})();
+  var th=null,lg=null,saved=null;try{th=localStorage.getItem("fqpn-theme");lg=localStorage.getItem("fqpn-lang");saved=localStorage.getItem("fqpn-ui")}catch(e){}
+  if(saved){try{UI=cleanUi(JSON.parse(saved))}catch(e){UI=cleanUi()}}else UI=cleanUi({dark:th!="light",language:lg=="ar"?"ar":"en"});
+  setLang(UI.language,false);applyUi();   // this device's copy first, so nothing flashes
+  await loadStatus();await loadSections();
+  if(D.ui){UI=cleanUi(D.ui);applyUi();try{localStorage.setItem("fqpn-ui",JSON.stringify(UI))}catch(e){}}   // the bot's copy wins
+  lastSig=JSON.stringify([D,S,LOGS,offline]);anim=true;renderAll();await show();tick()})();
 
 </script>
 </body>

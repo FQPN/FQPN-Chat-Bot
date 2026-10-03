@@ -5,6 +5,8 @@ import copy
 import json
 from pathlib import Path
 
+from .activity import ActivityLog
+
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 DEFAULTS = {
@@ -36,8 +38,28 @@ DEFAULTS = {
     "settings": {
         "only_when_live": True,
         "paused": False,
+        "start_active": True,   # when off, the bot starts paused every time the app opens
         "live_check_seconds": 60,
         "commands_url": "",
+    },
+    "prefs": {   # how the installed app behaves (Settings > App, Notifications, Logs and data)
+        "startup": False,          # start with Windows
+        "start_minimized": False,  # when started with Windows, go to the tray instead of showing the window
+        "on_close": "quit",        # "quit" or "tray"
+        "auto_reconnect": True,    # start the bot again by itself if the Twitch connection drops
+        "auto_update": True,       # look for new versions and download them quietly
+        "notify": True,            # desktop pop-ups
+        "notify_sound": False,
+        "log_days": 30,            # keep logs for this many days (0 = forever)
+        "log_chat": False,         # also save viewers' chat messages
+    },
+    "ui": {   # how the dashboard looks (saved here so it also sticks inside the installed app)
+        "dark": True,
+        "language": "en",
+        "fontSize": "medium",
+        "accent": "#9a1118",
+        "compact": False,
+        "reduceMotion": False,
     },
     "events": {   # automatic replies to Twitch events; each has tiers picked by the event's number
         "watch_streak": {"enabled": True, "tiers": [
@@ -77,6 +99,16 @@ class Store:
                 self.save(name, copy.deepcopy(DEFAULTS[name]))
         self._migrate()
         self._migrate_events()
+        # the activity shown on the Logs page, saved so it survives a restart
+        self.activity = ActivityLog(DATA_DIR / "activity.jsonl", days_fn=lambda: self.get("prefs").get("log_days", 30))
+
+    def apply_launch_defaults(self) -> None:
+        """Run once when the app opens: 'Start the bot when the app opens' decides whether the bot starts active or paused."""
+        settings = dict(self.get("settings"))
+        want_paused = settings.get("start_active", True) is False
+        if bool(settings.get("paused")) != want_paused:
+            settings["paused"] = want_paused
+            self.save("settings", settings)
 
     def _migrate_events(self) -> None:
         """Older versions stored the Watch Streak reply as {response, min_streak}. It becomes one tier, and any

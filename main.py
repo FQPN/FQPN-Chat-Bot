@@ -1,8 +1,9 @@
 import asyncio
 import logging
+import time
 import webbrowser
 
-from core import auth, dashboard
+from core import auth, dashboard, desktop, notify, updater
 from core.bot import TwitchBot
 from core.store import Store
 
@@ -12,7 +13,16 @@ log = logging.getLogger("twitchbot")
 
 async def main(open_browser=True):
     store = Store()
+    store.apply_launch_defaults()   # "Start the bot when the app opens" (Settings > Bot)
     state = {"bot": None, "account": None}   # shared with the dashboard
+    state["update_wake"] = asyncio.Event()
+    try:   # the Windows start-up entry follows the settings (this also repairs it after an update)
+        desktop.apply_prefs(store.get("prefs"))
+    except Exception:
+        log.exception("Could not update the Windows start-up entry")
+    updater.cleanup()
+    state["update_loop"] = asyncio.create_task(updater.loop(updater.U, store, state["update_wake"]))
+    last_error_notice = 0.0
 
     # The dashboard starts first so it's available even if Twitch is down.
     try:
@@ -31,6 +41,7 @@ async def main(open_browser=True):
     # then runs the bot. Automatic reconnection: if the bot ever stops or crashes, start it again.
     while True:
         state["wake"].clear()
+        state["lost"] = False
         account = await auth.get_account()
         if account is None:
             state["account"] = None
@@ -63,9 +74,21 @@ async def main(open_browser=True):
             raise
         except Exception:
             log.exception("Bot stopped unexpectedly")
+            if time.time() - last_error_notice > 600:    # at most one pop-up per 10 minutes
+                last_error_notice = time.time()
+                notify.error(store.get("prefs"), "The bot stopped unexpectedly. Details are in bot.log.")
         finally:
             await bot.close()
         if auth.load_token() is None:     # disconnected from the dashboard
+            continue
+        prefs = store.get("prefs")
+        if not prefs.get("auto_reconnect", True):
+            # "Reconnect to Twitch automatically" is off: wait until the dashboard's Reconnect button is pressed
+            state["bot"] = None
+            state["lost"] = True
+            notify.error(prefs, "Lost the connection to Twitch. Open the dashboard and press Reconnect.")
+            log.info("Connection lost; waiting for Reconnect")
+            await state["wake"].wait()
             continue
         log.info("Restarting in 10 seconds...")
         await asyncio.sleep(10)

@@ -19,15 +19,6 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install the bot's libraries and PyInstaller
-        run: pip install -r requirements.txt pyinstaller
-
-      - name: Build the program folder
-        run: pyinstaller TwitchChatBot.spec --noconfirm
-
-      - name: Install Inno Setup
-        run: choco install innosetup -y --no-progress
-
       - name: Work out the version number
         shell: bash
         run: |
@@ -37,9 +28,43 @@ jobs:
             echo "VERSION=0.0.0-test" >> "$GITHUB_ENV"
           fi
 
+      # The app reads its own version from this file to know when a newer release exists.
+      - name: Put the version number into the app
+        shell: bash
+        run: printf 'VERSION = "%s"\n' "$VERSION" > core/version.py
+
+      - name: Install the bot's libraries and PyInstaller
+        run: pip install -r requirements.txt pyinstaller
+
+      - name: Build the program folder
+        run: pyinstaller TwitchChatBot.spec --noconfirm
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
       - name: Build Setup.exe
         shell: cmd
         run: '"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=%VERSION% installer.iss'
+
+      # Microsoft Store package: only built once the three Store values exist as repository variables
+      # (Settings > Secrets and variables > Actions > Variables). See MICROSOFT-STORE.md.
+      - name: Build the Microsoft Store package
+        if: ${{ vars.MSIX_IDENTITY_NAME != '' }}
+        shell: pwsh
+        env:
+          MSIX_IDENTITY_NAME: ${{ vars.MSIX_IDENTITY_NAME }}
+          MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER }}
+          MSIX_PUBLISHER_DISPLAY_NAME: ${{ vars.MSIX_PUBLISHER_DISPLAY_NAME }}
+        run: |
+          pip install pillow
+          python make_msix.py
+
+      - name: Keep the Store package from this run
+        if: ${{ vars.MSIX_IDENTITY_NAME != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: store-package
+          path: Output/*.msix
 
       - name: Keep the installer from this run
         uses: actions/upload-artifact@v4

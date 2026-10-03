@@ -14,7 +14,7 @@ import twitchio
 from twitchio import eventsub
 from twitchio.ext import commands
 
-from . import auth, events, greetings, manage
+from . import auth, events, greetings, manage, notify
 from .manage import CommandError
 from .store import Store
 from .variables import Context, expand, uses_variable
@@ -77,7 +77,7 @@ class TwitchBot(commands.Bot):
         self._chan = None
         self._chan_ts = 0.0
         self._follow_cache: dict[str, tuple[float, object]] = {}
-        self.activity: deque = deque(maxlen=100)   # recent activity shown on the dashboard Logs page
+        self.activity = self.store.activity.items   # recent activity (also saved to disk by the store)
         self._dash_closed = False
         self._greet_tasks: set[asyncio.Task] = set()
         self._seen_events: deque = deque(maxlen=50)   # so a repeated delivery of the same notice is answered once
@@ -145,12 +145,19 @@ class TwitchBot(commands.Bot):
         await super().close(*args, **kwargs)
 
     def _log_activity(self, kind: str, name: str, user: str = "") -> None:
-        self.activity.append({
-            "time": datetime.now(timezone.utc).isoformat(),
-            "kind": kind,      # command | timer | manage | greeting | event
-            "name": name,
-            "user": user,
-        })
+        self.store.activity.add(kind, name, user)    # kind: command | timer | manage | greeting | event | chat
+
+    def _log_chat(self, payload) -> None:
+        """'Log chat messages' in Settings: keeps what viewers wrote next to the bot's own actions."""
+        try:
+            if not self.store.get("prefs").get("log_chat", False):
+                return
+            text = (payload.text or "").strip()
+            chatter = payload.chatter
+            if text:
+                self.store.activity.add("chat", text, chatter.display_name or chatter.name)
+        except Exception:
+            log.exception("Could not log a chat message")
 
     # ---------- sending ----------
 
@@ -299,8 +306,6 @@ class TwitchBot(commands.Bot):
 
     async def _fire_event(self, key, value, user, login="", extra=None, dedupe=None) -> None:
         """Answers one Twitch event with the best matching reply from the Events page."""
-        if self.store.get("settings").get("paused"):
-            return
         blocked = {u.lower() for u in self.store.get("blocklist").get("users", [])}
         if login and login.lower() in blocked:
             return
@@ -308,6 +313,12 @@ class TwitchBot(commands.Bot):
             if dedupe in self._seen_events:
                 return
             self._seen_events.append(dedupe)
+        try:   # a desktop pop-up, whether or not a chat reply is set up for this event
+            notify.event(self.store.get("prefs"), key, user, value, extra)
+        except Exception:
+            log.exception("Notification failed")
+        if self.store.get("settings").get("paused"):
+            return
         template = events.pick_reply(self.store.get("events"), key, value)
         if template is None:
             return
@@ -461,9 +472,10 @@ class TwitchBot(commands.Bot):
         # streamer's account), only the bot's own replies.
         if payload.source_broadcaster is not None or self._is_own_echo(payload):
             return
-        if self.store.get("settings").get("paused"):   # paused from the dashboard: stay silent
-            return
         if self._is_blocked(payload):
+            return
+        self._log_chat(payload)
+        if self.store.get("settings").get("paused"):   # paused from the dashboard: stay silent
             return
         try:
             self._maybe_greet(payload)

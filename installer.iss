@@ -33,6 +33,14 @@ Name: "{autodesktop}\FQPN's Chat Bot"; Filename: "{app}\FQPN'sChatBot.exe"; Task
 
 [Run]
 Filename: "{app}\FQPN'sChatBot.exe"; Description: "Start FQPN's Chat Bot now"; Flags: nowait postinstall skipifsilent
+; After "Restart and update" inside the app, the update runs silently and the app opens again by itself.
+Filename: "{app}\FQPN'sChatBot.exe"; Flags: nowait; Check: StartAfterUpdate
+
+[Code]
+function StartAfterUpdate: Boolean;
+begin
+  Result := WizardSilent and (ExpandConstant('{param:RELAUNCH|0}') = '1');
+end;
 
 ; Your commands, timers and Twitch login live in %APPDATA%\TwitchChatBot, outside the install folder,
 ; so uninstalling or upgrading never deletes them.

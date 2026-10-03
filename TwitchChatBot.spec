@@ -5,6 +5,8 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 hidden = (collect_submodules("twitchio") + collect_submodules("aiohttp")
           + collect_submodules("webview"))
 datas = [("core/dashboard.html", "core")] + collect_data_files("twitchio") + collect_data_files("webview")
+hidden += collect_submodules("pystray")   # the tray icon (its Windows part is loaded by name at run time)
+datas += [("icon.ico", ".")]              # the logo shown in the dashboard and in the tray
 
 a = Analysis(
     ["launcher.py"],
