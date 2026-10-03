@@ -185,6 +185,7 @@ main::before{content:"";position:absolute;width:35rem;height:35rem;right:-10rem;
 .btn.danger{background:#b4161d;border-color:#d11f27}.btn.danger:hover{background:#d11f27}
 .btn:disabled{opacity:.6;cursor:wait}
 .sheet.small{max-width:26.25rem}
+.row.b5{grid-template-columns:11.875rem 1fr 7.5rem 6.25rem 5.625rem}
 .ic{width:1.25rem;height:1.25rem}
 .supbtn .heart{width:1.125rem;height:1.125rem}.supbtn .ext{width:.875rem;height:.875rem}
 .btn.danger{color:var(--on-red,#fff)}
@@ -656,8 +657,10 @@ function renderCommands(){
       rows+='<div class="row'+(c.enabled===false?' dim':'')+'" data-k="'+attr(name)+'" style="--i:'+n+'"><button class="cmd" dir="auto" data-c="'+attr(name)+'" title="'+attr(t("copy_title"))+'"><span class="tt">'+esc(name)+'</span> <span>⧉</span></button><div class="msg" dir="auto">'+esc(c.response)+al+'</div><span class="lvl '+lvCls(c.permission)+'">'+lvText(c.permission)+'</span><span class="cd">'+fmtCd(c.cooldown)+'</span>'+swBtn(c.enabled,name)+actBtns(name)+'</div>';n++});
     if(!n)rows='<div class="empty">'+t(offline?"err_net":(Object.keys(D.commands).length?"empty_cmds":"empty_none"))+'</div>'
   }else{
-    BUILTINS.forEach(function(b,i){if(q&&(b[0]).indexOf(q)<0)return;n++;
-      rows+='<div class="row" style="--i:'+i+'"><span class="cmd static" dir="auto">'+pe+b[0]+'</span><div class="msg">'+t("bi_"+b[0],{p:pe})+'</div><span class="lvl '+lvCls(b[1])+'">'+lvText(b[1])+'</span><span class="cd">'+(b[2]==null?"—":fmtCd(b[2]))+'</span><span class="bi">'+t("bi_tag")+'</span><span></span></div>'})
+    var off=D.settings.disabled_builtins||[];   // built-ins have no edit or delete: just a Status switch
+    head='<div class="row head b5"><span>'+t("th_cmd")+'</span><span>'+t("th_resp")+'</span><span>'+t("th_level")+'</span><span>'+t("th_cd")+'</span><span>'+t("th_status")+'</span></div>';
+    BUILTINS.forEach(function(b,i){if(q&&(b[0]).indexOf(q)<0)return;n++;var dis=off.indexOf(b[0])>=0;
+      rows+='<div class="row b5'+(dis?' dim':'')+'" data-b="'+b[0]+'" style="--i:'+i+'"><span class="cmd static" dir="auto">'+pe+b[0]+'</span><div class="msg">'+t("bi_"+b[0],{p:pe})+'</div><span class="lvl '+lvCls(b[1])+'">'+lvText(b[1])+'</span><span class="cd">'+(b[2]==null?"—":fmtCd(b[2]))+'</span>'+swBtn(!dis,pe+b[0])+'</div>'})
   }
   $("count").textContent=t("count",{n:n});$("list").className="tbl"+(anim?" fresh":"");$("list").innerHTML=head+rows}
 function renderTimers(){
@@ -829,10 +832,16 @@ async function toggleItem(kind,key,on,sw){
     anim=false;renderDashboard();if(kind=="command")renderCommands();anim=true
   }catch(e){sw.setAttribute("aria-checked",!on);fail(e)}}
 
+async function toggleBuiltin(name,on,sw){   // switch a built-in command on or off
+  try{await mutate("settings",function(st){var a=(st.disabled_builtins||[]).filter(function(x){return x!=name});if(!on)a.push(name);st.disabled_builtins=a})}
+  catch(e){sw.setAttribute("aria-checked",!on);fail(e)}}
+
 /* ===================== events ===================== */
 $("list").addEventListener("click",function(e){
   var row=e.target.closest(".row"),key=row&&row.dataset.k;
-  var s=e.target.closest(".sw");if(s&&key){var on=s.getAttribute("aria-checked")!="true";s.setAttribute("aria-checked",on);row.classList.toggle("dim",!on);toggleItem("command",key,on,s);return}
+  var s=e.target.closest(".sw"),bn=row&&row.dataset.b;
+  if(s&&bn){var on0=s.getAttribute("aria-checked")!="true";s.setAttribute("aria-checked",on0);row.classList.toggle("dim",!on0);toggleBuiltin(bn,on0,s);return}
+  if(s&&key){var on=s.getAttribute("aria-checked")!="true";s.setAttribute("aria-checked",on);row.classList.toggle("dim",!on);toggleItem("command",key,on,s);return}
   if(e.target.closest(".edit")&&key){openEdit("command",key);return}
   if(e.target.closest(".del")&&key){askDelete("command",key,key);return}
   var c=e.target.closest(".cmd:not(.static)");if(c){copyText(c.dataset.c);say(t("copied",{c:c.dataset.c}))}});

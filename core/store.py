@@ -41,6 +41,7 @@ DEFAULTS = {
         "start_active": True,   # when off, the bot starts paused every time the app opens
         "live_check_seconds": 60,
         "commands_url": "",
+        "disabled_builtins": [],   # built-in commands switched off in Commands > Built-in
     },
     "prefs": {   # how the installed app behaves (Settings > App, Notifications, Logs and data)
         "startup": False,          # start with Windows

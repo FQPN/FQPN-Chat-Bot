@@ -496,6 +496,8 @@ class TwitchBot(commands.Bot):
             name, _, rest = text[len(manage.BUILTIN_PREFIX):].partition(" ")
             name, rest = name.lower(), rest.strip()
             if name in manage.RESERVED:
+                if name in (self.store.get("settings").get("disabled_builtins") or []):
+                    return          # switched off in the dashboard (Commands > Built-in): stay silent
                 await self._builtin(payload, name, rest, user, level, manage.BUILTIN_PREFIX)
                 return
 

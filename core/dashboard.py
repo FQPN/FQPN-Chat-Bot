@@ -266,12 +266,16 @@ def validate(section: str, data, prefix: str = "!"):
         url = _text(data.get("commands_url", ""), "Commands page link", 300, required=False)
         if url and not url.lower().startswith(("http://", "https://")):
             raise ValidationError("The commands page link must start with http:// or https://")
+        off = data.get("disabled_builtins", [])
+        if not isinstance(off, list) or any(x not in manage.RESERVED for x in off):
+            raise ValidationError("Choose built-in commands from the list.")
         return {
             "only_when_live": _bool(data.get("only_when_live"), "Only when live"),
             "paused": _bool(data.get("paused", False), "Paused"),
             "start_active": _bool(data.get("start_active", True), "Start the bot when the app opens"),
             "live_check_seconds": int(_number(data.get("live_check_seconds"), "Live check interval", 15, 3600)),
             "commands_url": url,
+            "disabled_builtins": sorted(set(off)),
         }
 
     if section == "prefs":
