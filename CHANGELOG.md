@@ -1,6 +1,8 @@
 # Changelog
 
 ## 1.1.1
+- **Fixed a "Not Found" page in the app window** on computers where another program (for example a Flask app) already used port 5000. The app now takes the next free port by itself and never shows an address it doesn't own.
+- **Update pop-up:** when a new version is found, a pop-up offers **Update now** or **Update later**, with what's new. If notifications are on you also get a desktop notification, so you notice it even when the app is hidden in the tray.
 - **The dashboard only ever opens in the app window, never in a browser.** A second launch waits for the first window and brings it to the front. If the window can't open, a message explains how to install the Microsoft Edge WebView2 Runtime.
 - The installer removes the old `FQPN's Chat Bot.exe` left over from the first release and points an existing desktop shortcut at the current program.
 - Fixed: starting the app a second time no longer opens a second copy (which also made the bot answer twice in chat). The copy that is already running comes to the front instead.

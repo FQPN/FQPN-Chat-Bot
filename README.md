@@ -33,7 +33,7 @@ The app updates itself: with **Check for updates automatically** on (Settings > 
 ## First start
 1. The bot asks you to connect Twitch: the dashboard shows a short code and an **Open Twitch** button.
 2. Open the link, enter the code and click **Authorize**. You only do this once.
-3. The dashboard is at **http://localhost:5000** (it opens by itself). It is reachable from this computer only.
+3. The dashboard opens in the app window by itself. It uses a free local port (usually 5000; if another program already uses it, the next free one). It is reachable from this computer only.
 
 ## Twitch permissions the bot asks for
 `user:read:chat`, `user:write:chat`, `moderator:manage:announcements`, `channel:manage:broadcast`,

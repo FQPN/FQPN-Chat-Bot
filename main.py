@@ -26,9 +26,8 @@ async def main(open_browser=False):    # open_browser is ignored: the dashboard 
     # The dashboard starts first so it's available even if Twitch is down.
     try:
         await dashboard.start(store, state)
-    except OSError:
-        print(f"Could not start the dashboard: port {dashboard.PORT} is already in use "
-              "(is the bot already running?). The bot will still run.")
+    except OSError as e:
+        print(f"Could not start the dashboard: {e}. The bot will still run.")
 
     state["login"] = {"status": "idle"}
     state["wake"] = asyncio.Event()

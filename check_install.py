@@ -20,18 +20,19 @@ REQUIRED = ["main.py", "launcher.py", "core/__init__.py", "core/auth.py", "core/
 # a phrase that only the NEW version of each file contains
 NEW_IN = {
     "main.py": ["open_browser", "updater.loop", "apply_launch_defaults", "python launcher.py"],
-    "launcher.py": ["class Shell", "ensure_single_instance", "fail_no_window", "edgechromium"],
+    "launcher.py": ["class Shell", "ensure_single_instance", "fail_no_window", "edgechromium", "read_port", "fail_no_dashboard"],
     "core/store.py": ["ActivityLog", '"prefs"', "apply_launch_defaults", "disabled_builtins"],
     "core/bot.py": ["store.activity", "notify.event", "_log_chat", "disabled_builtins", "BY_TYPED"],
     "core/manage.py": ["BUILTIN_NAMES", "BY_TYPED"],
-    "core/dashboard.py": ['"prefs"', "updater", "/api/update/check", "/api/show", "disabled_builtins"],
+    "core/dashboard.py": ['"prefs"', "updater", "/api/update/check", "/api/show", "disabled_builtins", "bind_first_free"],
+    "core/updater.py": ["def announce"],
     "core/desktop.py": ["quit_app", "show_window"],
-    "core/dashboard.html": ["data-pref", "spane-app", "updbtn", "toggleBuiltin", "transform-origin:15px 7px", 'class="sep"', "BNAME"],
+    "core/dashboard.html": ["data-pref", "spane-app", "updbtn", "toggleBuiltin", "transform-origin:15px 7px", 'class="sep"', "BNAME", "upop_title"],
 }
 
 # a phrase that only the OLD version of a file contains (so it must NOT be there)
 OLD_IN = {"core/dashboard.html": ["animation:tick", "transform-origin:0.75rem"],
-          "launcher.py": ["webbrowser"], "main.py": ["webbrowser"]}   # the browser must not be used any more
+          "launcher.py": ["webbrowser", "wait_for_port"], "main.py": ["webbrowser"]}   # the browser must not be used any more
 
 # files that belong in the TwitchBot folder (next to main.py) and files that belong inside core
 ROOT_FILES = ["launcher.py", "main.py", "check_install.py", "installer.iss", "requirements.txt", "README.md", "CHANGELOG.md",

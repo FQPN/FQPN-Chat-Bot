@@ -183,6 +183,10 @@ main::before{content:"";position:absolute;width:35rem;height:35rem;right:-10rem;
 .btn.danger{background:#b4161d;border-color:#d11f27}.btn.danger:hover{background:#d11f27}
 .btn:disabled{opacity:.6;cursor:wait}
 .sheet.small{max-width:26.25rem}
+.unotes{background:var(--bg);border:1px solid var(--line);border-radius:0.5rem;padding:0.625rem 0.75rem;max-height:9.375rem;overflow:auto;font-size:0.8125rem;line-height:1.5;color:var(--soft);white-space:pre-wrap;overflow-wrap:anywhere;margin:0.375rem 0 0.625rem}
+.uprog{height:0.5rem;border-radius:62.4375rem;background:var(--chip);overflow:hidden;margin:0.5rem 0}
+.uprog i{display:block;height:100%;width:0;background:var(--red2);border-radius:62.4375rem;transition:width .3s}
+#us{min-height:1.3em}
 .owned .sep{color:var(--mute);font-weight:400}
 .row.b5{grid-template-columns:11.875rem 1fr 7.5rem 6.25rem 5.625rem}
 .ic{width:1.25rem;height:1.25rem}
@@ -439,6 +443,15 @@ body.reduce *,body.reduce *::before,body.reduce *::after{transition:none!importa
   <h2 id="ct"></h2><p class="hint" id="cb"></p>
   <div class="mact"><button class="ghost" id="ccancel" type="button" data-i18n="cancel"></button><button class="btn sm danger" id="cok" type="button"></button></div>
 </div></div>
+<div class="modal" id="umodal"><div class="sheet small" role="dialog" aria-modal="true" aria-labelledby="ut">
+  <h2 id="ut" data-i18n="upop_title"></h2>
+  <p class="hint" id="ub"></p>
+  <div class="hint" id="unl" hidden data-i18n="upop_new"></div>
+  <div class="unotes" id="un" hidden dir="auto"></div>
+  <div class="uprog" id="up" hidden><i id="upbar"></i></div>
+  <p class="hint" id="us"></p>
+  <div class="mact"><button class="ghost" id="ulater" type="button" data-i18n="upop_later"></button><button class="btn sm" id="unow" type="button" data-i18n="upop_now"></button></div>
+</div></div>
 <div class="toast" id="toast"></div>
 <script>
 /* ===================== i18n ===================== */
@@ -490,7 +503,7 @@ reset_all:"Reset all settings",reset_all_s:"Puts the settings on all these tabs 
 upd_title:"App updates",upd_version:"Version {v}",upd_check:"Check for updates",upd_download:"Download update",upd_install:"Restart and update",upd_dev:"running from source, so updates are off",upd_checking:"checking…",upd_uptodate:"you have the latest version",upd_available:"version {v} is available",upd_downloading:"downloading the update… {p}%",upd_ready:"version {v} is ready to install",upd_installing:"installing the update…",upd_error:"couldn't check: {m}",
 upd_confirm_q:"Install the update now?",upd_confirm_body:"The app closes for a moment and opens again with the new version. Your commands, timers and Twitch login are kept.",
 ban_upd_ready:"Version {v} is ready to install.",ban_upd_avail:"Version {v} is available.",ban_upd_dl:"Downloading the update… {p}%",ban_lost:"The connection to Twitch was lost.",ban_reconnect:"Reconnect",
-notif_test:"Send a test notification",notif_test_s:"Shows a pop-up now so you can see how it looks.",notif_test_btn:"Send test",notif_test_ok:"Test notification sent",notif_test_fail:"No pop-up could be shown (is the tray icon running?)",log_chat_by:"said by {u}",bi_note:"These built-in commands have their own names (like !cmadd) on purpose. They are different from Nightbot's (!addcom, !editcom, !delcom, !commands, !title, !game), so both bots can share your chat without answering the same message.",pause_aria:"Pause bot",pause_on:"Bot is paused",pause_off:"Bot is active",paused_toast:"Bot paused",resumed_toast:"Bot resumed",st_paused:"Paused",ban_paused:"The bot is paused and won't reply to anyone or send timers.",resume:"Resume",timers_title:"Timers",timers_sub:"Send messages to your chat automatically on a schedule.",new_timer:"+ New Timer",your_timers:"Your timers",no_timers:"No timers yet. Select New Timer to add one.",
+notif_test:"Send a test notification",notif_test_s:"Shows a pop-up now so you can see how it looks.",notif_test_btn:"Send test",notif_test_ok:"Test notification sent",notif_test_fail:"No pop-up could be shown (is the tray icon running?)",log_chat_by:"said by {u}",bi_note:"These built-in commands have their own names (like !cmadd) on purpose. They are different from Nightbot's (!addcom, !editcom, !delcom, !commands, !title, !game), so both bots can share your chat without answering the same message.",upop_title:"Update available",upop_body:"Version {v} is available. Do you want to update now?",upop_now:"Update now",upop_later:"Update later",upop_new:"What's new",upop_dl:"Downloading the update… {p}%",upop_wait:"Getting the update ready…",upop_installing:"Installing… the app closes for a moment and opens again with your commands and login kept.",upop_err:"Couldn't update: {m}",upop_retry:"Try again",pause_aria:"Pause bot",pause_on:"Bot is paused",pause_off:"Bot is active",paused_toast:"Bot paused",resumed_toast:"Bot resumed",st_paused:"Paused",ban_paused:"The bot is paused and won't reply to anyone or send timers.",resume:"Resume",timers_title:"Timers",timers_sub:"Send messages to your chat automatically on a schedule.",new_timer:"+ New Timer",your_timers:"Your timers",no_timers:"No timers yet. Select New Timer to add one.",
 every:"Every {t}",mins:function(p){return p.n+" min"},timer_live_note:"Timers only send while you're live. You can change this in Settings.",
 
 bl_title:"Blocklist",bl_sub:"The bot ignores messages from blocked users and messages that contain blocked words.",bl_users:"Blocked users",bl_words:"Blocked words",bl_add:"Add",bl_user_ph:"username",bl_word_ph:"word or phrase",bl_empty:"Nothing blocked yet.",remove_aria:"Remove {n}",
@@ -548,7 +561,7 @@ reset_all:"إعادة ضبط كل الإعدادات",reset_all_s:"يعيد إع
 upd_title:"تحديثات التطبيق",upd_version:"الإصدار {v}",upd_check:"البحث عن تحديثات",upd_download:"تنزيل التحديث",upd_install:"إعادة التشغيل والتحديث",upd_dev:"يعمل من الشيفرة المصدرية، لذلك التحديثات متوقفة",upd_checking:"جارٍ البحث…",upd_uptodate:"لديك أحدث إصدار",upd_available:"الإصدار {v} متاح",upd_downloading:"جارٍ تنزيل التحديث… {p}%",upd_ready:"الإصدار {v} جاهز للتثبيت",upd_installing:"جارٍ تثبيت التحديث…",upd_error:"تعذّر البحث: {m}",
 upd_confirm_q:"تثبيت التحديث الآن؟",upd_confirm_body:"يُغلق التطبيق لحظة ثم يفتح من جديد بالإصدار الجديد. تبقى أوامرك ومؤقتاتك وحساب تويتش كما هي.",
 ban_upd_ready:"الإصدار {v} جاهز للتثبيت.",ban_upd_avail:"الإصدار {v} متاح.",ban_upd_dl:"جارٍ تنزيل التحديث… {p}%",ban_lost:"انقطع الاتصال بتويتش.",ban_reconnect:"إعادة الاتصال",
-notif_test:"إرسال إشعار تجريبي",notif_test_s:"يعرض نافذة منبثقة الآن لترى شكلها.",notif_test_btn:"إرسال تجربة",notif_test_ok:"تم إرسال الإشعار التجريبي",notif_test_fail:"تعذّر عرض إشعار (هل أيقونة علبة النظام تعمل؟)",log_chat_by:"كتبه {u}",bi_note:"لهذه الأوامر المدمجة أسماؤها الخاصة (مثل !cmadd) عن قصد. وهي تختلف عن أسماء Nightbot (!addcom و!editcom و!delcom و!commands و!title و!game)، فيستطيع البوتان مشاركة دردشتك دون أن يرد كلاهما على الرسالة نفسها.",pause_aria:"إيقاف البوت مؤقتًا",pause_on:"البوت متوقف مؤقتًا",pause_off:"البوت يعمل",paused_toast:"تم إيقاف البوت مؤقتًا",resumed_toast:"تم استئناف البوت",st_paused:"متوقف مؤقتًا",ban_paused:"البوت متوقف مؤقتًا ولن يرد على أحد ولن يرسل المؤقتات.",resume:"استئناف",timers_title:"المؤقتات",timers_sub:"أرسل رسائل إلى الدردشة تلقائيًا حسب جدول زمني.",new_timer:"+ مؤقت جديد",your_timers:"مؤقتاتك",no_timers:"لا توجد مؤقتات بعد. اضغط «مؤقت جديد» لإضافة واحد.",
+notif_test:"إرسال إشعار تجريبي",notif_test_s:"يعرض نافذة منبثقة الآن لترى شكلها.",notif_test_btn:"إرسال تجربة",notif_test_ok:"تم إرسال الإشعار التجريبي",notif_test_fail:"تعذّر عرض إشعار (هل أيقونة علبة النظام تعمل؟)",log_chat_by:"كتبه {u}",bi_note:"لهذه الأوامر المدمجة أسماؤها الخاصة (مثل !cmadd) عن قصد. وهي تختلف عن أسماء Nightbot (!addcom و!editcom و!delcom و!commands و!title و!game)، فيستطيع البوتان مشاركة دردشتك دون أن يرد كلاهما على الرسالة نفسها.",upop_title:"تحديث متاح",upop_body:"الإصدار {v} متاح. هل تريد التحديث الآن؟",upop_now:"التحديث الآن",upop_later:"التحديث لاحقًا",upop_new:"ما الجديد",upop_dl:"جارٍ تنزيل التحديث… {p}%",upop_wait:"جارٍ تجهيز التحديث…",upop_installing:"جارٍ التثبيت… يُغلق التطبيق لحظة ثم يفتح من جديد مع بقاء أوامرك وحسابك.",upop_err:"تعذّر التحديث: {m}",upop_retry:"حاول مرة أخرى",pause_aria:"إيقاف البوت مؤقتًا",pause_on:"البوت متوقف مؤقتًا",pause_off:"البوت يعمل",paused_toast:"تم إيقاف البوت مؤقتًا",resumed_toast:"تم استئناف البوت",st_paused:"متوقف مؤقتًا",ban_paused:"البوت متوقف مؤقتًا ولن يرد على أحد ولن يرسل المؤقتات.",resume:"استئناف",timers_title:"المؤقتات",timers_sub:"أرسل رسائل إلى الدردشة تلقائيًا حسب جدول زمني.",new_timer:"+ مؤقت جديد",your_timers:"مؤقتاتك",no_timers:"لا توجد مؤقتات بعد. اضغط «مؤقت جديد» لإضافة واحد.",
 every:"كل {t}",mins:function(p){var n=p.n;return n==1?"دقيقة":n==2?"دقيقتين":n<=10?n+" دقائق":n+" دقيقة"},timer_live_note:"لا تُرسل المؤقتات إلا أثناء البث المباشر. يمكنك تغيير ذلك من الإعدادات.",
 
 bl_title:"قائمة الحظر",bl_sub:"يتجاهل البوت رسائل المستخدمين المحظورين والرسائل التي تحتوي على كلمات محظورة.",bl_users:"المستخدمون المحظورون",bl_words:"الكلمات المحظورة",bl_add:"إضافة",bl_user_ph:"اسم المستخدم",bl_word_ph:"كلمة أو عبارة",bl_empty:"لا يوجد شيء محظور بعد.",remove_aria:"إزالة {n}",
@@ -741,7 +754,7 @@ function renderBanner(){
   else if((S.update||{}).status=="downloading"){h='<span>'+t("ban_upd_dl",{p:S.update.progress||0})+'</span>';cls="info"}
   else if(D.settings.paused){h='<span>'+t("ban_paused")+'</span><button class="bbtn" data-a="resume">'+t("resume")+'</button>';cls="warn"}
   b.hidden=!h;b.className="banner "+cls;b.innerHTML=h}
-function renderAll(){renderDashboard();renderCommands();renderTimers();renderGreetings();renderEvents();renderBlocklist();renderLogs();fillSettings(false);renderPause();renderPrefs();renderAccount();renderBanner()}
+function renderAll(){renderDashboard();renderCommands();renderTimers();renderGreetings();renderEvents();renderBlocklist();renderLogs();fillSettings(false);renderPause();renderPrefs();renderAccount();renderBanner();renderUpdatePopup()}
 
 /* ===================== edit window (commands / timers / triggers) ===================== */
 var M=null,lastFocus=null,sheet=$("sheet");
@@ -819,7 +832,7 @@ function confirmBox(o){CB=o;lastFocus=document.activeElement;$("ct").textContent
 function closeConfirm(){$("cmodal").classList.remove("open");CB=null;if(lastFocus&&lastFocus.focus)lastFocus.focus()}
 $("ccancel").onclick=closeConfirm;$("cmodal").addEventListener("mousedown",function(e){if(e.target===$("cmodal"))closeConfirm()});
 $("cok").onclick=async function(){var o=CB;if(!o)return;$("cok").disabled=true;try{await o.run();closeConfirm()}catch(e){closeConfirm();fail(e)}finally{$("cok").disabled=false}};
-document.addEventListener("keydown",function(e){if(e.key!="Escape")return;if($("cmodal").classList.contains("open"))closeConfirm();else if($("modal").classList.contains("open"))closeEdit()});
+document.addEventListener("keydown",function(e){if(e.key!="Escape")return;if(updPopOpen()){if((S.update||{}).status!="installing")updLater();return}if($("cmodal").classList.contains("open"))closeConfirm();else if($("modal").classList.contains("open"))closeEdit()});
 function askDelete(kind,key,label){confirmBox({title:t("confirm_del_q",{n:label}),body:t("confirm_del_body"),ok:t("delete"),danger:true,run:async function(){
   if(kind=="command")await mutate("commands",function(c){if(!c[key])throw Gone();delete c[key]});
   else if(kind=="greeting"){var u0=D.greetings.users[key]&&D.greetings.users[key].user;await mutate("greetings",function(g){g.users.splice(idxOf(g.users,key,function(x){return x.user==u0}),1)})}
@@ -972,6 +985,48 @@ $("updbtn").onclick=async function(){var a=this.dataset.a;if(a=="install"){start
     else if(a=="download"){S.update=Object.assign({},S.update,{status:"downloading",progress:0});renderPrefs();renderBanner();updFast();await API.post("/api/update/download")}
     await loadStatus();renderPrefs();renderBanner()}catch(e){await loadStatus();renderPrefs();renderBanner();fail(e)}};
 $("notifytest").onclick=async function(){try{var r=await API.post("/api/notify/test");say(t(r.ok?"notif_test_ok":"notif_test_fail"),!r.ok)}catch(e){fail(e)}};
+/* ===== update pop-up: shown once per version, with Update now / Update later ===== */
+var updPop={shown:null,later:null,busy:false,err:""};   // shown: the version on offer; later: the version the user postponed (until the next time the app starts)
+try{updPop.later=sessionStorage.getItem("fqpn-upd-later")}catch(e){}
+function cleanNotes(s){   // release notes are written in markdown: show them as plain, tidy lines
+  var out=[];String(s||"").split(/\r?\n/).forEach(function(l){l=l.trim();if(!l||/^\*{0,2}full changelog/i.test(l)||/^<!--/.test(l))return;
+    l=l.replace(/^#+\s*/,"").replace(/^[*-]\s+/,"• ").replace(/\*\*|__|`/g,"").replace(/\[([^\]]+)\]\([^)]*\)/g,"$1");out.push(l)});
+  var t=out.join("\n");return t.length>900?t.slice(0,900).replace(/\s+\S*$/,"")+" …":t}
+function updPopOpen(){return $("umodal").classList.contains("open")}
+function renderUpdatePopup(){
+  if(!updPopOpen())return;
+  var u=S.update||{},v=u.latest||updPop.shown||"",st=u.status,notes=cleanNotes(u.notes),inst=st=="installing",status="";
+  $("ub").textContent=t("upop_body",{v:v});
+  $("unl").hidden=!notes;$("un").hidden=!notes;$("un").textContent=notes;
+  $("up").hidden=st!="downloading";$("upbar").style.width=(u.progress||0)+"%";
+  if(updPop.err)status=t("upop_err",{m:updPop.err});else if(inst)status=t("upop_installing");else if(st=="downloading")status=t("upop_dl",{p:u.progress||0});else if(updPop.busy)status=t("upop_wait");
+  $("us").textContent=status;
+  $("unow").disabled=updPop.busy||inst;$("unow").textContent=t(updPop.err?"upop_retry":"upop_now");$("ulater").disabled=inst}
+function maybeShowUpdatePopup(){
+  var u=S.update||{},st=u.status;
+  if(updPopOpen()||modalOpen()||offline||!u.latest)return;
+  if(st!="available"&&st!="downloading"&&st!="ready")return;
+  if(updPop.later===u.latest)return;
+  updPop.shown=u.latest;updPop.busy=false;updPop.err="";$("umodal").classList.add("open");renderUpdatePopup();$("unow").focus()}
+function updLater(){updPop.later=updPop.shown;try{sessionStorage.setItem("fqpn-upd-later",String(updPop.later))}catch(e){}updPop.busy=false;$("umodal").classList.remove("open")}
+async function updNow(){
+  if(updPop.busy)return;updPop.busy=true;updPop.err="";renderUpdatePopup();
+  try{
+    await loadStatus();   // start from what the app really reports, not from a guess made a moment ago
+    var asked=0,s=(S.update||{}).status;
+    if(s=="available"||s=="error"){asked++;S.update=Object.assign({},S.update,{status:"downloading",progress:0});renderUpdatePopup();await API.post("/api/update/download")}
+    for(var i=0;i<1800;i++){await loadStatus();s=(S.update||{}).status;renderUpdatePopup();renderPrefs();renderBanner();
+      if(!updPopOpen()){updPop.busy=false;return}     // the user chose "Update later" while we waited: never install behind their back
+      if(s=="ready")break;
+      if(s=="error")throw new Error((S.update||{}).error||"");
+      if(s=="installing")return;
+      if(s=="available"){if(asked>=3)throw new Error(t("err_net"));asked++;await API.post("/api/update/download")}   // the download never started: ask again
+      await new Promise(function(r){setTimeout(r,1000)})}
+    if(!updPopOpen()){updPop.busy=false;return}
+    await API.post("/api/update/install");S.update=Object.assign({},S.update,{status:"installing"});renderUpdatePopup();renderPrefs();renderBanner()
+  }catch(e){updPop.err=e.message||String(e);updPop.busy=false;await loadStatus();renderUpdatePopup()}}
+$("unow").onclick=updNow;$("ulater").onclick=updLater;
+$("umodal").addEventListener("mousedown",function(e){if(e.target===$("umodal")&&(S.update||{}).status!="installing")updLater()});
 $("resetbtn").onclick=function(){confirmBox({title:t("reset_q"),body:t("reset_body"),ok:t("reset_btn"),danger:true,run:async function(){
   await mutate("settings",function(s){s.start_active=true;s.only_when_live=true;s.live_check_seconds=60;s.commands_url=""});
   await mutate("prefs",function(p){Object.assign(p,PREF_DEF)});
@@ -1034,7 +1089,7 @@ function setLang(l,save){
   if(save){try{localStorage.setItem("fqpn-lang",l)}catch(e){}}
   fillSelects();applyStatic();buildAnn();anim=true;renderAll();placePill()}
 async function tick(){
-  try{await loadStatus();
+  try{await loadStatus();maybeShowUpdatePopup();renderUpdatePopup();
     if(!modalOpen()){await loadSections();if(curView=="logs"||curView=="dashboard")await loadLogs();
       var sig=JSON.stringify([D,S,LOGS,offline]);if(sig!==lastSig){lastSig=sig;anim=false;renderAll();anim=true}}
   }catch(e){}

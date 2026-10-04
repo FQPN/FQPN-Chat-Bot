@@ -14,6 +14,7 @@ import time
 import urllib.request
 from pathlib import Path
 
+from . import notify
 from . import version as _version
 
 log = logging.getLogger("updater")
@@ -32,7 +33,7 @@ U: dict = {}                          # the one shared update state (dashboard, 
 
 def new_state() -> dict:
     return {"status": "idle", "current": current(), "latest": None, "notes": "", "progress": 0,
-            "error": None, "path": None, "asset": None, "checked": None}
+            "error": None, "path": None, "asset": None, "checked": None, "announced": None}
 
 
 def current() -> str:
@@ -193,6 +194,15 @@ def cleanup() -> None:
         pass
 
 
+def announce(u: dict, store) -> None:
+    """A desktop pop-up (if notifications are on) the first time a new version is found, so it is noticed even while the
+    app window is hidden in the tray. Once per version."""
+    latest = u.get("latest")
+    if latest and u.get("status") in ("available", "ready") and u.get("announced") != latest:
+        u["announced"] = latest
+        notify.send(store.get("prefs"), "Update available", f"Version {latest} is ready. Open FQPN's Chat Bot to update.")
+
+
 async def loop(u: dict, store, wake: asyncio.Event) -> None:
     """Background task: look for updates now and then, and download them quietly when 'Check for updates automatically' is on."""
     await asyncio.sleep(FIRST_CHECK_DELAY)
@@ -202,6 +212,7 @@ async def loop(u: dict, store, wake: asyncio.Event) -> None:
                 await check(u)
                 if u["status"] == "available":
                     await download(u)
+            announce(u, store)
         except Exception:
             log.exception("Update loop failed")
         wake.clear()

@@ -1,4 +1,4 @@
-"""Local web dashboard (http://localhost:5000).
+"""Local web dashboard (shown only inside the app window; it listens on this PC only, usually on port 5000).
 
 It only edits the JSON files through Store. The bot re-reads those files
 automatically, so changes apply without restarting anything."""
@@ -7,6 +7,7 @@ import asyncio
 import os
 import logging
 import re
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -19,7 +20,29 @@ from .store import Store
 log = logging.getLogger("twitchbot.dashboard")
 
 HOST = "127.0.0.1"   # this PC only - never exposed to the network
-PORT = 5000
+PORT = 5000          # the first port tried. Another program (a Flask app, for example) may already use it: start() then takes
+PORT_TRIES = 25      # the next free one, and PORT is updated to the one really in use.
+PORT_FILE = None     # the launcher sets a file here; the port in use is written to it so a second launch can find this copy
+ready = threading.Event()   # set once the server is listening (or has failed): the launcher waits for it
+start_error = None
+
+
+def origin_ok(origin: str, port: int) -> bool:
+    """True if a request really comes from this dashboard's own page (the same port: another local website is not)."""
+    return origin in (f"http://localhost:{port}", f"http://127.0.0.1:{port}")
+
+
+async def bind_first_free(first: int, tries: int, bind) -> int:
+    """Starts listening on the first free port from `first`. bind(port) is a coroutine that raises OSError when the
+    port is busy. Returns the port that worked."""
+    last = None
+    for port in range(first, first + tries):
+        try:
+            await bind(port)
+            return port
+        except OSError as e:
+            last = e
+    raise OSError(f"No free port between {first} and {first + tries - 1}") from last
 PAGE = Path(__file__).resolve().parent / "dashboard.html"
 ICON = Path(__file__).resolve().parent.parent / "icon.ico"   # next to main.py (and inside the installed program folder)
 PERMISSIONS = ("everyone", "subscriber", "vip", "moderator", "broadcaster")
@@ -325,8 +348,7 @@ def validate(section: str, data, prefix: str = "!"):
 
 # ---------- web app ----------
 
-def create_app(store: Store, state: dict, port: int = PORT) -> web.Application:
-    allowed_origins = {f"http://localhost:{port}", f"http://127.0.0.1:{port}"}
+def create_app(store: Store, state: dict, port: int | None = None) -> web.Application:
 
     @web.middleware
     async def guard(request: web.Request, handler):
@@ -336,7 +358,7 @@ def create_app(store: Store, state: dict, port: int = PORT) -> web.Application:
             raise web.HTTPForbidden(text="Forbidden")
         if request.method not in ("GET", "HEAD"):
             origin = request.headers.get("Origin")
-            if origin and origin not in allowed_origins:
+            if origin and not origin_ok(origin, port or PORT):      # PORT is the port really in use
                 raise web.HTTPForbidden(text="Forbidden")
             if request.content_type != "application/json":
                 raise web.HTTPUnsupportedMediaType(text="Expected JSON")
@@ -487,9 +509,26 @@ def create_app(store: Store, state: dict, port: int = PORT) -> web.Application:
     return app
 
 
-async def start(store: Store, state: dict, port: int = PORT) -> web.AppRunner:
-    runner = web.AppRunner(create_app(store, state, port), access_log=None)
+async def start(store: Store, state: dict, port: int | None = None) -> web.AppRunner:
+    global PORT, start_error
+    runner = web.AppRunner(create_app(store, state), access_log=None)
     await runner.setup()
-    await web.TCPSite(runner, HOST, port).start()
-    log.info("Dashboard running at http://localhost:%d", port)
+
+    async def bind(p: int) -> None:
+        await web.TCPSite(runner, HOST, p).start()
+
+    try:
+        chosen = await bind_first_free(port or PORT, PORT_TRIES, bind)
+    except OSError as e:
+        start_error = str(e)
+        ready.set()
+        raise
+    PORT = chosen
+    if PORT_FILE is not None:
+        try:
+            Path(PORT_FILE).write_text(str(chosen), encoding="utf-8")
+        except OSError:
+            log.warning("Could not write the dashboard port file", exc_info=True)
+    ready.set()
+    log.info("Dashboard running at http://%s:%d", HOST, chosen)
     return runner

@@ -14,7 +14,6 @@ import asyncio
 import json
 import logging
 import os
-import socket
 import sys
 import threading
 import time
@@ -64,9 +63,27 @@ class WinMutex:
         return True
 
 
-def wake_existing(port: int, timeout: float = 3.0) -> str:
+def read_port(home: Path):
+    """The port the running copy's dashboard uses (it writes it to a file when it starts), or None."""
+    try:
+        port = int((home / "dashboard.port").read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+    return port if 1024 <= port <= 65535 else None
+
+
+def clear_port(home: Path) -> None:
+    try:
+        (home / "dashboard.port").unlink()
+    except OSError:
+        pass
+
+
+def wake_existing(port, timeout: float = 3.0) -> str:
     """Asks the copy that is already running to show its window.
-    Returns "shown", "nowindow" (it runs without an app window) or "" (could not reach it)."""
+    Returns "shown", "nowindow" (it has no window yet) or "" (could not reach it)."""
+    if not port:
+        return ""
     import urllib.request
     req = urllib.request.Request(f"http://127.0.0.1:{port}/api/show", data=b"{}", method="POST",
                                  headers={"Content-Type": "application/json"})
@@ -135,9 +152,13 @@ def fail_no_window(say=_message_box, leave=os._exit) -> None:
     leave(1)
 
 
-def dashboard_port() -> int:
-    import importlib
-    return importlib.import_module("core.dashboard").PORT
+def fail_no_dashboard(error, say=_message_box, leave=os._exit) -> None:
+    """The dashboard could not start (no free local port). Say so plainly and stop."""
+    log.error("The dashboard could not start: %s", error)
+    say("FQPN's Chat Bot couldn't start its dashboard" + (f" ({error})" if error else "") + ".\n\n"
+        "Another program is using the local network ports it needs. Close other programs that run a local web server "
+        "(for example a Flask or Node app), or restart the computer, then start the app again.")
+    leave(1)
 
 
 def user_home() -> Path:
@@ -159,6 +180,7 @@ def configure(home: Path, resources: Path) -> None:
     auth.AUTH_DIR = home / "authentication"
     auth.TOKEN_FILE = auth.AUTH_DIR / "token.json"
     dashboard.PAGE = resources / "core" / "dashboard.html"
+    dashboard.PORT_FILE = home / "dashboard.port"
     updater.UPDATES_DIR = home / "updates"
 
 
@@ -172,18 +194,6 @@ def read_prefs(home: Path) -> dict:
     except (OSError, ValueError):
         pass
     return prefs
-
-
-def wait_for_port(port: int, timeout: float = 20) -> bool:
-    """Waits until the dashboard server is accepting connections."""
-    end = time.time() + timeout
-    while time.time() < end:
-        try:
-            with socket.create_connection(("127.0.0.1", port), 0.5):
-                return True
-        except OSError:
-            time.sleep(0.3)
-    return False
 
 
 def tray_importable() -> bool:
@@ -298,14 +308,14 @@ def install_pending_update(home: Path) -> None:
 
 
 def run() -> None:
-    if not ensure_single_instance(dashboard_port, quiet="--minimized" in sys.argv):
+    home = user_home()
+    if not ensure_single_instance(lambda: read_port(home), quiet="--minimized" in sys.argv):
         os._exit(0)                                   # another copy is running: it has been asked to show its window
     for stream in (sys.stdout, sys.stderr):          # Arabic names and emoji in the log
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")
         except Exception:
             pass
-    home = user_home()
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
@@ -329,10 +339,10 @@ def run() -> None:
 
     threading.Thread(target=bot_thread, daemon=True).start()
 
-    if not wait_for_port(dashboard.PORT):
-        log.error("The dashboard did not start")
-
-    url = f"http://localhost:{dashboard.PORT}"
+    # Wait until OUR dashboard is listening (not just until "something" answers on port 5000: another program may use it).
+    if not dashboard.ready.wait(30) or dashboard.start_error:
+        fail_no_dashboard(dashboard.start_error)
+    url = f"http://127.0.0.1:{dashboard.PORT}"        # the port really in use; 127.0.0.1 can never be mistaken for another address
     try:
         import webview
         # Started by Windows with "Start minimized" on: go straight to the tray (only if a tray icon is possible)
@@ -347,6 +357,7 @@ def run() -> None:
                       gui="edgechromium" if sys.platform == "win32" else None)
         # Window closed for real -> stop the tray, install a waiting update, and end the program.
         shell.shutdown()
+        clear_port(home)
         install_pending_update(home)
         logging.shutdown()
         os._exit(0)
