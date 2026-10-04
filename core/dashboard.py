@@ -267,7 +267,7 @@ def validate(section: str, data, prefix: str = "!"):
         if url and not url.lower().startswith(("http://", "https://")):
             raise ValidationError("The commands page link must start with http:// or https://")
         off = data.get("disabled_builtins", [])
-        if not isinstance(off, list) or any(x not in manage.RESERVED for x in off):
+        if not isinstance(off, list) or any(x not in manage.BUILTIN_KEYS for x in off):
             raise ValidationError("Choose built-in commands from the list.")
         return {
             "only_when_live": _bool(data.get("only_when_live"), "Only when live"),
@@ -451,7 +451,7 @@ def create_app(store: Store, state: dict, port: int = PORT) -> web.Application:
         """A second copy of the app was started: it asks this one to bring its window to the front instead of running twice."""
         fn = desktop.show_window
         if fn is None:
-            return web.json_response({"ok": True, "shown": False})      # running without an app window (browser mode)
+            return web.json_response({"ok": True, "shown": False})      # no app window yet: this copy is still starting
         try:
             fn()
         except Exception:

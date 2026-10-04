@@ -18,7 +18,6 @@ import socket
 import sys
 import threading
 import time
-import webbrowser
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -99,10 +98,12 @@ def _message_box(text: str) -> None:
     print(text)
 
 
-def ensure_single_instance(get_port, mutex=None, wake=wake_existing, sleep=time.sleep, wait: float = 8.0,
-                           step: float = 0.5, quiet: bool = False, say=_message_box, browser=webbrowser.open) -> bool:
-    """True: this is the only copy, carry on. False: another copy is running (it was asked to show itself, or the user
-    was told), so this one must exit. Two copies would both answer in chat."""
+def ensure_single_instance(get_port, mutex=None, wake=wake_existing, sleep=time.sleep, wait: float = 20.0,
+                           step: float = 0.5, quiet: bool = False, say=_message_box) -> bool:
+    """True: this is the only copy, carry on. False: another copy is running (it was asked to show its window, or the
+    user was told), so this one must exit. Two copies would both answer in chat.
+    The dashboard is only ever shown in the app window, never in a browser: if the other copy has no window yet
+    (it is still starting), this waits and asks again."""
     mutex = mutex or WinMutex()
     end = time.time() + wait
     while True:
@@ -111,17 +112,27 @@ def ensure_single_instance(get_port, mutex=None, wake=wake_existing, sleep=time.
         if quiet:                             # started by Windows with --minimized while a copy runs: stay silent
             return False
         _allow_foreground()
-        result = wake(get_port())
-        if result == "shown":
+        if wake(get_port()) == "shown":       # "nowindow" or "" means the other copy is still starting up
             return False
-        if result == "nowindow":
-            browser(f"http://localhost:{get_port()}")
+        if time.time() >= end:                # still nothing: it may be stuck
+            say("FQPN's Chat Bot is already running, but its window isn't ready. Wait a few seconds and try again, "
+                "look for its icon in the system tray, or close it in Task Manager and start it again.")
             return False
-        if time.time() >= end:                # nothing answers: either it is still starting or it is stuck
-            say("FQPN's Chat Bot is already running. If you can't see its window, look for its icon in the system tray, "
-                "or close it in Task Manager and start it again.")
-            return False
-        sleep(step)                           # it may just be closing (for example during an update): try again
+        sleep(step)                           # it may also just be closing (for example during an update): try again
+
+
+WINDOW_HELP = ("FQPN's Chat Bot couldn't open its window.\n\n"
+               "It needs the free Microsoft Edge WebView2 Runtime. Install it from:\n"
+               "https://developer.microsoft.com/microsoft-edge/webview2/\n\n"
+               "Then start the app again. More details are in bot.log inside %APPDATA%\\TwitchChatBot.")
+
+
+def fail_no_window(say=_message_box, leave=os._exit) -> None:
+    """The app window could not open. The dashboard is never shown in a browser, so tell the user what to do and stop
+    (a bot running with no window at all would be impossible to control)."""
+    log.error("The app window could not open")
+    say(WINDOW_HELP)
+    leave(1)
 
 
 def dashboard_port() -> int:
@@ -312,7 +323,7 @@ def run() -> None:
     # The bot runs in a background thread because the app window must use the main thread.
     def bot_thread():
         try:
-            asyncio.run(main.main(open_browser=False))
+            asyncio.run(main.main())
         except Exception:
             log.exception("The bot crashed")
 
@@ -331,17 +342,17 @@ def run() -> None:
         shell.window.events.closing += shell.closing
         desktop.show_window = shell.show              # a second launch asks this copy to show its window
         # private_mode=False + storage_path keeps the dashboard's theme/language between launches
-        webview.start(shell.start_tray, (hidden,), private_mode=False, storage_path=str(home / "webview"))
+        # On Windows the window must be the Edge (WebView2) one: the old built-in engine cannot show this dashboard properly.
+        webview.start(shell.start_tray, (hidden,), private_mode=False, storage_path=str(home / "webview"),
+                      gui="edgechromium" if sys.platform == "win32" else None)
         # Window closed for real -> stop the tray, install a waiting update, and end the program.
         shell.shutdown()
         install_pending_update(home)
         logging.shutdown()
         os._exit(0)
     except Exception:
-        log.exception("Could not open the app window, using the browser instead")
-        webbrowser.open(url)
-        while True:                    # keep the bot alive
-            time.sleep(3600)
+        log.exception("Could not open the app window")
+        fail_no_window()
 
 
 if __name__ == "__main__":

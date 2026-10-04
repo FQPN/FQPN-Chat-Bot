@@ -1,5 +1,5 @@
-"""Chat-side command management: !commands add/edit/delete/options and
-!addcom / !editcom / !delcom. Pure functions on the commands dict so they
+"""Chat-side command management: !cmlist add/edit/delete/options and
+!cmadd / !cmedit / !cmdel. Pure functions on the commands dict so they
 can be tested without Twitch.
 
 Command names are exactly what the creator typed (for example "!discord",
@@ -8,7 +8,14 @@ commands below always start with "!"."""
 
 import re
 
-RESERVED = {"commands", "addcom", "editcom", "delcom", "title", "game"}   # built-ins, always typed with "!"
+# The built-in commands. The keys are the internal names (also what the settings remember); the values are what people
+# type after "!". They are deliberately NOT Nightbot's names (!commands, !addcom, !editcom, !delcom, !title, !game), so
+# running both bots in one chat never makes them answer the same message.
+BUILTIN_NAMES = {"commands": "cmlist", "addcom": "cmadd", "editcom": "cmedit", "delcom": "cmdel",
+                 "title": "settitle", "game": "setgame"}
+BUILTIN_KEYS = set(BUILTIN_NAMES)                         # internal names
+RESERVED = set(BUILTIN_NAMES.values())                    # typed names, always with "!"
+BY_TYPED = {typed: key for key, typed in BUILTIN_NAMES.items()}
 BUILTIN_PREFIX = "!"
 MAX_NAME = 60
 USERLEVELS = {
@@ -27,7 +34,7 @@ class CommandError(Exception):
 
 
 def is_reserved(name: str) -> bool:
-    """True for names that would collide with a built-in command (!title, !game, ...)."""
+    """True for names that would collide with a built-in command (!settitle, !setgame, ...)."""
     if name.startswith(BUILTIN_PREFIX):
         first = name[len(BUILTIN_PREFIX):].split(" ", 1)[0]
         return first in RESERVED
@@ -86,7 +93,7 @@ def match_command(commands: dict, text: str):
 
 def split_name(rest: str) -> tuple[str, str]:
     """Reads the command name from the start of `rest`. Put quotes around a name with spaces:
-    !commands add "hello there" Hi!  ->  ("hello there", "Hi!")"""
+    !cmadd "hello there" Hi!  ->  ("hello there", "Hi!")"""
     rest = rest.strip()
     if rest[:1] in ('"', "\u201c"):
         close = '"' if rest[0] == '"' else "\u201d"
@@ -136,10 +143,10 @@ def _resolve(commands: dict, raw: str, prefix: str = "!") -> tuple[str, str]:
 def add_command(commands: dict, rest: str, prefix: str = "!") -> str:
     raw, tail = split_name(rest)
     if not raw:
-        raise CommandError('Usage: !commands add name [-ul=level] [-cd=seconds] [-a=alias] response  (use "quotes" around a name with spaces)')
+        raise CommandError('Usage: !cmadd name [-ul=level] [-cd=seconds] [-a=alias] response  (use "quotes" around a name with spaces)')
     name = clean_name(raw)
     if name in names_in_use(commands):
-        raise CommandError(f"{name} already exists. Use !commands edit to change it.")
+        raise CommandError(f"{name} already exists. Use !cmedit to change it.")
     opts, response = parse_options(tail)
     if not response:
         raise CommandError("Add the response after the options.")
@@ -160,7 +167,7 @@ def add_command(commands: dict, rest: str, prefix: str = "!") -> str:
 def edit_command(commands: dict, rest: str, prefix: str = "!", options_only: bool = False) -> str:
     raw, tail = split_name(rest)
     if not raw:
-        raise CommandError("Usage: !commands edit name [options] new response")
+        raise CommandError("Usage: !cmedit name [options] new response")
     _, owner = _resolve(commands, raw)
     opts, response = parse_options(tail)
     if options_only and response:
@@ -185,7 +192,7 @@ def delete_command(commands: dict, rest: str, prefix: str = "!") -> tuple[str, b
     """Returns (name, was_whole_command). Deleting an alias removes only the alias."""
     raw, _ = split_name(rest)
     if not raw:
-        raise CommandError("Usage: !commands delete name")
+        raise CommandError("Usage: !cmdel name")
     name, owner = _resolve(commands, raw)
     if name != owner:
         commands[owner]["aliases"] = [a for a in commands[owner].get("aliases", []) if a != name]

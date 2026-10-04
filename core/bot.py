@@ -495,10 +495,11 @@ class TwitchBot(commands.Bot):
         if text.startswith(manage.BUILTIN_PREFIX):
             name, _, rest = text[len(manage.BUILTIN_PREFIX):].partition(" ")
             name, rest = name.lower(), rest.strip()
-            if name in manage.RESERVED:
-                if name in (self.store.get("settings").get("disabled_builtins") or []):
+            key = manage.BY_TYPED.get(name)          # what was typed (!cmadd) -> the built-in's internal name (addcom)
+            if key:
+                if key in (self.store.get("settings").get("disabled_builtins") or []):
                     return          # switched off in the dashboard (Commands > Built-in): stay silent
-                await self._builtin(payload, name, rest, user, level, manage.BUILTIN_PREFIX)
+                await self._builtin(payload, key, rest, user, level, manage.BUILTIN_PREFIX)
                 return
 
         # Custom commands: the creator chose the exact name (any symbol or none, spaces allowed)

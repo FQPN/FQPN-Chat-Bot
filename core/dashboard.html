@@ -92,12 +92,10 @@ nav a .ic{transition:transform .35s cubic-bezier(.34,1.56,.64,1)}
 nav a:hover .ic{transform:scale(1.15)}
 nav a:hover .wand{transform:scale(1.15) rotate(-14deg)}
 nav a:hover .gear{transform:scale(1.15) rotate(90deg)}
-nav a:hover .clock .hand{transform-origin:12px 12px;animation:tick .8s steps(4) 1}
 .spark{transform-origin:15px 7px}.spark2{transform-origin:19px 16px}
 nav a.on .spark{animation:twinkle 2.4s ease-in-out infinite}
 nav a.on .spark2{animation:twinkle 2.4s ease-in-out .8s infinite}
 @keyframes twinkle{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.6)}}
-@keyframes tick{to{transform:rotate(360deg)}}
 main{position:relative;overflow:hidden}
 main::before{content:"";position:absolute;width:35rem;height:35rem;right:-10rem;top:-15rem;border-radius:50%;background:radial-gradient(circle,var(--glow,rgba(163,18,26,.12)),transparent 68%);animation:drift 16s ease-in-out infinite alternate;pointer-events:none}
 .top,.wrap{position:relative;z-index:1}
@@ -320,6 +318,7 @@ body.reduce *,body.reduce *::before,body.reduce *::after{transition:none!importa
       <button type="button" role="tab" aria-selected="true" data-t="custom" data-i18n="tab_custom"></button>
       <button type="button" role="tab" aria-selected="false" tabindex="-1" data-t="default" data-i18n="tab_default"></button>
     </div>
+    <p class="note" id="binote" style="margin:0 0 .875rem" data-i18n="bi_note" hidden></p>
     <div class="bar">
       <input type="search" id="q" data-i18n-ph="search_ph" data-i18n-aria="search_ph">
       <span class="count" id="count"></span>
@@ -457,9 +456,9 @@ ban_perm:"This version needs new Twitch permissions (announcements, title and ga
 cmd_title:"Commands",cmd_sub:"Create and manage custom commands for your Twitch chat.",new_cmd:"+ New Command",tab_custom:"Custom",tab_default:"Built-in",search_ph:"Search commands…",count:"{n} commands",
 th_cmd:"Command",th_resp:"Response",th_level:"User level",th_cd:"Cooldown",th_status:"Status",th_actions:"Actions",
 empty_cmds:"No commands match. Try a different search.",empty_none:"No commands yet. Select New Command to add one.",bi_tag:"Built-in",
-bi_commands:'Lists your commands, or sends your commands page link. Moderators can manage commands with <bdi dir="ltr">{p}commands add / edit / delete</bdi>.',
-bi_addcom:'Moderators add a command from chat: <bdi dir="ltr">{p}addcom {p}name response</bdi>',bi_editcom:"Moderators change a command's response or options from chat.",bi_delcom:"Moderators delete a command, or remove one alias, from chat.",
-bi_title:'Shows the stream title. Moderators can change it: <bdi dir="ltr">{p}title new title</bdi>',bi_game:'Shows the current game. Moderators can change it: <bdi dir="ltr">{p}game game name</bdi>',
+bi_commands:'Lists your commands, or sends your commands page link. Moderators can manage commands with <bdi dir="ltr">{p}cmlist add / edit / delete</bdi>.',
+bi_addcom:'Moderators add a command from chat: <bdi dir="ltr">{p}cmadd {p}name response</bdi>',bi_editcom:"Moderators change a command's response or options from chat.",bi_delcom:"Moderators delete a command, or remove one alias, from chat.",
+bi_title:'Shows the stream title. Moderators can change it: <bdi dir="ltr">{p}settitle new title</bdi>',bi_game:'Shows the current game. Moderators can change it: <bdi dir="ltr">{p}setgame game name</bdi>',
 lvl_everyone:"Everyone",lvl_subscriber:"Subscriber",lvl_vip:"VIP",lvl_moderator:"Moderator",lvl_broadcaster:"Owner",
 copy_title:"Copy command",copied:"Copied {c}",also:"Also: ",edit_aria:"Edit {n}",delete_aria:"Delete {n}",enable_aria:"Enable {n}",
 dash_title:"Dashboard",dash_sub:"A quick look at your bot and your chat.",card_cmds:"Commands",card_cmds_sub:"{n} enabled",card_timers:"Active timers",card_status:"Bot status",
@@ -491,13 +490,13 @@ reset_all:"Reset all settings",reset_all_s:"Puts the settings on all these tabs 
 upd_title:"App updates",upd_version:"Version {v}",upd_check:"Check for updates",upd_download:"Download update",upd_install:"Restart and update",upd_dev:"running from source, so updates are off",upd_checking:"checking…",upd_uptodate:"you have the latest version",upd_available:"version {v} is available",upd_downloading:"downloading the update… {p}%",upd_ready:"version {v} is ready to install",upd_installing:"installing the update…",upd_error:"couldn't check: {m}",
 upd_confirm_q:"Install the update now?",upd_confirm_body:"The app closes for a moment and opens again with the new version. Your commands, timers and Twitch login are kept.",
 ban_upd_ready:"Version {v} is ready to install.",ban_upd_avail:"Version {v} is available.",ban_upd_dl:"Downloading the update… {p}%",ban_lost:"The connection to Twitch was lost.",ban_reconnect:"Reconnect",
-notif_test:"Send a test notification",notif_test_s:"Shows a pop-up now so you can see how it looks.",notif_test_btn:"Send test",notif_test_ok:"Test notification sent",notif_test_fail:"No pop-up could be shown (is the tray icon running?)",log_chat_by:"said by {u}",pause_aria:"Pause bot",pause_on:"Bot is paused",pause_off:"Bot is active",paused_toast:"Bot paused",resumed_toast:"Bot resumed",st_paused:"Paused",ban_paused:"The bot is paused and won't reply to anyone or send timers.",resume:"Resume",timers_title:"Timers",timers_sub:"Send messages to your chat automatically on a schedule.",new_timer:"+ New Timer",your_timers:"Your timers",no_timers:"No timers yet. Select New Timer to add one.",
+notif_test:"Send a test notification",notif_test_s:"Shows a pop-up now so you can see how it looks.",notif_test_btn:"Send test",notif_test_ok:"Test notification sent",notif_test_fail:"No pop-up could be shown (is the tray icon running?)",log_chat_by:"said by {u}",bi_note:"These built-in commands have their own names (like !cmadd) on purpose. They are different from Nightbot's (!addcom, !editcom, !delcom, !commands, !title, !game), so both bots can share your chat without answering the same message.",pause_aria:"Pause bot",pause_on:"Bot is paused",pause_off:"Bot is active",paused_toast:"Bot paused",resumed_toast:"Bot resumed",st_paused:"Paused",ban_paused:"The bot is paused and won't reply to anyone or send timers.",resume:"Resume",timers_title:"Timers",timers_sub:"Send messages to your chat automatically on a schedule.",new_timer:"+ New Timer",your_timers:"Your timers",no_timers:"No timers yet. Select New Timer to add one.",
 every:"Every {t}",mins:function(p){return p.n+" min"},timer_live_note:"Timers only send while you're live. You can change this in Settings.",
 
 bl_title:"Blocklist",bl_sub:"The bot ignores messages from blocked users and messages that contain blocked words.",bl_users:"Blocked users",bl_words:"Blocked words",bl_add:"Add",bl_user_ph:"username",bl_word_ph:"word or phrase",bl_empty:"Nothing blocked yet.",remove_aria:"Remove {n}",
 set_title:"Settings",set_sub:"Control how your bot behaves in chat.",general:"This dashboard",bot_settings:"Bot",dark:"Dark mode",dark_s:"Switch the dashboard between dark and light colors.",language:"Language",
 only_live:"Timers only while I'm live",only_live_s:"Timers stay quiet while you're offline.",live_check:"Check if I'm live every (seconds)",live_check_s:"Between 15 and 3600.",
-cmds_url:"Commands page link",cmds_url_s:"Sent when someone types the commands command. Leave empty to list the commands in chat.",save_changes:"Save changes",
+cmds_url:"Commands page link",cmds_url_s:"Sent when someone types !cmlist. Leave empty to list the commands in chat.",save_changes:"Save changes",
 t_edit_command:"Edit command",t_new_command:"New command",t_edit_timer:"Edit timer",t_new_timer:"New timer",
 m_hint1:"A command runs when a viewer's message starts with its name. Type the name exactly as viewers will: spaces are allowed, and you can start it with a symbol like ! or use none. Aliases are extra names for the same command.",lbl_cmd:"Command",lbl_alias:"Aliases",alias_ph:"!g, hello there (separate with commas)",name_ph:"!discord  or  hello there",lbl_name:"Timer name",
 lbl_resp:"Response",lbl_msg:"Message",lbl_match:"When chat says",lbl_mode:"Match type",lbl_level:"Who can use it",lbl_cd:"Cooldown (seconds)",lbl_interval:"Repeat every (minutes)",
@@ -515,9 +514,9 @@ ban_perm:"هذا الإصدار يحتاج صلاحيات جديدة من توي
 cmd_title:"الأوامر",cmd_sub:"أنشئ وأدر أوامر مخصصة لدردشة تويتش الخاصة بك.",new_cmd:"+ أمر جديد",tab_custom:"مخصصة",tab_default:"مدمجة",search_ph:"ابحث في الأوامر…",count:"الأوامر: {n}",
 th_cmd:"الأمر",th_resp:"الرد",th_level:"مستوى المستخدم",th_cd:"فترة الانتظار",th_status:"الحالة",th_actions:"الإجراءات",
 empty_cmds:"لا توجد أوامر مطابقة. جرّب بحثًا مختلفًا.",empty_none:"لا توجد أوامر بعد. اضغط «أمر جديد» لإضافة واحد.",bi_tag:"مدمج",
-bi_commands:'يعرض أوامرك أو يرسل رابط صفحة الأوامر. ويستطيع المشرفون إدارة الأوامر عبر <bdi dir="ltr">{p}commands add / edit / delete</bdi>.',
-bi_addcom:'يضيف المشرفون أمرًا من الدردشة: <bdi dir="ltr">{p}addcom {p}name response</bdi>',bi_editcom:"يغيّر المشرفون رد الأمر أو خياراته من الدردشة.",bi_delcom:"يحذف المشرفون أمرًا، أو اسمًا مستعارًا واحدًا، من الدردشة.",
-bi_title:'يعرض عنوان البث. ويستطيع المشرفون تغييره: <bdi dir="ltr">{p}title new title</bdi>',bi_game:'يعرض اللعبة الحالية. ويستطيع المشرفون تغييرها: <bdi dir="ltr">{p}game game name</bdi>',
+bi_commands:'يعرض أوامرك أو يرسل رابط صفحة الأوامر. ويستطيع المشرفون إدارة الأوامر عبر <bdi dir="ltr">{p}cmlist add / edit / delete</bdi>.',
+bi_addcom:'يضيف المشرفون أمرًا من الدردشة: <bdi dir="ltr">{p}cmadd {p}name response</bdi>',bi_editcom:"يغيّر المشرفون رد الأمر أو خياراته من الدردشة.",bi_delcom:"يحذف المشرفون أمرًا، أو اسمًا مستعارًا واحدًا، من الدردشة.",
+bi_title:'يعرض عنوان البث. ويستطيع المشرفون تغييره: <bdi dir="ltr">{p}settitle new title</bdi>',bi_game:'يعرض اللعبة الحالية. ويستطيع المشرفون تغييرها: <bdi dir="ltr">{p}setgame game name</bdi>',
 lvl_everyone:"الجميع",lvl_subscriber:"مشترك",lvl_vip:"VIP",lvl_moderator:"مشرف",lvl_broadcaster:"صاحب القناة",
 copy_title:"نسخ الأمر",copied:"تم نسخ {c}",also:"ويُستخدم أيضًا: ",edit_aria:"تعديل {n}",delete_aria:"حذف {n}",enable_aria:"تفعيل {n}",
 dash_title:"لوحة التحكم",dash_sub:"نظرة سريعة على البوت والدردشة.",card_cmds:"الأوامر",card_cmds_sub:"المفعّل: {n}",card_timers:"المؤقتات النشطة",card_status:"حالة البوت",
@@ -549,13 +548,13 @@ reset_all:"إعادة ضبط كل الإعدادات",reset_all_s:"يعيد إع
 upd_title:"تحديثات التطبيق",upd_version:"الإصدار {v}",upd_check:"البحث عن تحديثات",upd_download:"تنزيل التحديث",upd_install:"إعادة التشغيل والتحديث",upd_dev:"يعمل من الشيفرة المصدرية، لذلك التحديثات متوقفة",upd_checking:"جارٍ البحث…",upd_uptodate:"لديك أحدث إصدار",upd_available:"الإصدار {v} متاح",upd_downloading:"جارٍ تنزيل التحديث… {p}%",upd_ready:"الإصدار {v} جاهز للتثبيت",upd_installing:"جارٍ تثبيت التحديث…",upd_error:"تعذّر البحث: {m}",
 upd_confirm_q:"تثبيت التحديث الآن؟",upd_confirm_body:"يُغلق التطبيق لحظة ثم يفتح من جديد بالإصدار الجديد. تبقى أوامرك ومؤقتاتك وحساب تويتش كما هي.",
 ban_upd_ready:"الإصدار {v} جاهز للتثبيت.",ban_upd_avail:"الإصدار {v} متاح.",ban_upd_dl:"جارٍ تنزيل التحديث… {p}%",ban_lost:"انقطع الاتصال بتويتش.",ban_reconnect:"إعادة الاتصال",
-notif_test:"إرسال إشعار تجريبي",notif_test_s:"يعرض نافذة منبثقة الآن لترى شكلها.",notif_test_btn:"إرسال تجربة",notif_test_ok:"تم إرسال الإشعار التجريبي",notif_test_fail:"تعذّر عرض إشعار (هل أيقونة علبة النظام تعمل؟)",log_chat_by:"كتبه {u}",pause_aria:"إيقاف البوت مؤقتًا",pause_on:"البوت متوقف مؤقتًا",pause_off:"البوت يعمل",paused_toast:"تم إيقاف البوت مؤقتًا",resumed_toast:"تم استئناف البوت",st_paused:"متوقف مؤقتًا",ban_paused:"البوت متوقف مؤقتًا ولن يرد على أحد ولن يرسل المؤقتات.",resume:"استئناف",timers_title:"المؤقتات",timers_sub:"أرسل رسائل إلى الدردشة تلقائيًا حسب جدول زمني.",new_timer:"+ مؤقت جديد",your_timers:"مؤقتاتك",no_timers:"لا توجد مؤقتات بعد. اضغط «مؤقت جديد» لإضافة واحد.",
+notif_test:"إرسال إشعار تجريبي",notif_test_s:"يعرض نافذة منبثقة الآن لترى شكلها.",notif_test_btn:"إرسال تجربة",notif_test_ok:"تم إرسال الإشعار التجريبي",notif_test_fail:"تعذّر عرض إشعار (هل أيقونة علبة النظام تعمل؟)",log_chat_by:"كتبه {u}",bi_note:"لهذه الأوامر المدمجة أسماؤها الخاصة (مثل !cmadd) عن قصد. وهي تختلف عن أسماء Nightbot (!addcom و!editcom و!delcom و!commands و!title و!game)، فيستطيع البوتان مشاركة دردشتك دون أن يرد كلاهما على الرسالة نفسها.",pause_aria:"إيقاف البوت مؤقتًا",pause_on:"البوت متوقف مؤقتًا",pause_off:"البوت يعمل",paused_toast:"تم إيقاف البوت مؤقتًا",resumed_toast:"تم استئناف البوت",st_paused:"متوقف مؤقتًا",ban_paused:"البوت متوقف مؤقتًا ولن يرد على أحد ولن يرسل المؤقتات.",resume:"استئناف",timers_title:"المؤقتات",timers_sub:"أرسل رسائل إلى الدردشة تلقائيًا حسب جدول زمني.",new_timer:"+ مؤقت جديد",your_timers:"مؤقتاتك",no_timers:"لا توجد مؤقتات بعد. اضغط «مؤقت جديد» لإضافة واحد.",
 every:"كل {t}",mins:function(p){var n=p.n;return n==1?"دقيقة":n==2?"دقيقتين":n<=10?n+" دقائق":n+" دقيقة"},timer_live_note:"لا تُرسل المؤقتات إلا أثناء البث المباشر. يمكنك تغيير ذلك من الإعدادات.",
 
 bl_title:"قائمة الحظر",bl_sub:"يتجاهل البوت رسائل المستخدمين المحظورين والرسائل التي تحتوي على كلمات محظورة.",bl_users:"المستخدمون المحظورون",bl_words:"الكلمات المحظورة",bl_add:"إضافة",bl_user_ph:"اسم المستخدم",bl_word_ph:"كلمة أو عبارة",bl_empty:"لا يوجد شيء محظور بعد.",remove_aria:"إزالة {n}",
 set_title:"الإعدادات",set_sub:"تحكم في طريقة عمل البوت في الدردشة.",general:"لوحة التحكم هذه",bot_settings:"البوت",dark:"الوضع الداكن",dark_s:"بدّل لوحة التحكم بين الألوان الداكنة والفاتحة.",language:"اللغة",
 only_live:"المؤقتات أثناء البث فقط",only_live_s:"تبقى المؤقتات صامتة عندما لا تكون مباشرًا.",live_check:"التحقق من البث كل (ثانية)",live_check_s:"بين 15 و3600.",
-cmds_url:"رابط صفحة الأوامر",cmds_url_s:"يُرسل عندما يكتب أحدهم أمر الأوامر. اتركه فارغًا ليعرض البوت الأوامر في الدردشة.",save_changes:"حفظ التغييرات",
+cmds_url:"رابط صفحة الأوامر",cmds_url_s:"يُرسل عندما يكتب أحدهم !cmlist. اتركه فارغًا ليعرض البوت الأوامر في الدردشة.",save_changes:"حفظ التغييرات",
 t_edit_command:"تعديل الأمر",t_new_command:"أمر جديد",t_edit_timer:"تعديل المؤقت",t_new_timer:"مؤقت جديد",
 m_hint1:"يعمل الأمر عندما تبدأ رسالة المشاهد باسمه. اكتب الاسم تمامًا كما سيكتبه المشاهدون: المسافات مسموحة، ويمكنك البدء برمز مثل ! أو بدونه. الأسماء المستعارة هي أسماء إضافية لنفس الأمر.",lbl_cmd:"الأمر",lbl_alias:"الأسماء المستعارة",alias_ph:"!g، مرحبا بك (افصل بينها بفاصلة)",name_ph:"!discord  أو  مرحبا بك",lbl_name:"اسم المؤقت",
 lbl_resp:"الرد",lbl_msg:"الرسالة",lbl_match:"عندما يكتب أحدهم",lbl_mode:"نوع المطابقة",lbl_level:"من يستخدمه",lbl_cd:"فترة الانتظار (بالثواني)",lbl_interval:"التكرار كل (دقيقة)",
@@ -646,6 +645,7 @@ vc.addEventListener("focusin",function(e){var b=e.target.closest(".chip");if(b)s
 
 /* ===================== rendering ===================== */
 var BUILTINS=[["commands","everyone",10],["addcom","moderator",null],["editcom","moderator",null],["delcom","moderator",null],["title","everyone",5],["game","everyone",5]];
+var BNAME={commands:"cmlist",addcom:"cmadd",editcom:"cmedit",delcom:"cmdel",title:"settitle",game:"setgame"};   // what people type after "!" (must match BUILTIN_NAMES in core/manage.py)
 var EDIT_SVG='<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
 var DEL_SVG='<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5"/></svg>';
 function actBtns(label){return '<div class="act"><button class="edit" aria-label="'+attr(t("edit_aria",{n:label}))+'">'+EDIT_SVG+'</button><button class="del" aria-label="'+attr(t("delete_aria",{n:label}))+'">'+DEL_SVG+'</button></div>'}
@@ -660,10 +660,10 @@ function renderCommands(){
   }else{
     var off=D.settings.disabled_builtins||[];   // built-ins have no edit or delete: just a Status switch
     head='<div class="row head b5"><span>'+t("th_cmd")+'</span><span>'+t("th_resp")+'</span><span>'+t("th_level")+'</span><span>'+t("th_cd")+'</span><span>'+t("th_status")+'</span></div>';
-    BUILTINS.forEach(function(b,i){if(q&&(b[0]).indexOf(q)<0)return;n++;var dis=off.indexOf(b[0])>=0;
-      rows+='<div class="row b5'+(dis?' dim':'')+'" data-b="'+b[0]+'" style="--i:'+i+'"><span class="cmd static" dir="auto">'+pe+b[0]+'</span><div class="msg">'+t("bi_"+b[0],{p:pe})+'</div><span class="lvl '+lvCls(b[1])+'">'+lvText(b[1])+'</span><span class="cd">'+(b[2]==null?"—":fmtCd(b[2]))+'</span>'+swBtn(!dis,pe+b[0])+'</div>'})
+    BUILTINS.forEach(function(b,i){var typed=BNAME[b[0]];if(q&&typed.indexOf(q)<0)return;n++;var dis=off.indexOf(b[0])>=0;
+      rows+='<div class="row b5'+(dis?' dim':'')+'" data-b="'+b[0]+'" style="--i:'+i+'"><span class="cmd static" dir="auto">'+pe+typed+'</span><div class="msg">'+t("bi_"+b[0],{p:pe})+'</div><span class="lvl '+lvCls(b[1])+'">'+lvText(b[1])+'</span><span class="cd">'+(b[2]==null?"—":fmtCd(b[2]))+'</span>'+swBtn(!dis,pe+typed)+'</div>'})
   }
-  $("count").textContent=t("count",{n:n});$("list").className="tbl"+(anim?" fresh":"");$("list").innerHTML=head+rows}
+  $("binote").hidden=tab!="default";$("count").textContent=t("count",{n:n});$("list").className="tbl"+(anim?" fresh":"");$("list").innerHTML=head+rows}
 function renderTimers(){
   var h='<h2>'+t("your_timers")+'</h2>';if(!D.timers.length)h+='<div class="empty">'+t("no_timers")+'</div>';
   D.timers.forEach(function(tm,i){h+='<div class="line" data-i="'+i+'"><div class="grow"><b dir="auto">'+esc(tm.name)+'</b><small dir="auto">'+esc(tm.message)+'</small></div><span class="cd">'+t("every",{t:fmtMin(tm.interval_minutes)})+'</span>'+swBtn(tm.enabled,tm.name)+actBtns(tm.name)+'</div>'});

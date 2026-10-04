@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import time
-import webbrowser
 
 from core import auth, dashboard, desktop, notify, updater
 from core.bot import TwitchBot
@@ -11,7 +10,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("twitchbot")
 
 
-async def main(open_browser=True):
+async def main(open_browser=False):    # open_browser is ignored: the dashboard is only shown in the app window
     store = Store()
     store.apply_launch_defaults()   # "Start the bot when the app opens" (Settings > Bot)
     state = {"bot": None, "account": None}   # shared with the dashboard
@@ -27,8 +26,6 @@ async def main(open_browser=True):
     # The dashboard starts first so it's available even if Twitch is down.
     try:
         await dashboard.start(store, state)
-        if open_browser:   # the installed app shows its own window instead
-            webbrowser.open(f"http://localhost:{dashboard.PORT}")
     except OSError:
         print(f"Could not start the dashboard: port {dashboard.PORT} is already in use "
               "(is the bot already running?). The bot will still run.")
@@ -95,6 +92,7 @@ async def main(open_browser=True):
 
 
 if __name__ == "__main__":
+    print("The bot is starting without an app window. To open the app, run:  python launcher.py")
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
