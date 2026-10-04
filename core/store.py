@@ -42,6 +42,7 @@ DEFAULTS = {
         "live_check_seconds": 60,
         "commands_url": "",
         "disabled_builtins": [],   # built-in commands switched off in Commands > Built-in
+        "separate_bot": False,     # the bot talks from its own Twitch account (Settings > Bot > Chat account)
     },
     "prefs": {   # how the installed app behaves (Settings > App, Notifications, Logs and data)
         "startup": False,          # start with Windows
@@ -84,6 +85,9 @@ DEFAULTS = {
             {"min": 100, "response": "{user} JUST DROPPED {bits} BITS! \U0001f525"},
             {"min": 500, "response": "{user} WITH {bits} BITS!!! \U0001f6a8"},
             {"min": 1000, "response": "{user} JUST DROPPED {bits} BITS!!! ABSOLUTE MADNESS! \U0001f525\U0001f525\U0001f525"}]},
+        "donation": {"enabled": False, "tiers": [      # replies by amount (in the donation's own currency)
+            {"min": 0, "response": "Thank you {user} for the {amount} {currency} donation! \u2764\ufe0f"},
+            {"min": 50, "response": "WOW! {user} donated {amount} {currency}! You are amazing! \U0001f525"}]},
     },
     "greetings": {"enabled": True, "users": []},   # people to greet, each with one or more messages
     "greeted": {"session": "", "users": [], "last": {}},   # who was already greeted during the current stream

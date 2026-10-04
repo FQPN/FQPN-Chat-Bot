@@ -14,7 +14,7 @@ import twitchio
 from twitchio import eventsub
 from twitchio.ext import commands
 
-from . import auth, events, greetings, manage, notify
+from . import auth, botauth, events, greetings, manage, notify
 from .manage import CommandError
 from .store import Store
 from .variables import Context, expand, uses_variable
@@ -64,8 +64,12 @@ def format_duration(seconds: float) -> str:
 
 
 class TwitchBot(commands.Bot):
-    def __init__(self, account: dict, store: Store | None = None):
+    def __init__(self, account: dict, store: Store | None = None, bot_account: dict | None = None):
+        # account = your channel account. bot_account = a separate account that writes the replies ("Use a separate bot
+        # account" in Settings > Bot); without it the bot talks as your own account, exactly as before.
         self.account = account
+        self.bot_account = bot_account or account
+        self.separate = bot_account is not None and str(bot_account["user_id"]) != str(account["user_id"])
         self.store = store or Store()
         self.connected = False
         self.is_live = False
@@ -87,16 +91,18 @@ class TwitchBot(commands.Bot):
         super().__init__(
             client_id=auth.CLIENT_ID,
             client_secret=None,  # Public client: no secret
-            bot_id=account["user_id"],
-            owner_id=account["user_id"],
+            bot_id=self.bot_account["user_id"],     # who writes in chat
+            owner_id=account["user_id"],            # whose channel it is
             prefix=manage.BUILTIN_PREFIX,   # only used for the built-in commands
         )
 
     # ---------- lifecycle ----------
 
     async def setup_hook(self) -> None:
-        # Hand the token to TwitchIO so it keeps it refreshed.
+        # Hand the token(s) to TwitchIO so it keeps them refreshed.
         await self.add_token(self.account["access_token"], self.account["refresh_token"])
+        if self.separate:
+            await self.add_token(self.bot_account["access_token"], self.bot_account["refresh_token"])
 
         await self.subscribe_websocket(
             payload=eventsub.ChatMessageSubscription(
@@ -121,11 +127,24 @@ class TwitchBot(commands.Bot):
 
     async def event_ready(self) -> None:
         self.connected = True
-        log.info("Bot ready, connected as %s", self.account["login"])
+        if self.separate:
+            log.info("Bot ready: %s writes in the chat of %s", self.bot_account["login"], self.account["login"])
+        else:
+            log.info("Bot ready, connected as %s", self.account["login"])
 
     async def event_token_refreshed(self, payload) -> None:
-        # Keep our saved token in sync with what TwitchIO refreshed.
-        if str(payload.user_id) == str(self.bot_id):
+        # Keep our saved token in sync with what TwitchIO refreshed (each account has its own file).
+        uid = str(payload.user_id)
+        if self.separate and uid == str(self.bot_id):
+            botauth.save_token(
+                {
+                    "access_token": payload.token,
+                    "refresh_token": payload.refresh_token,
+                    "expires_at": time.time() + int(payload.expires_in),
+                    "scopes": list(payload.scopes) if payload.scopes else botauth.SCOPES,
+                }
+            )
+        elif uid == str(self.owner_id):
             auth.save_token(
                 {
                     "access_token": payload.token,
@@ -189,8 +208,18 @@ class TwitchBot(commands.Bot):
             text = body
 
         text = text[:500]
-        sent = await payload.respond(text) if payload is not None else await owner.send_message(text, sender=self.bot_id)
+        if payload is not None and not self.separate:
+            sent = await payload.respond(text)
+        else:   # a separate bot account (or a message with no trigger): say who sends it
+            sent = await owner.send_message(text, sender=self.bot_id)
         self._remember(text, sent)
+
+    async def send_test(self) -> str:
+        """The dashboard's "Send test message": says hello from the account the replies come from."""
+        name = self.bot_account["login"]
+        await self._send(f"Hello from {name}!")
+        self._log_activity("manage", "test message", name)
+        return name
 
     def _is_own_echo(self, payload) -> bool:
         if payload.id in self._sent_ids:
@@ -225,7 +254,7 @@ class TwitchBot(commands.Bot):
 
     async def _channel_info(self):
         if self._chan is None or time.time() - self._chan_ts > 20:
-            infos = await self.fetch_channels([self.owner_id], token_for=self.bot_id)
+            infos = await self.fetch_channels([self.owner_id], token_for=self.owner_id)
             self._chan, self._chan_ts = infos[0], time.time()
         return self._chan
 
@@ -249,7 +278,7 @@ class TwitchBot(commands.Bot):
         if hit and time.time() < hit[0]:
             return hit[1]
         owner = self.create_partialuser(self.owner_id)
-        result = await owner.fetch_followers(user=chatter_id, token_for=self.bot_id)
+        result = await owner.fetch_followers(user=chatter_id, token_for=self.owner_id)
         when = None
         async for f in result.followers:
             when = f.followed_at
@@ -285,14 +314,18 @@ class TwitchBot(commands.Bot):
         async def attempt(name, *makers):
             try:
                 for make in makers:
-                    await self.subscribe_websocket(payload=make())
+                    if self.separate:   # these belong to the channel: they use your channel account's login, not the bot's
+                        await self.subscribe_websocket(payload=make(), token_for=self.owner_id)
+                    else:
+                        await self.subscribe_websocket(payload=make())
                 self.event_problems.pop(name, None)
             except Exception as e:
                 self.event_problems[name] = str(e)[:160] or e.__class__.__name__
                 log.warning("Can't listen for %s events (%s). They need an extra Twitch permission: add it to auth.py and reconnect.",
                             name, e.__class__.__name__)
-        owner, bot = self.owner_id, self.bot_id
-        await attempt("follow", lambda: eventsub.ChannelFollowSubscription(broadcaster_user_id=owner, moderator_user_id=bot))
+        owner = self.owner_id
+        # you are always allowed to see your own followers, so with a separate bot account you are the "moderator" here
+        await attempt("follow", lambda: eventsub.ChannelFollowSubscription(broadcaster_user_id=owner, moderator_user_id=owner))
         await attempt("hype_train",
                       lambda: eventsub.HypeTrainBeginSubscription(broadcaster_user_id=owner),
                       lambda: eventsub.HypeTrainProgressSubscription(broadcaster_user_id=owner),
@@ -317,7 +350,7 @@ class TwitchBot(commands.Bot):
             notify.event(self.store.get("prefs"), key, user, value, extra)
         except Exception:
             log.exception("Notification failed")
-        if self.store.get("settings").get("paused"):
+        if self.store.get("settings").get("paused") or (extra or {}).get("_no_reply"):
             return
         template = events.pick_reply(self.store.get("events"), key, value)
         if template is None:
@@ -328,8 +361,25 @@ class TwitchBot(commands.Bot):
         if key == "watch_streak":
             ctx.streak = value
         label = key.replace("_", " ")
-        self._log_activity("event", f"{label} {value}" if value else label, user)
+        if key == "donation":
+            self._log_activity("event", f"donation {ctx.extra.get('amount', value)} {ctx.extra.get('currency', '')}".strip(), user)
+        else:
+            self._log_activity("event", f"{label} {value}" if value else label, user)
         await self._send(await expand(template, ctx))
+
+    async def on_donation(self, d: dict) -> None:
+        """A donation arrived from Streamlabs or StreamElements (see donations.py): thank the donor in chat."""
+        amount = d["amount"]
+        shown = f"{int(amount)}" if amount == int(amount) else f"{amount:.2f}"
+        block = self.store.get("blocklist")
+        text = f"{d['user']} {d['message']}".lower()
+        muted = any(w.lower() in text for w in block.get("words", []) if w)    # a blocked word in the name or note: no public reply
+        extra = {"amount": shown, "currency": d["currency"], "message": d["message"]}
+        if muted:
+            extra["_no_reply"] = True
+        login = d["user"].lower().replace(" ", "_")
+        await self._fire_event("donation", amount, d["user"], login, extra=extra,
+                               dedupe=f"{d['service']}:{d['id']}" if d.get("id") else None)
 
     async def event_chat_notification(self, payload) -> None:
         """Subs, gifts, raids and watch streaks arrive here (needs no extra permission)."""
@@ -472,6 +522,8 @@ class TwitchBot(commands.Bot):
         # streamer's account), only the bot's own replies.
         if payload.source_broadcaster is not None or self._is_own_echo(payload):
             return
+        if self.separate and str(getattr(payload.chatter, "id", "")) == str(self.bot_id):
+            return      # whatever the bot account writes is never treated as a command
         if self._is_blocked(payload):
             return
         self._log_chat(payload)
@@ -568,7 +620,7 @@ class TwitchBot(commands.Bot):
         if name == "game":
             if rest and is_mod:
                 try:
-                    games = await self.fetch_games(names=[rest], token_for=self.bot_id)
+                    games = await self.fetch_games(names=[rest], token_for=self.owner_id)
                     if not games:
                         await self._send(f"Couldn't find a game called '{rest}' on Twitch.", payload)
                         return

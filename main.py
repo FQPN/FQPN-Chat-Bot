@@ -2,7 +2,7 @@ import asyncio
 import logging
 import time
 
-from core import auth, dashboard, desktop, notify, updater
+from core import auth, botauth, dashboard, desktop, donations, notify, updater
 from core.bot import TwitchBot
 from core.store import Store
 
@@ -23,6 +23,14 @@ async def main(open_browser=False):    # open_browser is ignored: the dashboard 
     state["update_loop"] = asyncio.create_task(updater.loop(updater.U, store, state["update_wake"]))
     last_error_notice = 0.0
 
+    async def on_donation(d):   # a donation from Streamlabs / StreamElements: the running bot thanks the donor in chat
+        bot = state.get("bot")
+        if bot is not None and bot.connected:
+            await bot.on_donation(d)
+
+    state["donations"] = donations.DonationManager(on_donation)
+    await state["donations"].start()        # reconnects to the services that have a saved token
+
     # The dashboard starts first so it's available even if Twitch is down.
     try:
         await dashboard.start(store, state)
@@ -30,6 +38,7 @@ async def main(open_browser=False):    # open_browser is ignored: the dashboard 
         print(f"Could not start the dashboard: {e}. The bot will still run.")
 
     state["login"] = {"status": "idle"}
+    state["bot_login"] = {"status": "idle"}      # the login of the separate bot account
     state["wake"] = asyncio.Event()
     auto_login = True    # first start: begin "Connect Twitch" automatically, like before
 
@@ -38,6 +47,7 @@ async def main(open_browser=False):    # open_browser is ignored: the dashboard 
     while True:
         state["wake"].clear()
         state["lost"] = False
+        state["restart"] = False
         account = await auth.get_account()
         if account is None:
             state["account"] = None
@@ -57,11 +67,26 @@ async def main(open_browser=False):    # open_browser is ignored: the dashboard 
         print(f"Connected as {account['login']}")
         state["account"] = account["login"]
         state["avatar_task"] = asyncio.create_task(dashboard.load_avatar(state, account))   # profile picture for the dashboard
-        bot = TwitchBot(account, store)
+        state["account_id"] = account["user_id"]
+
+        # "Use a separate bot account" (Settings > Bot): another Twitch account writes the replies in your chat.
+        bot_account = await botauth.get_account()          # None when no bot account is connected
+        state["bot_account"] = bot_account["login"] if bot_account else None
+        separate = bool(store.get("settings").get("separate_bot"))
+        if separate and bot_account is None:
+            # The option is on but there is no bot account yet: stay silent (never talk as your own account by surprise)
+            # and wait until the Connect button finishes or the option is switched off.
+            state["bot"] = None
+            print("The separate bot account is switched on but not connected. Waiting for it to be connected...")
+            await state["wake"].wait()
+            continue
+        if separate and state.get("bot_mod") is None:
+            state["mod_task"] = asyncio.create_task(dashboard.refresh_bot_mod(state))
+        bot = TwitchBot(account, store, bot_account=bot_account if separate else None)
         state["bot"] = bot
         try:
             await bot.start(
-                token=account["access_token"],
+                token=(bot_account if separate else account)["access_token"],
                 with_adapter=False,   # no local web server needed for chat
                 load_tokens=False,
                 save_tokens=False,
@@ -76,6 +101,8 @@ async def main(open_browser=False):    # open_browser is ignored: the dashboard 
         finally:
             await bot.close()
         if auth.load_token() is None:     # disconnected from the dashboard
+            continue
+        if state.get("restart"):          # a setting changed (separate bot account on/off, a new bot account): start again now
             continue
         prefs = store.get("prefs")
         if not prefs.get("auto_reconnect", True):

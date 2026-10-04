@@ -80,6 +80,7 @@ In detail:
 - The dashboard page loads its fonts (Outfit and Tajawal) from Google Fonts.
 - Commands, timers, greetings, events and settings are stored only on your computer, in `%APPDATA%\TwitchChatBot\data`.
 - There is no telemetry and no analytics. If **Check for updates automatically** is on (Settings > App, you can switch it off), the app asks GitHub for the newest release now and then and downloads its installer from this project's GitHub releases.
+- If you connect **Streamlabs** or **StreamElements** (Settings > Donations), the app connects to that service with your token to receive donation alerts. The token is stored encrypted with Windows' own protection, only on your PC, and is never shown again; **Disconnect & remove** deletes it.
 - Pop-ups, the tray icon and the saved logs work entirely on your computer. Chat messages are only saved if you switch on **Log chat messages**.
 
 ## License

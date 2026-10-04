@@ -183,6 +183,60 @@ main::before{content:"";position:absolute;width:35rem;height:35rem;right:-10rem;
 .btn.danger{background:#b4161d;border-color:#d11f27}.btn.danger:hover{background:#d11f27}
 .btn:disabled{opacity:.6;cursor:wait}
 .sheet.small{max-width:26.25rem}
+.dcards{display:flex;flex-direction:column;gap:0.875rem;padding:0.375rem 1.5rem 1.5rem}
+.dcard{border:1px solid var(--line);border-radius:0.875rem;background:var(--bg);padding:1.25rem 1.375rem;display:flex;flex-direction:column;gap:0.875rem}
+.dhead{display:flex;align-items:center;gap:0.875rem}
+.dhead b{display:block;font-size:1.0625rem;font-weight:600}
+.dhead small{display:block;color:var(--mute);font-size:0.8438rem;margin-top:2px}
+.dico{width:2.75rem;height:2.75rem;border-radius:0.75rem;background:var(--chip);color:var(--soft);display:grid;place-items:center;font-size:1.25rem;font-weight:600;flex:none}
+.ddot{margin-inline-start:auto;width:0.5625rem;height:0.5625rem;border-radius:50%;background:var(--off);flex:none}
+.ddot.ok{background:#22c984;box-shadow:0 0 0.5rem rgba(34,201,132,.6)}.ddot.wait{background:#f59e0b}.ddot.bad{background:#ff5a5f}
+.dst.ok{color:#22c984}.dst.wait{color:#f59e0b}.dst.bad{color:#ff7b82}
+.drow{display:flex;align-items:center;gap:0.875rem;flex-wrap:wrap}
+.drow input{flex:1;min-width:13.75rem;border:1px solid var(--line);background:var(--panel);color:var(--text);padding:0.75rem 1rem;border-radius:0.625rem;font:0.9375rem 'Outfit','Tajawal',sans-serif;direction:ltr;text-align:left}
+.dlabel{font-weight:500;font-size:0.875rem;margin-bottom:-0.375rem}
+.dok{color:#22c984;font-weight:600}
+.dwarn{margin:0;color:#f59e0b;font-size:0.8438rem;line-height:1.45}
+.dhint{margin:0;color:var(--mute);font-size:0.8125rem;line-height:1.5}
+@media (max-width:900px){.dcards{padding-left:0.875rem;padding-right:0.875rem}.dcard{padding:1rem}}
+/* ===== PREVIEW: styling of the planned "separate bot account" screens (rem units, so Font size still scales them) ===== */
+.bacgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(16rem,1fr));gap:.875rem;padding:1rem 1.5rem 1.125rem;border-top:1px solid var(--line)}
+.acard{border:1px solid var(--line);border-radius:.625rem;padding:1rem;background:var(--bg);display:flex;flex-direction:column;gap:.625rem}
+.acard.dash{border-style:dashed}
+.ahead{display:flex;align-items:center;gap:.75rem}
+.ahead b{display:block;font-size:1.0625rem;unicode-bidi:isolate;line-height:1.2}
+.ahead small{display:block;color:var(--mute);font-size:.8125rem}
+.aav{width:2.75rem;height:2.75rem;border-radius:50%;display:grid;place-items:center;flex:none;background:var(--chip);color:var(--soft);font-weight:600;font-size:1.0625rem}
+.aav.bot{background:var(--menu-h);color:var(--red2)}
+.aav.add{border:2px dashed var(--line);background:none;font-size:1.375rem;color:var(--mute);font-weight:400}
+.aav svg{width:1.375rem;height:1.375rem}
+.astat{margin-inline-start:auto;font-size:.75rem;font-weight:600;border-radius:62rem;padding:.1875rem .625rem;border:1px solid var(--line);color:var(--mute);white-space:nowrap;display:inline-flex;align-items:center;gap:.375rem}
+.astat::before{content:"";width:.4375rem;height:.4375rem;border-radius:50%;background:currentColor}
+.astat.ok{color:#3fb871;border-color:rgba(63,184,113,.4)}
+.astat.wait{color:#f59e0b;border-color:rgba(245,158,11,.4)}
+.ahint{margin:0;color:var(--mute);font-size:.8125rem;line-height:1.45}
+.aact{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:auto}
+.modline{display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;padding:.875rem 1.5rem;border-top:1px solid var(--line)}
+.modline .grow{flex:1;min-width:14rem}.modline .grow small{display:block;color:var(--mute);font-size:.8125rem;margin-top:.125rem}
+.modline.ok .tick{color:#3fb871}.modline.warn{background:rgba(245,158,11,.06)}.modline.warn .tick{color:#f59e0b}
+.tick{width:1.25rem;height:1.25rem;flex:none}
+.codechip{font:600 .8125rem ui-monospace,Menlo,Consolas,monospace;background:var(--chip);border:1px solid var(--line);border-radius:.375rem;padding:.1875rem .5rem;direction:ltr;unicode-bidi:isolate;display:inline-block}
+.chatprev{margin:.25rem 1.5rem 1.25rem;border-radius:.625rem;background:#0e0e10;color:#efeff1;padding:.75rem .875rem;font-size:.8125rem;line-height:1.8;max-width:36rem;direction:ltr;text-align:left}
+.chatprev .nm{font-weight:700}.chatprev .mute{color:#adadb8;font-style:italic}
+.chatprev .bd{display:inline-grid;place-items:center;width:1rem;height:1rem;border-radius:.1875rem;margin-inline-end:.3125rem;vertical-align:-.1875rem}
+.chatprev .bd.mod{background:#00ad03}.chatprev .bd.bc{background:#e91916}.chatprev .bd svg{width:.6875rem;height:.6875rem;color:var(--on-red,#fff)}
+.chatlbl{padding:.875rem 1.5rem .5rem;font-weight:500}
+.botrow{display:flex;align-items:center;gap:.5rem;margin:.375rem .625rem 0;padding:.4375rem .625rem;border:1px dashed var(--line);border-radius:.625rem;font-size:.8125rem;cursor:pointer;color:var(--soft);background:none;width:calc(100% - 1.25rem);font-family:inherit;text-align:start}
+.botrow:hover{background:var(--hover)}
+.botrow .aav{width:1.75rem;height:1.75rem;font-size:.75rem}.botrow .aav svg{width:1rem;height:1rem}
+.botrow b{display:block;font-size:.8125rem;line-height:1.15;unicode-bidi:isolate;color:var(--text)}.botrow i{font-style:normal;font-size:.6875rem;color:var(--mute)}
+.botrow i.ok{color:#3fb871}.botrow i.wait{color:#f59e0b}
+.steps{list-style:none;padding:0;margin:.5rem 0 0;display:flex;flex-direction:column;gap:.875rem}
+.steps li{display:flex;gap:.75rem;align-items:flex-start}
+.steps li>b{flex:none;width:1.5rem;height:1.5rem;border-radius:50%;background:var(--red);color:var(--on-red,#fff);display:grid;place-items:center;font-size:.8125rem}
+.steps small{display:block;color:var(--mute);font-size:.8125rem;margin-top:.125rem}
+@media (max-width:900px){.chatprev{margin-left:.875rem;margin-right:.875rem}.bacgrid{padding-left:.875rem;padding-right:.875rem}.modline,.chatlbl{padding-left:.875rem;padding-right:.875rem}}
+
 .unotes{background:var(--bg);border:1px solid var(--line);border-radius:0.5rem;padding:0.625rem 0.75rem;max-height:9.375rem;overflow:auto;font-size:0.8125rem;line-height:1.5;color:var(--soft);white-space:pre-wrap;overflow-wrap:anywhere;margin:0.375rem 0 0.625rem}
 .uprog{height:0.5rem;border-radius:62.4375rem;background:var(--chip);overflow:hidden;margin:0.5rem 0}
 .uprog i{display:block;height:100%;width:0;background:var(--red2);border-radius:62.4375rem;transition:width .3s}
@@ -247,7 +301,8 @@ body.reduce *,body.reduce *::before,body.reduce *::after{transition:none!importa
 .sheet[data-evk=gift_sub] .chip[data-ev~=gift_sub],
 .sheet[data-evk=raid] .chip[data-ev~=raid],
 .sheet[data-evk=hype_train] .chip[data-ev~=hype_train],
-.sheet[data-evk=bits] .chip[data-ev~=bits]{display:inline-flex}
+.sheet[data-evk=bits] .chip[data-ev~=bits],
+.sheet[data-evk=donation] .chip[data-ev~=donation]{display:inline-flex}
 .msgbox{background:var(--bg);border:1px solid var(--line);border-radius:0.5rem;padding:0.75rem 0.875rem;max-width:42.5rem;white-space:pre-wrap;overflow-wrap:anywhere;margin-bottom:0.625rem}
 .evcard{margin-bottom:1rem}
 .warnline{color:#f59e0b}
@@ -300,6 +355,7 @@ body.reduce *,body.reduce *::before,body.reduce *::after{transition:none!importa
       <span class="who"><b dir="ltr" id="acname">FQPN_</b><i id="st" class="st-off"><span class="dot"></span><span id="stt"></span></i></span>
       <span class="tw"><svg width="26" height="26" viewBox="0 0 24 24" fill="#9146ff" aria-label="Twitch"><path d="M4 2 2.5 6v14H8v3h3l3-3h4l4.5-4.5V2H4zm16 12-3 3h-5l-3 3v-3H6V4h14v10zM17 7.5h-2v5h2v-5zm-5 0h-2v5h2v-5z"/></svg><svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg></span>
     </button>
+    <button class="botrow" id="botrow" type="button" hidden></button>
   </div>
 </aside>
 <main>
@@ -368,6 +424,7 @@ body.reduce *,body.reduce *::before,body.reduce *::after{transition:none!importa
       <button type="button" role="tab" id="stab-a" aria-controls="spane-a" aria-selected="true" data-st="a" data-i18n="set_tab_appearance"></button>
       <button type="button" role="tab" id="stab-app" aria-controls="spane-app" aria-selected="false" tabindex="-1" data-st="app" data-i18n="set_tab_app"></button>
       <button type="button" role="tab" id="stab-b" aria-controls="spane-b" aria-selected="false" tabindex="-1" data-st="b" data-i18n="set_tab_bot"></button>
+      <button type="button" role="tab" id="stab-d" aria-controls="spane-d" aria-selected="false" tabindex="-1" data-st="d" data-i18n="set_tab_donations"></button>
       <button type="button" role="tab" id="stab-n" aria-controls="spane-n" aria-selected="false" tabindex="-1" data-st="n" data-i18n="set_tab_notif"></button>
       <button type="button" role="tab" id="stab-l" aria-controls="spane-l" aria-selected="false" tabindex="-1" data-st="l" data-i18n="set_tab_logs"></button>
     </div>
@@ -398,11 +455,26 @@ body.reduce *,body.reduce *::before,body.reduce *::after{transition:none!importa
 
     <div class="panel" id="spane-b" role="tabpanel" aria-labelledby="stab-b" hidden>
       <div class="h2row" style="border-top:0"><h2 data-i18n="bot_settings"></h2><div class="pause" id="pausebox"><span id="pausetxt"></span><button class="sw" id="pausesw" role="switch" aria-checked="false" data-i18n-aria="pause_aria"></button></div></div>
-      <div class="line"><div class="grow"><span data-i18n="start_active"></span><small data-i18n="start_active_s"></small></div><button class="sw" id="sasw" role="switch" aria-checked="true" data-i18n-aria="start_active"></button></div>
+      <div class="h2row"><h2 data-i18n="bac_title"></h2></div>
+      <div class="line" style="border-top:0"><div class="grow"><span data-i18n="bac_use"></span><small data-i18n="bac_use_s"></small></div><button class="sw" id="bacsw" role="switch" aria-checked="false" data-i18n-aria="bac_use"></button></div>
+      <div id="bacbox" hidden>
+        <div class="bacgrid" id="bac-cards"></div>
+        <div class="modline" id="bacmod" hidden></div>
+        <div class="line"><div class="grow"><span data-i18n="bac_test"></span><small id="bactestl"></small></div><button class="ghost" id="bactest" type="button" data-i18n="bac_test_btn"></button></div>
+      </div>
+      <div class="chatlbl" data-i18n="bac_preview"></div><div class="chatprev" id="chatprev"></div>
+      <div class="h2row"><h2 data-i18n="bac_more"></h2></div>
+      <div class="line" style="border-top:0"><div class="grow"><span data-i18n="start_active"></span><small data-i18n="start_active_s"></small></div><button class="sw" id="sasw" role="switch" aria-checked="true" data-i18n-aria="start_active"></button></div>
       <div class="line"><div class="grow"><span data-i18n="only_live"></span><small data-i18n="only_live_s"></small></div><button class="sw" id="owsw" role="switch" aria-checked="true" data-i18n-aria="only_live"></button></div>
       <div class="field" style="border-top:1px solid var(--line)"><label for="lcs" data-i18n="live_check"></label><input id="lcs" type="number" min="15" max="3600" step="1"><small data-i18n="live_check_s"></small></div>
       <div class="field"><label for="cu" data-i18n="cmds_url"></label><input id="cu" dir="ltr" maxlength="300" placeholder="https://…" style="max-width:420px"><small data-i18n="cmds_url_s"></small></div>
       <div class="sp"><button class="btn" id="save" data-i18n="save_changes"></button></div>
+    </div>
+
+    <div class="panel" id="spane-d" role="tabpanel" aria-labelledby="stab-d" hidden>
+      <h2 data-i18n="don_title"></h2>
+      <div class="field" style="border-top:0"><small data-i18n="don_intro"></small></div>
+      <div class="dcards" id="dcards"></div>
     </div>
 
     <div class="panel" id="spane-n" role="tabpanel" aria-labelledby="stab-n" hidden>
@@ -443,6 +515,11 @@ body.reduce *,body.reduce *::before,body.reduce *::after{transition:none!importa
   <h2 id="ct"></h2><p class="hint" id="cb"></p>
   <div class="mact"><button class="ghost" id="ccancel" type="button" data-i18n="cancel"></button><button class="btn sm danger" id="cok" type="button"></button></div>
 </div></div>
+<div class="modal" id="bmodal"><div class="sheet small" role="dialog" aria-modal="true" aria-labelledby="bmt">
+  <h2 id="bmt"></h2>
+  <ol class="steps"><li><b>1</b><div><span data-i18n="bm_s1"></span><small data-i18n="bm_s1b"></small></div></li><li><b>2</b><div><span data-i18n="bm_s2"></span></div></li><li><b>3</b><div><span data-i18n="bm_s3"></span></div></li></ol>
+  <div class="mact"><button class="ghost" id="bmcancel" type="button" data-i18n="cancel"></button><button class="btn sm" id="bmgo" type="button" data-i18n="bm_continue"></button></div>
+</div></div>
 <div class="modal" id="umodal"><div class="sheet small" role="dialog" aria-modal="true" aria-labelledby="ut">
   <h2 id="ut" data-i18n="upop_title"></h2>
   <p class="hint" id="ub"></p>
@@ -456,10 +533,10 @@ body.reduce *,body.reduce *::before,body.reduce *::after{transition:none!importa
 <script>
 /* ===================== i18n ===================== */
 var AH='<bdi dir="ltr">/announce</bdi>',AB='<bdi dir="ltr">/announceblue</bdi>',AG='<bdi dir="ltr">/announcegreen</bdi>',AO='<bdi dir="ltr">/announceorange</bdi>',AP='<bdi dir="ltr">/announcepurple</bdi>';
-var VAR_TOK=["$(user)","$(touser)","$(query)","$(querystring)","$(count)","$(channel)","$(game)","$(title)","$(uptime)","$(follow)","$(followdate)","$(followage)","$(streak)","$(tier)","$(months)","$(message)","$(gifts)","$(raider)","$(viewers)","$(level)","$(bits)","$(eval Math.floor(Math.random() * 101))","$(urlfetch https://…)"];
-var CHIP_EV={"$(streak)":"watch_streak","$(tier)":"subscription gift_sub","$(months)":"subscription","$(message)":"subscription bits","$(gifts)":"gift_sub","$(raider)":"raid","$(viewers)":"raid","$(level)":"hype_train","$(bits)":"bits"};   // buttons that only appear in the matching event editor
+var VAR_TOK=["$(user)","$(touser)","$(query)","$(querystring)","$(count)","$(channel)","$(game)","$(title)","$(uptime)","$(follow)","$(followdate)","$(followage)","$(streak)","$(tier)","$(months)","$(message)","$(gifts)","$(raider)","$(viewers)","$(level)","$(bits)","$(amount)","$(currency)","$(eval Math.floor(Math.random() * 101))","$(urlfetch https://…)"];
+var CHIP_EV={"$(streak)":"watch_streak","$(tier)":"subscription gift_sub","$(months)":"subscription","$(message)":"subscription bits donation","$(amount)":"donation","$(currency)":"donation","$(gifts)":"gift_sub","$(raider)":"raid","$(viewers)":"raid","$(level)":"hype_train","$(bits)":"bits"};   // buttons that only appear in the matching event editor
 var VAR_LBL=VAR_TOK.slice();VAR_LBL[VAR_TOK.length-2]="$(eval …)";   // shorter text on the button; the full example is what gets inserted
-var VAR_EX=["Hi FQPN_!","!hug @sam → sam","!game valorant → valorant","hello world → hello%20world","42","fqpn_","Valorant","Ranked grind!","2h 14m","followed fqpn_ on March 3, 2024 (1 year, 2 months ago)","March 3, 2024","1 year, 2 months, 3 days","604","Tier 1","7","Keep going!","5","StreamerXYZ","82","5","100","Math.floor(Math.random() * 101) → 57","(text from the page)"];
+var VAR_EX=["Hi FQPN_!","!hug @sam → sam","!game valorant → valorant","hello world → hello%20world","42","fqpn_","Valorant","Ranked grind!","2h 14m","followed fqpn_ on March 3, 2024 (1 year, 2 months ago)","March 3, 2024","1 year, 2 months, 3 days","604","Tier 1","7","Keep going!","5","StreamerXYZ","82","5","100","12.50","USD","Math.floor(Math.random() * 101) → 57","(text from the page)"];
 var I18N={
 en:{brand_sub:"CHAT BOT",nav_dashboard:"Dashboard",nav_commands:"Commands",nav_timers:"Timers",nav_blocklist:"Blocklist",nav_logs:"Logs",nav_settings:"Settings",
 twitch_account:"Twitch Account",disconnect:"Disconnect account",connect:"Connect Twitch",connected:"Connected",connecting:"Connecting…",not_connected:"Not connected",disc_toast:"Account disconnected",conn_started:"Starting Twitch login…",
@@ -503,7 +580,14 @@ reset_all:"Reset all settings",reset_all_s:"Puts the settings on all these tabs 
 upd_title:"App updates",upd_version:"Version {v}",upd_check:"Check for updates",upd_download:"Download update",upd_install:"Restart and update",upd_dev:"running from source, so updates are off",upd_checking:"checking…",upd_uptodate:"you have the latest version",upd_available:"version {v} is available",upd_downloading:"downloading the update… {p}%",upd_ready:"version {v} is ready to install",upd_installing:"installing the update…",upd_error:"couldn't check: {m}",
 upd_confirm_q:"Install the update now?",upd_confirm_body:"The app closes for a moment and opens again with the new version. Your commands, timers and Twitch login are kept.",
 ban_upd_ready:"Version {v} is ready to install.",ban_upd_avail:"Version {v} is available.",ban_upd_dl:"Downloading the update… {p}%",ban_lost:"The connection to Twitch was lost.",ban_reconnect:"Reconnect",
-notif_test:"Send a test notification",notif_test_s:"Shows a pop-up now so you can see how it looks.",notif_test_btn:"Send test",notif_test_ok:"Test notification sent",notif_test_fail:"No pop-up could be shown (is the tray icon running?)",log_chat_by:"said by {u}",bi_note:"These built-in commands have their own names (like !cmadd) on purpose. They are different from Nightbot's (!addcom, !editcom, !delcom, !commands, !title, !game), so both bots can share your chat without answering the same message.",upop_title:"Update available",upop_body:"Version {v} is available. Do you want to update now?",upop_now:"Update now",upop_later:"Update later",upop_new:"What's new",upop_dl:"Downloading the update… {p}%",upop_wait:"Getting the update ready…",upop_installing:"Installing… the app closes for a moment and opens again with your commands and login kept.",upop_err:"Couldn't update: {m}",upop_retry:"Try again",pause_aria:"Pause bot",pause_on:"Bot is paused",pause_off:"Bot is active",paused_toast:"Bot paused",resumed_toast:"Bot resumed",st_paused:"Paused",ban_paused:"The bot is paused and won't reply to anyone or send timers.",resume:"Resume",timers_title:"Timers",timers_sub:"Send messages to your chat automatically on a schedule.",new_timer:"+ New Timer",your_timers:"Your timers",no_timers:"No timers yet. Select New Timer to add one.",
+notif_test:"Send a test notification",notif_test_s:"Shows a pop-up now so you can see how it looks.",notif_test_btn:"Send test",notif_test_ok:"Test notification sent",notif_test_fail:"No pop-up could be shown (is the tray icon running?)",log_chat_by:"said by {u}",bi_note:"These built-in commands have their own names (like !cmadd) on purpose. They are different from Nightbot's (!addcom, !editcom, !delcom, !commands, !title, !game), so both bots can share your chat without answering the same message.",upop_title:"Update available",upop_body:"Version {v} is available. Do you want to update now?",upop_now:"Update now",upop_later:"Update later",upop_new:"What's new",upop_dl:"Downloading the update… {p}%",upop_wait:"Getting the update ready…",upop_installing:"Installing… the app closes for a moment and opens again with your commands and login kept.",upop_err:"Couldn't update: {m}",upop_retry:"Try again",bac_title:"Chat account",bac_use:"Use a separate bot account",bac_use_s:"Replies, announcements and greetings are sent from another Twitch account instead of your own.",bac_channel:"Your channel",bac_channel_s:"Needed for the stream title and game, follows, hype trains and bits.",bac_bot:"Bot account",bac_bot_s:"Writes the bot's replies in your chat.",bac_none:"No bot account yet",bac_none_s:"Pick the Twitch account that should write in your chat.",bac_connect:"Connect bot account",bac_change:"Change account",bac_disc:"Disconnect",bac_mod_ok:"{n} is a moderator in your channel.",bac_mod_ok_s:"Announcements and all chat features are available.",bac_mod_no:"{n} isn't a moderator in your channel yet.",bac_mod_no_s:"Announcements and some chat features won't work until it is. Type this in your chat:",bac_copy:"Copy",bac_copied:"Copied",bac_check:"Check again",bac_checking:"Checking…",bac_now_mod:"{n} is now a moderator",bac_test:"Send a test message",bac_test_s:"Posts “Hello from {n}!” in your chat so you can see which name it uses.",bac_test_btn:"Send test",bac_test_done:"Test message sent as {n}",bac_preview:"How it looks in your chat",bac_silent:"(the bot is silent until the bot account is connected)",bm_title:"Connect the bot account",bm_title2:"Change the bot account",bm_s1:"Open twitch.tv in a private window and log in as the bot account.",bm_s1b:"If you stay logged in as your own account, Twitch would connect your own account again.",bm_s2:"Press Continue. You will get a code.",bm_s3:"Enter the code on the Twitch page and press Authorize.",bm_continue:"Continue",bb_none:"The bot account isn't connected, so the bot is silent.",bb_nomod:"{n} isn't a moderator in your channel yet.",bb_wait:"Waiting for Twitch…",dash_chat:"Chat account",dash_chat_on:"Replies are sent from this account",dash_chat_off:"Replies are sent from your own account",side_bot:"Bot",bac_on_toast:"Separate bot account switched on",bac_off_toast:"The bot talks as {n} again",bac_conn_toast:"{n} connected as the bot account",bac_disc_toast:"Bot account disconnected",bac_disc_q:"Disconnect the bot account?",bac_disc_body:"The bot will stay silent until you connect a bot account again.",bac_more:"Behavior",bac_still_no:"{n} still isn't a moderator. Type the command in your chat first.",bb_login_bot:"Open this link in a private window where the bot account is logged in, then enter the code:",bb_perm:"The bot account needs new Twitch permissions. Connect it again.",bac_copy_link:"Copy link",bac_link_copied:"Link copied",bac_err_conn:"Couldn't connect the bot account: {m}",set_tab_donations:"Donations",don_title:"Donations",don_intro:"Connect Streamlabs and/or StreamElements so the bot can thank people when they donate. The replies are set up in Events → Donation. The bot only sees donations made while this app is running.",
+don_sl:"Donations — Streamlabs",don_sl_kind:"Socket API token",don_sl_label:"Socket API token",don_sl_ph:"Streamlabs Socket API token",don_sl_hint:"streamlabs.com → Settings → API Settings → “Your Socket API Token”.",
+don_se:"Donations — StreamElements",don_se_kind:"JWT token",don_se_label:"JWT token",don_se_ph:"StreamElements JWT token",don_se_hint:"streamelements.com → account menu → Account → Show secrets → JWT Token.",
+don_enc:"Stored encrypted on this PC.",don_plain:"Stored on this PC. This system can't encrypt it, so keep your data folder private.",don_connect:"Connect",don_remove:"Disconnect & remove",don_saved:"Token saved.",
+don_st_none:"not linked",don_st_connecting:"connecting…",don_st_connected:"connected",don_st_invalid:"invalid token",don_st_error:"can't connect",
+don_connected_toast:"{n} connected",don_removed_toast:"{n} disconnected and its token removed",don_remove_q:"Disconnect {n} and remove its token?",don_remove_body:"The bot stops seeing donations from it. You can paste the token again later.",
+ev_t_donation:"Donation",ev_d_donation:"When someone donates through Streamlabs or StreamElements. Pick different replies by amount, like 1, 20 or 100. The bot only sees donations made while this app is running.",ev_u_amount:"Amount",
+ev_don_none:"No donation service is connected yet, so the bot can't see donations. Add your Streamlabs or StreamElements token in Settings → Donations.",ev_don_open:"Open Donations settings",ev_don_on:"Listening to: {s}",pause_aria:"Pause bot",pause_on:"Bot is paused",pause_off:"Bot is active",paused_toast:"Bot paused",resumed_toast:"Bot resumed",st_paused:"Paused",ban_paused:"The bot is paused and won't reply to anyone or send timers.",resume:"Resume",timers_title:"Timers",timers_sub:"Send messages to your chat automatically on a schedule.",new_timer:"+ New Timer",your_timers:"Your timers",no_timers:"No timers yet. Select New Timer to add one.",
 every:"Every {t}",mins:function(p){return p.n+" min"},timer_live_note:"Timers only send while you're live. You can change this in Settings.",
 
 bl_title:"Blocklist",bl_sub:"The bot ignores messages from blocked users and messages that contain blocked words.",bl_users:"Blocked users",bl_words:"Blocked words",bl_add:"Add",bl_user_ph:"username",bl_word_ph:"word or phrase",bl_empty:"Nothing blocked yet.",remove_aria:"Remove {n}",
@@ -518,7 +602,7 @@ ann_announce:"Announce",ann_blue:"Blue",ann_green:"Green",ann_orange:"Orange",an
 cancel:"Cancel","delete":"Delete",confirm_del_q:"Delete {n}?",confirm_del_body:"This can't be undone.",
 saved:"Saved",added:"Added",deleted:"Deleted",settings_saved:"Settings saved",err_gone:"That item changed or was removed. The list was reloaded.",err_net:"Couldn't reach the bot.",err_exists:"{n} already exists.",
 err_spaces:"The name can't contain spaces.",err_name:"Enter a name.",err_resp:"Enter some text.",err_num:"Enter a valid number.",err_len:"The text is too long (max 450 characters).",err_match:"Enter the text to look for.",err_url:"The link must start with http:// or https://",err_range:"Number out of range.",
-vars:["The display name of the viewer who used the command.","The first name after the command (the @ is removed). If there isn't one, it's the viewer who used the command.","Everything the viewer typed after the command name.","Same as the text after the command, but made safe to use inside a link.","How many times this command has been used.","Your channel name.","The game or category you're streaming right now.","Your current stream title.","How long you've been live. If you're offline, the command says you're offline instead.","A sentence about whether the viewer follows you.","The date the viewer started following you.","How long the viewer has followed you.","The viewer's Watch Streak: how many streams in a row they have watched. Only works in the Watch streak reply.","The subscription type: Tier 1, Tier 2, Tier 3 or Prime. Only works in the Subscription and Gift subs replies.","How many months the person has subscribed in total. Only works in the Subscription reply.","The message the person wrote with their sub or their Bits. Only works in the Subscription and Bits replies.","How many subs were gifted at once. Only works in the Gift subs reply.","The name of the streamer who raided you. Only works in the Raid reply.","How many viewers came with the raid. Only works in the Raid reply.","The Hype Train level. Only works in the Hype train reply.","How many Bits were cheered. Only works in the Bits reply.","Does a little math, like Nightbot's eval. The button adds a ready example that picks a random whole number from 0 to 100. You can use + - * / %, brackets, and Math.random(), Math.floor(), Math.round(), Math.ceil(), Math.abs(), Math.min(), Math.max().","Gets the text of a public web page (first 400 characters) and puts it in the reply. Replace the link with yours."]},
+vars:["The display name of the viewer who used the command.","The first name after the command (the @ is removed). If there isn't one, it's the viewer who used the command.","Everything the viewer typed after the command name.","Same as the text after the command, but made safe to use inside a link.","How many times this command has been used.","Your channel name.","The game or category you're streaming right now.","Your current stream title.","How long you've been live. If you're offline, the command says you're offline instead.","A sentence about whether the viewer follows you.","The date the viewer started following you.","How long the viewer has followed you.","The viewer's Watch Streak: how many streams in a row they have watched. Only works in the Watch streak reply.","The subscription type: Tier 1, Tier 2, Tier 3 or Prime. Only works in the Subscription and Gift subs replies.","How many months the person has subscribed in total. Only works in the Subscription reply.","The message the person wrote with their sub, their Bits or their donation. Only works in the Subscription, Bits and Donation replies.","How many subs were gifted at once. Only works in the Gift subs reply.","The name of the streamer who raided you. Only works in the Raid reply.","How many viewers came with the raid. Only works in the Raid reply.","The Hype Train level. Only works in the Hype train reply.","How many Bits were cheered. Only works in the Bits reply.","The donation amount, like 5 or 12.50. Only works in the Donation reply.","The donation currency, like USD or SAR. Only works in the Donation reply.","Does a little math, like Nightbot's eval. The button adds a ready example that picks a random whole number from 0 to 100. You can use + - * / %, brackets, and Math.random(), Math.floor(), Math.round(), Math.ceil(), Math.abs(), Math.min(), Math.max().","Gets the text of a public web page (first 400 characters) and puts it in the reply. Replace the link with yours."]},
 ar:{brand_sub:"بوت الدردشة",nav_dashboard:"لوحة التحكم",nav_commands:"الأوامر",nav_timers:"المؤقتات",nav_blocklist:"قائمة الحظر",nav_logs:"السجلات",nav_settings:"الإعدادات",
 twitch_account:"حساب تويتش",disconnect:"فصل الحساب",connect:"ربط تويتش",connected:"متصل",connecting:"جارٍ الاتصال…",not_connected:"غير متصل",disc_toast:"تم فصل الحساب",conn_started:"جارٍ بدء تسجيل الدخول إلى تويتش…",
 disc_q:"فصل حساب تويتش؟",disc_body:"سيتوقف البوت عن الرد في الدردشة حتى تعيد الربط.",disc_yes:"فصل",
@@ -561,7 +645,14 @@ reset_all:"إعادة ضبط كل الإعدادات",reset_all_s:"يعيد إع
 upd_title:"تحديثات التطبيق",upd_version:"الإصدار {v}",upd_check:"البحث عن تحديثات",upd_download:"تنزيل التحديث",upd_install:"إعادة التشغيل والتحديث",upd_dev:"يعمل من الشيفرة المصدرية، لذلك التحديثات متوقفة",upd_checking:"جارٍ البحث…",upd_uptodate:"لديك أحدث إصدار",upd_available:"الإصدار {v} متاح",upd_downloading:"جارٍ تنزيل التحديث… {p}%",upd_ready:"الإصدار {v} جاهز للتثبيت",upd_installing:"جارٍ تثبيت التحديث…",upd_error:"تعذّر البحث: {m}",
 upd_confirm_q:"تثبيت التحديث الآن؟",upd_confirm_body:"يُغلق التطبيق لحظة ثم يفتح من جديد بالإصدار الجديد. تبقى أوامرك ومؤقتاتك وحساب تويتش كما هي.",
 ban_upd_ready:"الإصدار {v} جاهز للتثبيت.",ban_upd_avail:"الإصدار {v} متاح.",ban_upd_dl:"جارٍ تنزيل التحديث… {p}%",ban_lost:"انقطع الاتصال بتويتش.",ban_reconnect:"إعادة الاتصال",
-notif_test:"إرسال إشعار تجريبي",notif_test_s:"يعرض نافذة منبثقة الآن لترى شكلها.",notif_test_btn:"إرسال تجربة",notif_test_ok:"تم إرسال الإشعار التجريبي",notif_test_fail:"تعذّر عرض إشعار (هل أيقونة علبة النظام تعمل؟)",log_chat_by:"كتبه {u}",bi_note:"لهذه الأوامر المدمجة أسماؤها الخاصة (مثل !cmadd) عن قصد. وهي تختلف عن أسماء Nightbot (!addcom و!editcom و!delcom و!commands و!title و!game)، فيستطيع البوتان مشاركة دردشتك دون أن يرد كلاهما على الرسالة نفسها.",upop_title:"تحديث متاح",upop_body:"الإصدار {v} متاح. هل تريد التحديث الآن؟",upop_now:"التحديث الآن",upop_later:"التحديث لاحقًا",upop_new:"ما الجديد",upop_dl:"جارٍ تنزيل التحديث… {p}%",upop_wait:"جارٍ تجهيز التحديث…",upop_installing:"جارٍ التثبيت… يُغلق التطبيق لحظة ثم يفتح من جديد مع بقاء أوامرك وحسابك.",upop_err:"تعذّر التحديث: {m}",upop_retry:"حاول مرة أخرى",pause_aria:"إيقاف البوت مؤقتًا",pause_on:"البوت متوقف مؤقتًا",pause_off:"البوت يعمل",paused_toast:"تم إيقاف البوت مؤقتًا",resumed_toast:"تم استئناف البوت",st_paused:"متوقف مؤقتًا",ban_paused:"البوت متوقف مؤقتًا ولن يرد على أحد ولن يرسل المؤقتات.",resume:"استئناف",timers_title:"المؤقتات",timers_sub:"أرسل رسائل إلى الدردشة تلقائيًا حسب جدول زمني.",new_timer:"+ مؤقت جديد",your_timers:"مؤقتاتك",no_timers:"لا توجد مؤقتات بعد. اضغط «مؤقت جديد» لإضافة واحد.",
+notif_test:"إرسال إشعار تجريبي",notif_test_s:"يعرض نافذة منبثقة الآن لترى شكلها.",notif_test_btn:"إرسال تجربة",notif_test_ok:"تم إرسال الإشعار التجريبي",notif_test_fail:"تعذّر عرض إشعار (هل أيقونة علبة النظام تعمل؟)",log_chat_by:"كتبه {u}",bi_note:"لهذه الأوامر المدمجة أسماؤها الخاصة (مثل !cmadd) عن قصد. وهي تختلف عن أسماء Nightbot (!addcom و!editcom و!delcom و!commands و!title و!game)، فيستطيع البوتان مشاركة دردشتك دون أن يرد كلاهما على الرسالة نفسها.",upop_title:"تحديث متاح",upop_body:"الإصدار {v} متاح. هل تريد التحديث الآن؟",upop_now:"التحديث الآن",upop_later:"التحديث لاحقًا",upop_new:"ما الجديد",upop_dl:"جارٍ تنزيل التحديث… {p}%",upop_wait:"جارٍ تجهيز التحديث…",upop_installing:"جارٍ التثبيت… يُغلق التطبيق لحظة ثم يفتح من جديد مع بقاء أوامرك وحسابك.",upop_err:"تعذّر التحديث: {m}",upop_retry:"حاول مرة أخرى",bac_title:"حساب الدردشة",bac_use:"استخدام حساب بوت منفصل",bac_use_s:"تُرسل الردود والإعلانات والتحيات من حساب تويتش آخر بدل حسابك.",bac_channel:"قناتك",bac_channel_s:"مطلوب لعنوان البث واللعبة والمتابعات وقطار الحماس والبيتس.",bac_bot:"حساب البوت",bac_bot_s:"يكتب ردود البوت في دردشتك.",bac_none:"لا يوجد حساب بوت بعد",bac_none_s:"اختر حساب تويتش الذي سيكتب في دردشتك.",bac_connect:"ربط حساب البوت",bac_change:"تغيير الحساب",bac_disc:"فصل",bac_mod_ok:"{n} مشرف في قناتك.",bac_mod_ok_s:"الإعلانات وكل ميزات الدردشة متاحة.",bac_mod_no:"{n} ليس مشرفًا في قناتك بعد.",bac_mod_no_s:"لن تعمل الإعلانات وبعض ميزات الدردشة حتى يصبح مشرفًا. اكتب هذا في دردشتك:",bac_copy:"نسخ",bac_copied:"تم النسخ",bac_check:"تحقق مجددًا",bac_checking:"جارٍ التحقق…",bac_now_mod:"{n} أصبح مشرفًا الآن",bac_test:"إرسال رسالة تجريبية",bac_test_s:"ينشر «Hello from {n}!» في دردشتك لترى أي اسم يستخدمه.",bac_test_btn:"إرسال تجربة",bac_test_done:"تم إرسال الرسالة التجريبية باسم {n}",bac_preview:"كيف يبدو في دردشتك",bac_silent:"(يبقى البوت صامتًا حتى يُربط حساب البوت)",bm_title:"ربط حساب البوت",bm_title2:"تغيير حساب البوت",bm_s1:"افتح twitch.tv في نافذة خاصة وسجّل الدخول بحساب البوت.",bm_s1b:"إذا بقيت مسجّلًا بحسابك الشخصي فسيربط تويتش حسابك الشخصي مرة أخرى.",bm_s2:"اضغط «متابعة». سيظهر لك رمز.",bm_s3:"أدخل الرمز في صفحة تويتش واضغط Authorize.",bm_continue:"متابعة",bb_none:"حساب البوت غير مربوط، لذلك البوت صامت.",bb_nomod:"{n} ليس مشرفًا في قناتك بعد.",bb_wait:"بانتظار تويتش…",dash_chat:"حساب الدردشة",dash_chat_on:"تُرسل الردود من هذا الحساب",dash_chat_off:"تُرسل الردود من حسابك الشخصي",side_bot:"البوت",bac_on_toast:"تم تفعيل حساب البوت المنفصل",bac_off_toast:"يعود البوت للكتابة باسم {n}",bac_conn_toast:"تم ربط {n} كحساب للبوت",bac_disc_toast:"تم فصل حساب البوت",bac_disc_q:"فصل حساب البوت؟",bac_disc_body:"سيبقى البوت صامتًا حتى تربط حساب بوت مرة أخرى.",bac_more:"السلوك",bac_still_no:"{n} ليس مشرفًا بعد. اكتب الأمر في دردشتك أولًا.",bb_login_bot:"افتح هذا الرابط في نافذة خاصة سُجّل فيها الدخول بحساب البوت، ثم أدخل الرمز:",bb_perm:"يحتاج حساب البوت إلى صلاحيات جديدة من تويتش. اربطه مرة أخرى.",bac_copy_link:"نسخ الرابط",bac_link_copied:"تم نسخ الرابط",bac_err_conn:"تعذّر ربط حساب البوت: {m}",set_tab_donations:"التبرعات",don_title:"التبرعات",don_intro:"اربط Streamlabs و/أو StreamElements ليشكر البوت من يتبرع. تُضبط الردود من الأحداث ← التبرع. يرى البوت التبرعات التي تتم أثناء تشغيل هذا التطبيق فقط.",
+don_sl:"التبرعات — Streamlabs",don_sl_kind:"رمز Socket API",don_sl_label:"رمز Socket API",don_sl_ph:"رمز Socket API من Streamlabs",don_sl_hint:"streamlabs.com ← Settings ← API Settings ← «Your Socket API Token».",
+don_se:"التبرعات — StreamElements",don_se_kind:"رمز JWT",don_se_label:"رمز JWT",don_se_ph:"رمز JWT من StreamElements",don_se_hint:"streamelements.com ← قائمة الحساب ← Account ← Show secrets ← JWT Token.",
+don_enc:"محفوظ مشفّرًا على هذا الجهاز.",don_plain:"محفوظ على هذا الجهاز. هذا النظام لا يستطيع تشفيره، فاحرص على خصوصية مجلد بياناتك.",don_connect:"ربط",don_remove:"فصل وحذف",don_saved:"تم حفظ الرمز.",
+don_st_none:"غير مربوط",don_st_connecting:"جارٍ الاتصال…",don_st_connected:"متصل",don_st_invalid:"رمز غير صالح",don_st_error:"تعذّر الاتصال",
+don_connected_toast:"تم ربط {n}",don_removed_toast:"تم فصل {n} وحذف رمزه",don_remove_q:"فصل {n} وحذف رمزه؟",don_remove_body:"يتوقف البوت عن رؤية التبرعات منه. يمكنك لصق الرمز مرة أخرى لاحقًا.",
+ev_t_donation:"التبرع",ev_d_donation:"عندما يتبرع أحدهم عبر Streamlabs أو StreamElements. اختر ردودًا مختلفة حسب المبلغ، مثل 1 أو 20 أو 100. يرى البوت التبرعات التي تتم أثناء تشغيل هذا التطبيق فقط.",ev_u_amount:"المبلغ",
+ev_don_none:"لا توجد خدمة تبرعات مربوطة بعد، لذلك لا يرى البوت التبرعات. أضف رمز Streamlabs أو StreamElements من الإعدادات ← التبرعات.",ev_don_open:"فتح إعدادات التبرعات",ev_don_on:"يستمع إلى: {s}",pause_aria:"إيقاف البوت مؤقتًا",pause_on:"البوت متوقف مؤقتًا",pause_off:"البوت يعمل",paused_toast:"تم إيقاف البوت مؤقتًا",resumed_toast:"تم استئناف البوت",st_paused:"متوقف مؤقتًا",ban_paused:"البوت متوقف مؤقتًا ولن يرد على أحد ولن يرسل المؤقتات.",resume:"استئناف",timers_title:"المؤقتات",timers_sub:"أرسل رسائل إلى الدردشة تلقائيًا حسب جدول زمني.",new_timer:"+ مؤقت جديد",your_timers:"مؤقتاتك",no_timers:"لا توجد مؤقتات بعد. اضغط «مؤقت جديد» لإضافة واحد.",
 every:"كل {t}",mins:function(p){var n=p.n;return n==1?"دقيقة":n==2?"دقيقتين":n<=10?n+" دقائق":n+" دقيقة"},timer_live_note:"لا تُرسل المؤقتات إلا أثناء البث المباشر. يمكنك تغيير ذلك من الإعدادات.",
 
 bl_title:"قائمة الحظر",bl_sub:"يتجاهل البوت رسائل المستخدمين المحظورين والرسائل التي تحتوي على كلمات محظورة.",bl_users:"المستخدمون المحظورون",bl_words:"الكلمات المحظورة",bl_add:"إضافة",bl_user_ph:"اسم المستخدم",bl_word_ph:"كلمة أو عبارة",bl_empty:"لا يوجد شيء محظور بعد.",remove_aria:"إزالة {n}",
@@ -576,7 +667,7 @@ ann_announce:"إعلان",ann_blue:"أزرق",ann_green:"أخضر",ann_orange:"�
 cancel:"إلغاء","delete":"حذف",confirm_del_q:"حذف {n}؟",confirm_del_body:"لا يمكن التراجع عن هذا.",
 saved:"تم الحفظ",added:"تمت الإضافة",deleted:"تم الحذف",settings_saved:"تم حفظ الإعدادات",err_gone:"تغيّر هذا العنصر أو حُذف. تم تحديث القائمة.",err_net:"تعذر الوصول إلى البوت.",err_exists:"{n} موجود بالفعل.",
 err_spaces:"لا يمكن أن يحتوي الاسم على مسافات.",err_name:"أدخل اسمًا.",err_resp:"أدخل نصًا.",err_num:"أدخل رقمًا صحيحًا.",err_len:"النص طويل جدًا (الحد الأقصى 450 حرفًا).",err_match:"أدخل النص المراد البحث عنه.",err_url:"يجب أن يبدأ الرابط بـ http:// أو https://",err_range:"الرقم خارج النطاق المسموح.",
-vars:["الاسم الظاهر للمشاهد الذي استخدم الأمر.","أول اسم بعد الأمر (يُحذف الرمز @). إذا لم يوجد، يكون المشاهد الذي استخدم الأمر.","كل ما كتبه المشاهد بعد اسم الأمر.","نفس النص بعد الأمر، لكنه آمن للاستخدام داخل رابط.","عدد مرات استخدام هذا الأمر.","اسم قناتك.","اللعبة أو التصنيف الذي تبثه الآن.","عنوان بثك الحالي.","المدة التي مضت منذ بدء بثك. إذا لم تكن مباشرًا، يقول الأمر إنك غير متصل.","جملة تقول إن كان المشاهد يتابعك أم لا.","تاريخ بدء المشاهد متابعتك.","المدة التي يتابعك فيها المشاهد.","سلسلة مشاهدة المشاهد: كم بثًا متتاليًا شاهده. تعمل فقط في رد سلسلة المشاهدة.","نوع الاشتراك: Tier 1 أو Tier 2 أو Tier 3 أو Prime. يعمل فقط في ردّي الاشتراك وإهداء الاشتراكات.","إجمالي عدد الأشهر التي اشترك فيها الشخص. يعمل فقط في رد الاشتراك.","الرسالة التي كتبها الشخص مع اشتراكه أو بيتسه. يعمل فقط في ردّي الاشتراك والبيتس.","عدد الاشتراكات المُهداة دفعة واحدة. يعمل فقط في رد إهداء الاشتراكات.","اسم المذيع الذي أغار عليك. يعمل فقط في رد الغارة.","عدد المشاهدين الذين جاؤوا مع الغارة. يعمل فقط في رد الغارة.","مستوى قطار الحماس. يعمل فقط في رد قطار الحماس.","عدد البيتس المُرسلة. يعمل فقط في رد البيتس.","يجري عملية حسابية بسيطة مثل eval في Nightbot. يضيف الزر مثالًا جاهزًا يختار رقمًا صحيحًا عشوائيًا من 0 إلى 100. يمكنك استخدام + - * / % والأقواس والدوال Math.random() وMath.floor() وMath.round() وMath.ceil() وMath.abs() وMath.min() وMath.max().","يجلب نص صفحة ويب عامة (أول 400 حرف) ويضعه في الرد. استبدل الرابط برابطك."]}
+vars:["الاسم الظاهر للمشاهد الذي استخدم الأمر.","أول اسم بعد الأمر (يُحذف الرمز @). إذا لم يوجد، يكون المشاهد الذي استخدم الأمر.","كل ما كتبه المشاهد بعد اسم الأمر.","نفس النص بعد الأمر، لكنه آمن للاستخدام داخل رابط.","عدد مرات استخدام هذا الأمر.","اسم قناتك.","اللعبة أو التصنيف الذي تبثه الآن.","عنوان بثك الحالي.","المدة التي مضت منذ بدء بثك. إذا لم تكن مباشرًا، يقول الأمر إنك غير متصل.","جملة تقول إن كان المشاهد يتابعك أم لا.","تاريخ بدء المشاهد متابعتك.","المدة التي يتابعك فيها المشاهد.","سلسلة مشاهدة المشاهد: كم بثًا متتاليًا شاهده. تعمل فقط في رد سلسلة المشاهدة.","نوع الاشتراك: Tier 1 أو Tier 2 أو Tier 3 أو Prime. يعمل فقط في ردّي الاشتراك وإهداء الاشتراكات.","إجمالي عدد الأشهر التي اشترك فيها الشخص. يعمل فقط في رد الاشتراك.","الرسالة التي كتبها الشخص مع اشتراكه أو بيتسه أو تبرعه. يعمل فقط في ردود الاشتراك والبيتس والتبرع.","عدد الاشتراكات المُهداة دفعة واحدة. يعمل فقط في رد إهداء الاشتراكات.","اسم المذيع الذي أغار عليك. يعمل فقط في رد الغارة.","عدد المشاهدين الذين جاؤوا مع الغارة. يعمل فقط في رد الغارة.","مستوى قطار الحماس. يعمل فقط في رد قطار الحماس.","عدد البيتس المُرسلة. يعمل فقط في رد البيتس.","مبلغ التبرع، مثل 5 أو 12.50. يعمل فقط في رد التبرع.","عملة التبرع، مثل USD أو SAR. تعمل فقط في رد التبرع.","يجري عملية حسابية بسيطة مثل eval في Nightbot. يضيف الزر مثالًا جاهزًا يختار رقمًا صحيحًا عشوائيًا من 0 إلى 100. يمكنك استخدام + - * / % والأقواس والدوال Math.random() وMath.floor() وMath.round() وMath.ceil() وMath.abs() وMath.min() وMath.max().","يجلب نص صفحة ويب عامة (أول 400 حرف) ويضعه في الرد. استبدل الرابط برابطك."]}
 };
 var lang="en";
 function t(k,p){var d=I18N[lang][k];if(d===undefined)d=I18N.en[k];if(typeof d=="function")return d(p||{});if(p)d=d.replace(/\{(\w+)\}/g,function(m,n){return p[n]});return d}
@@ -589,7 +680,7 @@ function copyText(txt){
 
 /* ===================== state ===================== */
 var D={commands:{},timers:[],greetings:{enabled:true,users:[]},events:{},ui:null,prefs:null,blocklist:{users:[],words:[]},settings:{paused:false,start_active:true,only_when_live:true,live_check_seconds:60,commands_url:""}};
-var S={account:null,connected:false,live:false,uptime_seconds:null,login:{status:"idle"},problem:null,avatar:null,lost:false,caps:{},update:{status:"idle"}};
+var S={account:null,connected:false,live:false,uptime_seconds:null,login:{status:"idle"},problem:null,avatar:null,lost:false,caps:{},update:{status:"idle"},bot_account:{enabled:false,state:"none"},donations:{streamlabs:{state:"none"},streamelements:{state:"none"},encrypted:false}};
 var LOGS=[],offline=false,loaded=false,tab="custom",curView="commands",anim=true,lastSig="",settingsDirty=false;
 var LEVELS=["everyone","subscriber","vip","moderator","broadcaster"],LVCLS={everyone:"all",subscriber:"sub",vip:"vip",moderator:"mod",broadcaster:"bc"};
 function lvText(l){return t("lvl_"+(LVCLS[l]?l:"everyone"))}
@@ -608,7 +699,8 @@ async function req(path,opts){
   return d}
 var API={get:function(s){return req("/api/"+s)},
   put:function(s,data){return req("/api/"+s,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)})},
-  post:function(p){return req(p,{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"})}};
+  post:function(p){return req(p,{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"})},
+  postJson:function(p,data){return req(p,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)})}};
 function Gone(){var e=new Error(t("err_gone"));e.gone=true;return e}
 /* Always re-read the latest data first, change it, then save, so edits made from chat (!addcom ...) are never overwritten. */
 var mutQ=Promise.resolve();   // saves run one after another, so two quick clicks can never overwrite each other
@@ -690,8 +782,8 @@ function renderGreetings(){
   $("gr-list").innerHTML=h;renderEvTabs()}
 var EVM={watch_streak:{t:"ws_title",d:"ev_d_streak",u:"ev_u_streak",single:true},follow:{t:"ev_t_follow",d:"ev_d_follow",single:true,perm:"moderator:read:followers"},
   subscription:{t:"ev_t_sub",d:"ev_d_sub",u:"ev_u_months"},gift_sub:{t:"ev_t_gift",d:"ev_d_gift",u:"ev_u_gifts"},raid:{t:"ev_t_raid",d:"ev_d_raid",u:"ev_u_viewers"},
-  hype_train:{t:"ev_t_hype",d:"ev_d_hype",u:"ev_u_level",perm:"channel:read:hype_train"},bits:{t:"ev_t_bits",d:"ev_d_bits",u:"ev_u_bits"}};
-var EVORDER=["follow","subscription","gift_sub","raid","hype_train","bits","watch_streak"];
+  hype_train:{t:"ev_t_hype",d:"ev_d_hype",u:"ev_u_level",perm:"channel:read:hype_train"},bits:{t:"ev_t_bits",d:"ev_d_bits",u:"ev_u_bits"},donation:{t:"ev_t_donation",d:"ev_d_donation",u:"ev_u_amount",decimal:true}};
+var EVORDER=["follow","subscription","gift_sub","raid","hype_train","bits","donation","watch_streak"];
 function renderEvents(){
   var h="";
   EVORDER.forEach(function(k){
@@ -699,6 +791,8 @@ function renderEvents(){
     var m=EVM[k],ev=(D.events&&D.events[k])||{enabled:false,tiers:[]},on=ev.enabled!==false,tiers=ev.tiers||[],p=(S.event_problems||{})[k];
     h+='<div class="panel evcard" data-k="'+k+'"><div class="h2row" style="border-top:0"><h2>'+t(m.t)+'</h2><div class="pause grn'+(on?" on":"")+'"><span>'+t(on?"ev_on":"ev_off")+'</span><button class="sw" data-evsw="'+k+'" role="switch" aria-checked="'+on+'" aria-label="'+attr(t(m.t))+'"></button></div></div>';
     h+='<div class="field" style="border-top:0"><small>'+t(m.d)+'</small>';
+    if(k=="donation"){var on=DON.filter(function(s){return DS(s.k).state=="connected"}).map(function(s){return s.name});
+      h+=on.length?'<small>'+t("ev_don_on",{s:esc(on.join(", "))})+'</small>':'<small class="warnline">'+t("ev_don_none")+'</small><div><button class="ghost sm" data-go="donations" type="button">'+t("ev_don_open")+'</button></div>'}
     if(m.perm){h+='<small>'+t("ev_perm",{p:"<code>"+m.perm+"</code>"})+'</small>';if(p)h+='<small class="warnline">'+t("ev_refused")+'</small>'}
     h+='</div>';
     tiers.forEach(function(x,i){
@@ -727,7 +821,7 @@ function renderLogs(){$("l-list").innerHTML='<h2>'+t("recent")+'</h2>'+(LOGS.len
 function renderDashboard(){
   var cs=Object.keys(D.commands),en=cs.filter(function(k){return D.commands[k].enabled!==false}).length,total=cs.length,tm=D.timers.filter(function(x){return x.enabled!==false}).length,stc,stk;
   if(!S.account||offline){stk=t("st_none");stc="#9b9ba1"}else if(S.connected&&D.settings.paused){stk=t("st_paused");stc="#f59e0b"}else if(S.connected&&S.live){stk=t("st_live",{d:fmtDur(S.uptime_seconds||0)});stc="#3fb871"}else if(S.connected){stk=t("st_off");stc="#3fb871"}else{stk=t("connecting");stc="#f59e0b"}
-  $("d-cards").innerHTML='<div class="card red"><span>'+t("card_cmds")+'</span><b data-n="'+total+'">'+total+'</b><small>'+t("card_cmds_sub",{n:en})+'</small></div><div class="card"><span>'+t("card_timers")+'</span><b data-n="'+tm+'">'+tm+'</b></div><div class="card"><span>'+t("card_status")+'</span><b class="s" style="color:'+stc+'">'+esc(stk)+'</b></div>'}
+  $("d-cards").innerHTML='<div class="card red"><span>'+t("card_cmds")+'</span><b data-n="'+total+'">'+total+'</b><small>'+t("card_cmds_sub",{n:en})+'</small></div><div class="card"><span>'+t("card_timers")+'</span><b data-n="'+tm+'">'+tm+'</b></div><div class="card"><span>'+t("card_status")+'</span><b class="s" style="color:'+stc+'">'+esc(stk)+'</b></div>'+botDashCard()}
 function fillSettings(force){if(settingsDirty&&!force)return;var s=D.settings;$("sasw").setAttribute("aria-checked",s.start_active!==false);$("owsw").setAttribute("aria-checked",s.only_when_live!==false);$("lcs").value=s.live_check_seconds;$("cu").value=s.commands_url||""}
 function renderPause(){var on=!!D.settings.paused;$("pausesw").setAttribute("aria-checked",on);$("pausetxt").textContent=t(on?"pause_on":"pause_off");$("pausebox").classList.toggle("on",on)}
 async function setPaused(on){
@@ -753,8 +847,9 @@ function renderBanner(){
   else if((S.update||{}).status=="available"){h='<span>'+t("ban_upd_avail",{v:esc(S.update.latest)})+'</span><button class="bbtn" data-a="upd_download">'+t("upd_download")+'</button>';cls="info"}
   else if((S.update||{}).status=="downloading"){h='<span>'+t("ban_upd_dl",{p:S.update.progress||0})+'</span>';cls="info"}
   else if(D.settings.paused){h='<span>'+t("ban_paused")+'</span><button class="bbtn" data-a="resume">'+t("resume")+'</button>';cls="warn"}
+  if(!h){var bb=botBanner();if(bb){h=bb[0];cls=bb[1]}}   // the bot account needs attention (only when nothing more important is shown)
   b.hidden=!h;b.className="banner "+cls;b.innerHTML=h}
-function renderAll(){renderDashboard();renderCommands();renderTimers();renderGreetings();renderEvents();renderBlocklist();renderLogs();fillSettings(false);renderPause();renderPrefs();renderAccount();renderBanner();renderUpdatePopup()}
+function renderAll(){renderDashboard();renderCommands();renderTimers();renderGreetings();renderEvents();renderBlocklist();renderLogs();fillSettings(false);renderPause();renderPrefs();renderAccount();renderBanner();renderUpdatePopup();renderBotAccount();renderDonations()}
 
 /* ===================== edit window (commands / timers / triggers) ===================== */
 var M=null,lastFocus=null,sheet=$("sheet");
@@ -771,7 +866,7 @@ function openEdit(kind,key){
   $("lbl-name").textContent=t(kind=="command"?"lbl_cmd":kind=="greeting"?"lbl_gname":"lbl_name");$("lbl-resp").textContent=t(kind=="timer"?"lbl_msg":"lbl_resp");
   if(kind=="command"){$("mc").value=o?key:"";$("ma").value=o?(o.aliases||[]).join(", "):"";$("mr").value=o?o.response:"";$("ml").value=o?o.permission:"everyone";$("md").value=o?o.cooldown:5}
   else if(kind=="alert"){var em=EVM[ak],tl=((D.events[ak]||{}).tiers||[]);$("mr").value=o?o.response:"";
-    $("mmin").value=o?o.min:(tl.length?(Math.max.apply(null,tl.map(function(x){return x.min}))*2||1):1);$("minwrap").hidden=!!em.single;$("hintalert").hidden=!!em.single;$("lbl-min").textContent=t("ev_lbl_min",{u:t(em.u)})}
+    $("mmin").value=o?o.min:(tl.length?(Math.max.apply(null,tl.map(function(x){return x.min}))*2||1):1);$("minwrap").hidden=!!em.single;$("mmin").step=em.decimal?"0.01":"1";$("hintalert").hidden=!!em.single;$("lbl-min").textContent=t("ev_lbl_min",{u:t(em.u)})}
   else if(kind=="greeting"){$("mc").value=o?o.user:"";$("gmsgs").innerHTML="";gActive=null;(o?o.messages:[""]).forEach(function(m){addMsgBox(m)});gActive=$("gmsgs").querySelector("textarea")}
   else{$("mc").value=o?o.name:"";$("mr").value=o?o.message:"";$("mi").value=o?o.interval_minutes:20}
   $("mc").placeholder=kind=="command"?t("name_ph"):kind=="greeting"?t("gname_ph"):"";
@@ -799,7 +894,7 @@ async function saveEdit(){
         if(!c[key])throw Gone();obj.enabled=c[key].enabled!==false;if(name!=key&&c[name])throw new Error(t("err_exists",{n:name}));
         var out={};Object.keys(c).forEach(function(k){if(k==key)out[name]=obj;else out[k]=c[k]});return out})
     }else if(kind=="alert"){
-      var ak2=M.ak,em2=EVM[ak2],mn=em2.single?0:num("mmin",0,1000000);if(Math.floor(mn)!=mn)throw new Error(t("err_num"));
+      var ak2=M.ak,em2=EVM[ak2],mn=em2.single?0:num("mmin",0,1000000);if(em2.decimal)mn=Math.round(mn*100)/100;else if(Math.floor(mn)!=mn)throw new Error(t("err_num"));
       await mutate("events",function(e){var ev=e[ak2]=e[ak2]||{enabled:true,tiers:[]};ev.tiers=ev.tiers||[];
         var dup=function(i){return !em2.single&&ev.tiers.some(function(x,k){return k!=i&&x.min==mn})};
         if(isNew){if(dup(-1))throw new Error(t("err_dupmin",{n:mn}));ev.tiers.push({min:mn,response:resp})}
@@ -874,7 +969,8 @@ $("ev-cards").addEventListener("click",function(e){
   var ln=e.target.closest(".line");
   if(ln&&e.target.closest(".edit")){openEdit("alert",ln.dataset.k+":"+ln.dataset.i);return}
   if(ln&&e.target.closest(".del")){askTierDelete(ln.dataset.k,+ln.dataset.i);return}
-  var ad=e.target.closest(".addtier");if(ad)openEdit("alert",ad.dataset.k+":new")});
+  var ad=e.target.closest(".addtier");if(ad)openEdit("alert",ad.dataset.k+":new");
+  if(e.target.closest("[data-go=donations]")){location.hash="#settings";setTab("d")}});
 $("grsw").onclick=async function(){var sw=this,on=sw.getAttribute("aria-checked")!="true";sw.setAttribute("aria-checked",on);
   try{await mutate("greetings",function(g){g.enabled=on});renderGreetings();say(t(on?"greet_on_toast":"greet_off_toast"))}catch(e){sw.setAttribute("aria-checked",!on);fail(e)}};
 function setCmdTab(x){tab=x;document.querySelectorAll("#cmdtabs button").forEach(function(b){var on=b.dataset.t==x;b.setAttribute("aria-selected",on);b.tabIndex=on?0:-1});anim=true;renderCommands()}
@@ -1033,6 +1129,117 @@ $("resetbtn").onclick=function(){confirmBox({title:t("reset_q"),body:t("reset_bo
   UI=Object.assign({},UI_DEF,{language:UI.language});applyUi();saveUi(true);
   settingsDirty=false;fillSettings(true);anim=false;renderAll();anim=true;say(t("reset_done"))}})};
 
+/* ===== separate bot account (Settings > Bot > Chat account): another Twitch account writes the replies ===== */
+var BA_ROBOT='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="8" width="16" height="11" rx="3"/><path d="M12 4v4M9 13h.01M15 13h.01"/></svg>',
+    BA_CHECK='<svg class="tick" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>',
+    BA_WARN='<svg class="tick" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 2 21h20z"/><path d="M12 10v5M12 18h.01"/></svg>',
+    BA_SWORD='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19 17 7M14 5h5v5M4 14l6 6"/></svg>',
+    BA_CAM='<svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="7" width="12" height="10" rx="2"/><path d="m16 11 5-3v8l-5-3z"/></svg>';
+function BA(){return Object.assign({enabled:false,state:"none",login:null,is_mod:null,running:false,code:null,uri:null,error:null,problem:null},S.bot_account||{})}
+function baOk(){var a=BA();return a.enabled&&a.state=="connected"}
+function baStat(a){return a.state=="connected"?["ok",t("connected")]:a.state=="connecting"?["wait",t("bb_wait")]:["",t("not_connected")]}
+function baCardChannel(){var me=S.account||"—";return '<div class="acard"><div class="ahead"><span class="aav">'+esc(me.charAt(0).toUpperCase())+'</span><div><b dir="ltr">'+esc(me)+'</b><small>'+t("bac_channel")+'</small></div><span class="astat ok">'+t("connected")+'</span></div><p class="ahint">'+t("bac_channel_s")+'</p></div>'}
+function baCardBot(){
+  var a=BA(),s=baStat(a);
+  if(a.state=="none")return '<div class="acard dash"><div class="ahead"><span class="aav add">+</span><div><b>'+t("bac_none")+'</b><small>'+t("bac_bot")+'</small></div><span class="astat">'+t("not_connected")+'</span></div><p class="ahint">'+t("bac_none_s")+'</p><div class="aact"><button class="btn sm" data-bx="connect" type="button">'+t("bac_connect")+'</button></div></div>';
+  return '<div class="acard"><div class="ahead"><span class="aav bot">'+BA_ROBOT+'</span><div><b dir="ltr">'+esc(a.login||"…")+'</b><small>'+t("bac_bot")+'</small></div><span class="astat '+s[0]+'">'+s[1]+'</span></div><p class="ahint">'+t("bac_bot_s")+'</p><div class="aact">'+(a.state=="connecting"?'<button class="ghost" data-bx="cancel" type="button">'+t("cancel")+'</button>':'<button class="ghost" data-bx="change" type="button">'+t("bac_change")+'</button><button class="ghost" data-bx="disc" type="button">'+t("bac_disc")+'</button>')+'</div></div>'}
+function baModLine(){
+  var a=BA(),el=$("bacmod");
+  if(a.state!="connected"||a.is_mod===null||a.is_mod===undefined){el.hidden=true;return}
+  el.hidden=false;el.className="modline "+(a.is_mod?"ok":"warn");var n='<bdi>'+esc(a.login)+'</bdi>';
+  el.innerHTML=a.is_mod?BA_CHECK+'<div class="grow"><b>'+t("bac_mod_ok",{n:n})+'</b><small>'+t("bac_mod_ok_s")+'</small></div>'
+    :BA_WARN+'<div class="grow"><b>'+t("bac_mod_no",{n:n})+'</b><small>'+t("bac_mod_no_s")+' <span class="codechip">/mod '+esc(a.login)+'</span></small></div><button class="ghost" data-bx="copymod" type="button">'+t("bac_copy")+'</button><button class="ghost" data-bx="check" type="button">'+t("bac_check")+'</button>'}
+function baChatPrev(){
+  var a=BA(),by=baOk(),n=by?a.login:(S.account||"—"),bd=by?'<span class="bd mod">'+BA_SWORD+'</span>':'<span class="bd bc">'+BA_CAM+'</span>',col=by?"#ff7b4a":"#9b6bff";
+  var reply=(a.enabled&&!by)?'<div class="mute">'+t("bac_silent")+'</div>':'<div>'+bd+'<span class="nm" style="color:'+col+'">'+esc(n)+'</span>: Join the Discord! https://discord.gg/example</div>';
+  $("chatprev").innerHTML='<div><span class="nm" style="color:#3b9cff">sami_gamer</span>: discord</div>'+reply}
+function renderBotAccount(){
+  var a=BA();
+  $("bacsw").setAttribute("aria-checked",a.enabled);$("bacbox").hidden=!a.enabled;
+  $("bac-cards").innerHTML=baCardChannel()+baCardBot();baModLine();baChatPrev();
+  $("bactestl").textContent=t("bac_test_s",{n:a.login||"—"});$("bactest").disabled=!(a.enabled&&a.running);
+  var rb=$("botrow");rb.hidden=!a.enabled;
+  if(a.enabled){var s=baStat(a),none=a.state=="none";rb.innerHTML='<span class="aav '+(none?"add":"bot")+'">'+(none?"+":BA_ROBOT)+'</span><span><b dir="ltr">'+esc(none?t("bac_none"):(a.login||"…"))+'</b><i class="'+s[0]+'">'+t("side_bot")+' · '+s[1]+'</i></span>'}}
+function botDashCard(){var a=BA();return '<div class="card"><span>'+t("dash_chat")+'</span><b class="s" dir="ltr">'+esc(a.enabled?(a.login||"—"):(S.account||"—"))+'</b><small>'+t(a.enabled?"dash_chat_on":"dash_chat_off")+'</small></div>'}
+function botBanner(){
+  var a=BA();if(!a.enabled)return null;
+  if(a.state=="connecting"){var safe=a.uri&&/^https:\/\/([a-z0-9-]+\.)*twitch\.tv(\/|$)/i.test(a.uri);   // no "Open Twitch" button: your normal browser is logged in as YOU
+    return ['<span>'+t("bb_login_bot")+' <b class="code" dir="ltr">'+esc(a.code||"…")+'</b></span>'+(safe?'<button class="bbtn" data-bx="copylink" type="button">'+t("bac_copy_link")+'</button>':'')+'<button class="bbtn" data-bx="copycode" type="button">'+t("ban_copy")+'</button><button class="bbtn" data-bx="cancel" type="button">'+t("cancel")+'</button>',"info"]}
+  if(a.state=="none"){
+    if(a.error)return ['<span>'+t("bac_err_conn",{m:esc(a.error)})+'</span><button class="bbtn" data-bx="connect" type="button">'+t("retry")+'</button>',"bad"];
+    return ['<span>'+t(a.problem=="permissions"?"bb_perm":"bb_none")+'</span><button class="bbtn" data-bx="connect" type="button">'+t("bac_connect")+'</button>',"warn"]}
+  if(a.is_mod===false)return ['<span>'+t("bb_nomod",{n:'<bdi>'+esc(a.login)+'</bdi>'})+' <span class="codechip">/mod '+esc(a.login)+'</span></span><button class="bbtn" data-bx="copymod" type="button">'+t("bac_copy")+'</button><button class="bbtn" data-bx="check" type="button">'+t("bac_check")+'</button>',"warn"];
+  return null}
+function baRefresh(){renderBotAccount();renderBanner();renderDashboard()}
+function openBotModal(change){$("bmt").textContent=t(change?"bm_title2":"bm_title");$("bmodal").classList.add("open");$("bmgo").focus()}
+function closeBotModal(){$("bmodal").classList.remove("open")}
+var baFastOn=false;
+async function botFast(){   // while the Twitch code is waiting, look every second so the result shows up quickly
+  if(baFastOn)return;baFastOn=true;
+  try{for(var i=0;i<1800;i++){await new Promise(function(r){setTimeout(r,1000)});await loadStatus();baRefresh();var a=BA();
+      if(a.state!="connecting"){if(a.state=="connected")say(t("bac_conn_toast",{n:a.login}));else if(a.error)say(t("bac_err_conn",{m:a.error}),true);break}}}
+  finally{baFastOn=false}}
+async function botAct(a,el){
+  try{
+    if(a=="connect"||a=="change"){openBotModal(a=="change");return}
+    if(a=="cancel"){await API.post("/api/botaccount/cancel");await loadStatus();baRefresh();return}
+    if(a=="disc"){confirmBox({title:t("bac_disc_q"),body:t("bac_disc_body"),ok:t("bac_disc"),danger:true,run:async function(){await API.post("/api/botaccount/disconnect");await loadStatus();baRefresh();say(t("bac_disc_toast"))}});return}
+    if(a=="copymod"){copyText("/mod "+BA().login);say(t("bac_copied"));return}
+    if(a=="copycode"){copyText(BA().code||"");say(t("ban_copied"));return}
+    if(a=="copylink"){copyText(BA().uri||"");say(t("bac_link_copied"));return}
+    if(a=="check"){if(el)el.disabled=true;say(t("bac_checking"));var r=await API.post("/api/botaccount/check");await loadStatus();baRefresh();var b=BA();
+      if(b.is_mod)say(t("bac_now_mod",{n:b.login}));else if(b.is_mod===false)say(t("bac_still_no",{n:b.login}),true);return}
+  }catch(e){await loadStatus();baRefresh();fail(e)}}
+document.addEventListener("click",function(e){var b=e.target.closest("[data-bx]");if(b)botAct(b.dataset.bx,b)});
+$("bmgo").onclick=async function(){closeBotModal();
+  try{await API.post("/api/botaccount/connect");await loadStatus();baRefresh();botFast()}catch(e){fail(e)}};
+$("bmcancel").onclick=closeBotModal;$("bmodal").addEventListener("mousedown",function(e){if(e.target===$("bmodal"))closeBotModal()});
+document.addEventListener("keydown",function(e){if(e.key=="Escape"&&$("bmodal").classList.contains("open"))closeBotModal()});
+$("bacsw").onclick=async function(){
+  var on=this.getAttribute("aria-checked")!="true";S.bot_account=Object.assign(BA(),{enabled:on});baRefresh();
+  try{await mutate("settings",function(s){s.separate_bot=on});await loadStatus();baRefresh();
+    if(on){say(t("bac_on_toast"));if(BA().state=="none")openBotModal(false)}else say(t("bac_off_toast",{n:S.account||""}))}
+  catch(e){await loadStatus();baRefresh();fail(e)}};
+$("bactest").onclick=async function(){
+  try{var r=await API.post("/api/botaccount/test");say(t("bac_test_done",{n:r.name}))}catch(e){fail(e)}};
+$("botrow").onclick=function(){location.hash="#settings";setTab("b")};
+
+/* ===== Donations (Settings > Donations): Streamlabs and StreamElements tokens ===== */
+var DON=[{k:"streamlabs",name:"Streamlabs",p:"sl"},{k:"streamelements",name:"StreamElements",p:"se"}];
+function DS(k){return Object.assign({state:"none",detail:"",account:""},(S.donations||{})[k]||{})}
+function renderDonations(){
+  var box=$("dcards");if(!box)return;
+  var keep={};box.querySelectorAll("input[data-tok]").forEach(function(i){keep[i.dataset.tok]={v:i.value,f:document.activeElement===i,s:i.selectionStart}});   // never wipe a token someone is typing
+  var enc=!!(S.donations||{}).encrypted,h="";
+  DON.forEach(function(s){
+    var d=DS(s.k),cls={connected:"ok",connecting:"wait",invalid:"bad",error:"bad"}[d.state]||"",linked=d.state!="none",askToken=!linked||d.state=="invalid";
+    h+='<div class="dcard" data-svc="'+s.k+'"><div class="dhead"><span class="dico">$</span><div><b>'+t("don_"+s.p)+'</b><small>'+t("don_"+s.p+"_kind")+' · <span class="dst '+cls+'">'+t("don_st_"+d.state)+'</span>'+(d.account&&d.state=="connected"?' · <bdi>'+esc(d.account)+'</bdi>':'')+'</small></div><span class="ddot '+cls+'"></span></div>';
+    if(d.detail&&(d.state=="invalid"||d.state=="error"))h+='<p class="dwarn">'+esc(d.detail)+'</p>';
+    if(linked)h+='<div class="drow"><span class="dok">'+t("don_saved")+'</span><button class="ghost" data-don="remove" data-svc="'+s.k+'" type="button">'+t("don_remove")+'</button></div>';
+    if(askToken)h+='<label class="dlabel" for="dtok-'+s.p+'">'+t("don_"+s.p+"_label")+'</label><div class="drow"><input id="dtok-'+s.p+'" type="password" data-tok="'+s.k+'" autocomplete="off" spellcheck="false" maxlength="4000" placeholder="'+attr(t("don_"+s.p+"_ph"))+'"><button class="btn sm" data-don="connect" data-svc="'+s.k+'" type="button" disabled>'+t("don_connect")+'</button></div>';
+    h+='<p class="dhint">'+t("don_"+s.p+"_hint")+' '+t(enc?"don_enc":"don_plain")+'</p></div>'});
+  box.innerHTML=h;
+  box.querySelectorAll("input[data-tok]").forEach(function(i){var k=keep[i.dataset.tok];if(k){i.value=k.v;if(k.f){i.focus();try{i.setSelectionRange(k.s,k.s)}catch(e){}}}
+    var b=box.querySelector('button[data-don=connect][data-svc="'+i.dataset.tok+'"]');if(b)b.disabled=!i.value.trim()})}
+async function donConnect(k){
+  var inp=document.querySelector('#dcards input[data-tok="'+k+'"]');if(!inp||!inp.value.trim())return;var token=inp.value;inp.value="";   // the token leaves the page the moment it is sent
+  var btn=document.querySelector('#dcards button[data-don=connect][data-svc="'+k+'"]');if(btn)btn.disabled=true;
+  try{await API.postJson("/api/donations/"+k+"/connect",{token:token});await loadStatus();renderDonations();donFast(k)}
+  catch(e){await loadStatus();renderDonations();fail(e)}}
+var donFastOn={};
+async function donFast(k){   // after Connect: look every second until the service answers
+  if(donFastOn[k])return;donFastOn[k]=true;var name=DON.filter(function(s){return s.k==k})[0].name;
+  try{for(var i=0;i<90;i++){await new Promise(function(r){setTimeout(r,1000)});await loadStatus();renderDonations();renderEvents();var d=DS(k);
+      if(d.state=="connected"){say(t("don_connected_toast",{n:name}));break}
+      if(d.state=="invalid"||d.state=="none"){if(d.detail)say(d.detail,true);break}}}
+  finally{donFastOn[k]=false}}
+$("dcards").addEventListener("input",function(e){var i=e.target.closest("input[data-tok]");if(!i)return;var b=$("dcards").querySelector('button[data-don=connect][data-svc="'+i.dataset.tok+'"]');if(b)b.disabled=!i.value.trim()});
+$("dcards").addEventListener("keydown",function(e){var i=e.target.closest("input[data-tok]");if(i&&e.key=="Enter"){e.preventDefault();donConnect(i.dataset.tok)}});
+$("dcards").addEventListener("click",function(e){
+  var b=e.target.closest("[data-don]");if(!b)return;var k=b.dataset.svc,name=DON.filter(function(s){return s.k==k})[0].name;
+  if(b.dataset.don=="connect")donConnect(k);
+  else confirmBox({title:t("don_remove_q",{n:name}),body:t("don_remove_body"),ok:t("don_remove"),danger:true,run:async function(){await API.post("/api/donations/"+k+"/disconnect");await loadStatus();renderDonations();renderEvents();say(t("don_removed_toast",{n:name}))}})});
+
 /* account menu + banner */
 var me=$("me"),menu=$("menu");
 function closeMenu(){menu.classList.remove("open");me.setAttribute("aria-expanded","false")}
@@ -1058,7 +1265,7 @@ $("banner").addEventListener("click",function(e){var b=e.target.closest("[data-a
 /* ===================== views, language, polling ===================== */
 function placePill(){var a=document.querySelector("#nav a.on"),pl=$("pill");if(a){pl.style.transform="translateY("+a.offsetTop+"px)";pl.style.height=a.offsetHeight+"px"}}
 function countUp(el,to){var t0=null;function f(ts){if(!t0)t0=ts;var k=Math.min((ts-t0)/700,1);el.textContent=Math.round(to*(1-Math.pow(1-k,3)));if(k<1)requestAnimationFrame(f)}requestAnimationFrame(f)}
-var SPANES={a:"spane-a",app:"spane-app",b:"spane-b",n:"spane-n",l:"spane-l"};
+var SPANES={a:"spane-a",app:"spane-app",b:"spane-b",d:"spane-d",n:"spane-n",l:"spane-l"};
 function setTab(x){document.querySelectorAll("#settabs button").forEach(function(b){var on=b.dataset.st==x;b.setAttribute("aria-selected",on);b.tabIndex=on?0:-1});Object.keys(SPANES).forEach(function(k){$(SPANES[k]).hidden=k!=x})}
 $("settabs").addEventListener("click",function(e){var b=e.target.closest("button");if(b)setTab(b.dataset.st)});
 ["settabs","cmdtabs","evtabs"].forEach(function(id){$(id).addEventListener("keydown",function(e){if(e.key!="ArrowRight"&&e.key!="ArrowLeft")return;

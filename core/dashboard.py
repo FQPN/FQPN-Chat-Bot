@@ -8,13 +8,14 @@ import os
 import logging
 import re
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 import aiohttp
 from aiohttp import web
 
-from . import auth, desktop, events, manage, notify, updater
+from . import auth, botauth, desktop, events, manage, notify, updater
 from .store import Store
 
 log = logging.getLogger("twitchbot.dashboard")
@@ -56,8 +57,9 @@ class ValidationError(Exception):
 
 # ---------- Twitch connect / disconnect (used by the dashboard buttons) ----------
 
-async def _login(state: dict) -> None:
-    login = state["login"]
+async def _login(state: dict, role: str = "streamer") -> None:
+    bot_role = role == "bot"
+    login = state["bot_login"] if bot_role else state["login"]
     login.update(status="waiting", code=None, uri=None, message="")
 
     def on_code(code, uri):
@@ -65,9 +67,19 @@ async def _login(state: dict) -> None:
         print(f"\nGo to {uri} and enter code: {code}\n")
 
     try:
-        await auth.device_login(on_code=on_code, open_browser=True)
-        login.update(status="idle", code=None, uri=None, message="")
-        state["wake"].set()          # tells main.py to start the bot
+        if bot_role:    # never opens the browser by itself: it is usually logged in as YOU, not as the bot account
+            await botauth.device_login(on_code=on_code)
+            account = await botauth.get_account()
+            state["bot_account"] = account["login"] if account else None
+            state["bot_mod"] = None
+            login.update(status="idle", code=None, uri=None, message="")
+            store = state.get("store")
+            if store is not None and store.get("settings").get("separate_bot"):
+                restart_bot(state)   # the option is on: (re)start the bot so it talks from the new bot account
+        else:
+            await auth.device_login(on_code=on_code, open_browser=True)
+            login.update(status="idle", code=None, uri=None, message="")
+            state["wake"].set()          # tells main.py to start the bot
     except asyncio.CancelledError:
         login.update(status="idle", code=None, uri=None, message="")
         raise
@@ -101,11 +113,75 @@ async def load_avatar(state: dict, account: dict) -> None:
     state["avatar"] = await fetch_avatar(account)
 
 
-def start_login(state: dict) -> None:
-    login = state.setdefault("login", {"status": "idle"})
+def start_login(state: dict, role: str = "streamer") -> None:
+    key, task_key = ("bot_login", "bot_login_task") if role == "bot" else ("login", "login_task")
+    login = state.setdefault(key, {"status": "idle"})
     if login.get("status") == "waiting":
         return
-    state["login_task"] = asyncio.create_task(_login(state))
+    state[task_key] = asyncio.create_task(_login(state, role))
+
+
+def restart_bot(state: dict) -> None:
+    """Starts the bot again at once, so a changed setting (separate bot account on/off, a new bot account) takes effect.
+    main.py reads the settings each time it starts the bot."""
+    state["restart"] = True
+    wake = state.get("wake")
+    if wake is not None:
+        wake.set()
+    bot = state.get("bot")
+    if bot is not None:
+        state["close_task"] = asyncio.create_task(bot.close())
+
+
+def donation_status(state: dict) -> dict:
+    """Streamlabs / StreamElements connection status for the page. Never contains a token."""
+    manager = state.get("donations")
+    if manager is None:
+        return {"streamlabs": {"state": "none", "detail": "", "account": ""},
+                "streamelements": {"state": "none", "detail": "", "account": ""}, "encrypted": False}
+    return manager.public()
+
+
+def bot_account_info(state: dict, settings: dict) -> dict:
+    """What the dashboard shows about the separate bot account."""
+    bl = state.get("bot_login") or {"status": "idle"}
+    login = state.get("bot_account")
+    if bl.get("status") == "waiting":
+        st = "connecting"
+    elif login:
+        st = "connected"
+    else:
+        st = "none"
+    bot = state.get("bot")
+    return {
+        "enabled": bool(settings.get("separate_bot")),
+        "state": st,
+        "login": login,
+        "is_mod": (state.get("bot_mod") or {}).get("is_mod"),
+        "running": bool(bot and getattr(bot, "separate", False) and bot.connected),
+        "code": bl.get("code"),
+        "uri": bl.get("uri"),
+        "error": bl.get("message") if bl.get("status") == "error" else None,
+        "problem": botauth.last_problem,
+    }
+
+
+async def refresh_bot_mod(state: dict) -> None:
+    """Asks Twitch whether the bot account is a moderator of your channel."""
+    if state.get("mod_busy"):
+        return
+    owner = state.get("account_id")
+    if not owner or not state.get("bot_account"):
+        state["bot_mod"] = None
+        return
+    state["mod_busy"] = True
+    try:
+        state["bot_mod"] = {"is_mod": await botauth.is_moderator(owner), "at": time.time()}
+    except Exception:
+        log.exception("Could not check whether the bot account is a moderator")
+        state["bot_mod"] = {"is_mod": None, "at": time.time()}
+    finally:
+        state["mod_busy"] = False
 
 
 # ---------- validation ----------
@@ -223,7 +299,8 @@ def validate(section: str, data, prefix: str = "!"):
             for t in raw:
                 if not isinstance(t, dict):
                     raise ValidationError("A reply is invalid.")
-                low = int(_number(t.get("min", 0), "The 'from' number", 0, 1000000))
+                low = _number(t.get("min", 0), "The 'from' number", 0, 1000000)
+                low = round(float(low), 2) if key in events.DECIMAL else int(low)      # a donation can have cents
                 if key in events.SINGLE:
                     low = 0
                 if low in seen:
@@ -299,6 +376,7 @@ def validate(section: str, data, prefix: str = "!"):
             "live_check_seconds": int(_number(data.get("live_check_seconds"), "Live check interval", 15, 3600)),
             "commands_url": url,
             "disabled_builtins": sorted(set(off)),
+            "separate_bot": _bool(data.get("separate_bot", False), "Use a separate bot account"),
         }
 
     if section == "prefs":
@@ -349,6 +427,7 @@ def validate(section: str, data, prefix: str = "!"):
 # ---------- web app ----------
 
 def create_app(store: Store, state: dict, port: int | None = None) -> web.Application:
+    state.setdefault("store", store)     # the login code needs the settings too
 
     @web.middleware
     async def guard(request: web.Request, handler):
@@ -375,6 +454,11 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
         return web.Response(body=ICON.read_bytes(), content_type="image/x-icon")
 
     async def status(request):
+        info = bot_account_info(state, store.get("settings"))
+        mod = state.get("bot_mod") or {}
+        if (info["enabled"] and info["login"] and state.get("account_id") and not state.get("mod_busy")
+                and time.time() - mod.get("at", 0) > 120):      # keep the "is it a moderator?" answer fresh
+            state["mod_task"] = asyncio.create_task(refresh_bot_mod(state))
         bot = state.get("bot")
         account = state.get("account")
         uptime = None
@@ -391,6 +475,8 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             "event_problems": dict(getattr(bot, "event_problems", {}) or {}) if bot else {},
             "avatar": state.get("avatar") if account else None,
             "lost": bool(state.get("lost")),
+            "bot_account": bot_account_info(state, store.get("settings")),
+            "donations": donation_status(state),
             "caps": dict(desktop.caps, updates=bool(desktop.FROZEN and not updater.is_dev())),
             "update": {k: updater.U.get(k) for k in ("status", "current", "latest", "notes", "progress", "error")},
         })
@@ -439,7 +525,10 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             except Exception as e:
                 log.exception("Could not change the start-up setting")
                 return web.json_response({"error": "Couldn't change the Windows start-up setting: " + str(e)[:150]}, status=500)
+        previous = store.get("settings") if section == "settings" else None
         store.save(section, data)
+        if section == "settings" and previous is not None and bool(previous.get("separate_bot")) != bool(data.get("separate_bot")):
+            restart_bot(state)          # the bot talks from another account now (or from yours again)
         if section == "prefs":
             store.activity.prune()              # apply a new "Keep logs for"
             wake = state.get("update_wake")
@@ -480,6 +569,71 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             log.exception("Could not show the app window")
         return web.json_response({"ok": True, "shown": True})
 
+    async def donation_connect(request):
+        manager = state.get("donations")
+        if manager is None:
+            return web.json_response({"error": "Donations aren't available yet. Try again in a moment."}, status=503)
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "That request wasn't understood."}, status=400)
+        try:
+            manager.connect(request.match_info["service"], body.get("token") if isinstance(body, dict) else None)
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
+        except OSError as e:
+            log.error("Could not save a donation token: %s", e)          # the token itself is never logged
+            return web.json_response({"error": "Couldn't save the token on this PC: " + str(e)[:120]}, status=500)
+        return web.json_response({"ok": True})
+
+    async def donation_disconnect(request):
+        manager = state.get("donations")
+        if manager is None:
+            return web.json_response({"error": "Donations aren't available yet."}, status=503)
+        try:
+            manager.disconnect(request.match_info["service"])
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
+        return web.json_response({"ok": True})
+
+    async def bot_connect(request):
+        start_login(state, "bot")
+        return web.json_response({"ok": True})
+
+    async def bot_cancel(request):
+        task = state.get("bot_login_task")
+        if task and not task.done():
+            task.cancel()
+        state["bot_login"] = {"status": "idle"}
+        return web.json_response({"ok": True})
+
+    async def bot_disconnect(request):
+        task = state.get("bot_login_task")
+        if task and not task.done():
+            task.cancel()
+        botauth.disconnect()
+        state["bot_account"] = None
+        state["bot_mod"] = None
+        state["bot_login"] = {"status": "idle"}
+        if store.get("settings").get("separate_bot"):
+            restart_bot(state)          # the bot then waits until a bot account is connected again
+        return web.json_response({"ok": True})
+
+    async def bot_check(request):
+        await refresh_bot_mod(state)
+        return web.json_response({"ok": True, "is_mod": (state.get("bot_mod") or {}).get("is_mod")})
+
+    async def bot_test(request):
+        bot = state.get("bot")
+        if not (bot and getattr(bot, "separate", False) and bot.connected):
+            return web.json_response({"error": "The bot isn't running with the bot account yet."}, status=400)
+        try:
+            name = await bot.send_test()
+        except Exception as e:
+            log.exception("The test message could not be sent")
+            return web.json_response({"error": "Twitch refused the message: " + str(e)[:150]}, status=502)
+        return web.json_response({"ok": True, "name": name})
+
     async def reconnect(request):
         state["lost"] = False
         wake = state.get("wake")
@@ -499,6 +653,13 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
     app.router.add_post("/api/connect", connect)
     app.router.add_post("/api/disconnect", disconnect)
     app.router.add_post("/api/reconnect", reconnect)
+    app.router.add_post("/api/botaccount/connect", bot_connect)
+    app.router.add_post("/api/donations/{service}/connect", donation_connect)
+    app.router.add_post("/api/donations/{service}/disconnect", donation_disconnect)
+    app.router.add_post("/api/botaccount/cancel", bot_cancel)
+    app.router.add_post("/api/botaccount/disconnect", bot_disconnect)
+    app.router.add_post("/api/botaccount/check", bot_check)
+    app.router.add_post("/api/botaccount/test", bot_test)
     app.router.add_post("/api/show", show_window)
     app.router.add_post("/api/update/check", update_check)
     app.router.add_post("/api/update/download", update_download)
