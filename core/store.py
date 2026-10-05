@@ -62,6 +62,7 @@ DEFAULTS = {
         "accent": "#9a1118",
         "compact": False,
         "reduceMotion": False,
+        "tourDone": False,         # the guided tour has been seen (finished or skipped), so it does not start by itself again
     },
     "events": {   # automatic replies to Twitch events; each has tiers picked by the event's number
         "watch_streak": {"enabled": True, "tiers": [

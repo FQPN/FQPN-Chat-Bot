@@ -133,6 +133,13 @@ def restart_bot(state: dict) -> None:
         state["close_task"] = asyncio.create_task(bot.close())
 
 
+def keep_tour_flag(section: str, raw, store: Store):
+    """A save of the appearance settings that does not mention the tour keeps the stored value (so it never starts again by mistake)."""
+    if section == "ui" and isinstance(raw, dict) and "tourDone" not in raw:
+        return dict(raw, tourDone=bool(store.get("ui").get("tourDone", False)))
+    return raw
+
+
 def donation_status(state: dict) -> dict:
     """Streamlabs / StreamElements connection status for the page. Never contains a token."""
     manager = state.get("donations")
@@ -419,6 +426,7 @@ def validate(section: str, data, prefix: str = "!"):
             "accent": accent,
             "compact": _bool(data.get("compact", False), "Compact layout"),
             "reduceMotion": _bool(data.get("reduceMotion", False), "Reduce motion"),
+            "tourDone": _bool(data.get("tourDone", False), "Tutorial"),
         }
 
     raise ValidationError("Unknown section.")
@@ -514,7 +522,7 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
         if section not in SECTIONS:
             raise web.HTTPNotFound()
         try:
-            data = validate(section, await request.json())
+            data = validate(section, keep_tour_flag(section, await request.json(), store))
         except ValidationError as e:
             return web.json_response({"error": str(e)}, status=400)
         except (ValueError, AttributeError):
