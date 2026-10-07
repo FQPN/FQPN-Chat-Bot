@@ -348,7 +348,7 @@ def run() -> None:
         # Started by Windows with "Start minimized" on: go straight to the tray (only if a tray icon is possible)
         hidden = "--minimized" in sys.argv and tray_importable()
         shell = Shell(home, resource_dir())
-        shell.window = webview.create_window("FQPN's Chat Bot", url, width=1280, height=800, min_size=(900, 600), hidden=hidden)
+        shell.window = webview.create_window("FQPN's Chat Bot", url, width=1280, height=800, min_size=(1000, 650), hidden=hidden)
         shell.window.events.closing += shell.closing
         desktop.show_window = shell.show              # a second launch asks this copy to show its window
         # private_mode=False + storage_path keeps the dashboard's theme/language between launches

@@ -10,6 +10,18 @@ from .activity import ActivityLog
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 DEFAULTS = {
+    "stream": {                       # the messages the bot says when your stream starts, comes back and ends (off until switched on)
+        "start": {"enabled": False, "text": ""},       # an empty text means "the default in the app's language"
+        "followers": {"enabled": False, "text": ""},
+        "resume": {"enabled": False, "text": ""},
+        "end": {"enabled": False, "text": ""},
+        "end_after_minutes": 2,        # offline this long = the stream really ended (a shorter drop is ignored)
+        "resume_within_minutes": 15,   # back within this long after a drop = the same stream continues
+    },
+    "stream_state": {                 # kept by the app, not a setting: where the current stream session stands
+        "state": "idle", "seg_start": None, "live_seconds": 0.0, "offline_since": None, "ended_at": None,
+        "last_seen": 0.0, "end_total": None, "title": "", "category": "",
+    },
     "commands": {
         "discord": {
             "response": "Join the Discord!",
@@ -63,6 +75,7 @@ DEFAULTS = {
         "compact": False,
         "reduceMotion": False,
         "tourDone": False,         # the guided tour has been seen (finished or skipped), so it does not start by itself again
+        "gsDone": False,           # the "Getting started" checklist reached 5 of 5: it stays hidden from then on
     },
     "events": {   # automatic replies to Twitch events; each has tiers picked by the event's number
         "watch_streak": {"enabled": True, "tiers": [

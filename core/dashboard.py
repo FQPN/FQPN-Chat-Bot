@@ -47,7 +47,7 @@ async def bind_first_free(first: int, tries: int, bind) -> int:
 PAGE = Path(__file__).resolve().parent / "dashboard.html"
 ICON = Path(__file__).resolve().parent.parent / "icon.ico"   # next to main.py (and inside the installed program folder)
 PERMISSIONS = ("everyone", "subscriber", "vip", "moderator", "broadcaster")
-SECTIONS = ("commands", "timers", "greetings", "events", "blocklist", "settings", "ui", "prefs")
+SECTIONS = ("commands", "timers", "greetings", "events", "blocklist", "settings", "ui", "prefs", "stream")
 _LOGIN = re.compile(r"[a-z0-9_]{1,25}")
 
 
@@ -134,10 +134,21 @@ def restart_bot(state: dict) -> None:
 
 
 def keep_tour_flag(section: str, raw, store: Store):
-    """A save of the appearance settings that does not mention the tour keeps the stored value (so it never starts again by mistake)."""
-    if section == "ui" and isinstance(raw, dict) and "tourDone" not in raw:
-        return dict(raw, tourDone=bool(store.get("ui").get("tourDone", False)))
+    """A save of the appearance settings that does not mention the tour or the checklist keeps the stored values
+    (so neither of them comes back by mistake)."""
+    if section == "ui" and isinstance(raw, dict):
+        stored, raw = store.get("ui"), dict(raw)
+        for key in ("tourDone", "gsDone"):
+            if key not in raw:
+                raw[key] = bool(stored.get(key, False))
     return raw
+
+
+def health_info(state: dict) -> dict:
+    """What the watchdog says about the bot's connection, for the page (never anything private)."""
+    h = state.get("health") or {}
+    return {"state": h.get("state", "ok"), "detail": h.get("detail", ""), "warn": h.get("warn", ""),
+            "since": h.get("since"), "restarts": h.get("restarts", 0)}
 
 
 def donation_status(state: dict) -> dict:
@@ -386,6 +397,20 @@ def validate(section: str, data, prefix: str = "!"):
             "separate_bot": _bool(data.get("separate_bot", False), "Use a separate bot account"),
         }
 
+    if section == "stream":
+        if not isinstance(data, dict):
+            raise ValidationError("The stream messages are invalid.")
+        out = {}
+        for kind in ("start", "followers", "resume", "end"):
+            c = data.get(kind)
+            if not isinstance(c, dict):
+                raise ValidationError(f"The '{kind}' stream message is invalid.")
+            out[kind] = {"enabled": _bool(c.get("enabled", False), f"The '{kind}' stream message switch"),
+                         "text": _text(c.get("text", ""), f"The text of the '{kind}' stream message", 500, required=False)}
+        out["end_after_minutes"] = int(_number(data.get("end_after_minutes", 2), "Minutes offline before the stream counts as ended", 1, 30))
+        out["resume_within_minutes"] = int(_number(data.get("resume_within_minutes", 15), "Minutes to come back and continue the stream", 1, 120))
+        return out
+
     if section == "prefs":
         if not isinstance(data, dict):
             raise ValidationError("Settings are invalid.")
@@ -427,6 +452,7 @@ def validate(section: str, data, prefix: str = "!"):
             "compact": _bool(data.get("compact", False), "Compact layout"),
             "reduceMotion": _bool(data.get("reduceMotion", False), "Reduce motion"),
             "tourDone": _bool(data.get("tourDone", False), "Tutorial"),
+            "gsDone": _bool(data.get("gsDone", False), "Getting started"),
         }
 
     raise ValidationError("Unknown section.")
@@ -483,6 +509,7 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             "event_problems": dict(getattr(bot, "event_problems", {}) or {}) if bot else {},
             "avatar": state.get("avatar") if account else None,
             "lost": bool(state.get("lost")),
+            "health": health_info(state),
             "bot_account": bot_account_info(state, store.get("settings")),
             "donations": donation_status(state),
             "caps": dict(desktop.caps, updates=bool(desktop.FROZEN and not updater.is_dev())),
@@ -642,6 +669,10 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             return web.json_response({"error": "Twitch refused the message: " + str(e)[:150]}, status=502)
         return web.json_response({"ok": True, "name": name})
 
+    async def restart(request):
+        restart_bot(state)               # the "Restart bot" button: a fresh connection to Twitch, right now
+        return web.json_response({"ok": True})
+
     async def reconnect(request):
         state["lost"] = False
         wake = state.get("wake")
@@ -661,6 +692,7 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
     app.router.add_post("/api/connect", connect)
     app.router.add_post("/api/disconnect", disconnect)
     app.router.add_post("/api/reconnect", reconnect)
+    app.router.add_post("/api/restart", restart)
     app.router.add_post("/api/botaccount/connect", bot_connect)
     app.router.add_post("/api/donations/{service}/connect", donation_connect)
     app.router.add_post("/api/donations/{service}/disconnect", donation_disconnect)

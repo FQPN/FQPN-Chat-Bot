@@ -15,23 +15,25 @@ problems, notes = [], []
 
 REQUIRED = ["main.py", "launcher.py", "core/__init__.py", "core/auth.py", "core/bot.py", "core/dashboard.py",
             "core/dashboard.html", "core/store.py", "core/manage.py", "core/variables.py", "core/greetings.py",
-            "core/events.py", "core/version.py", "core/activity.py", "core/notify.py", "core/desktop.py", "core/updater.py", "core/botauth.py", "core/donations.py"]
+            "core/events.py", "core/version.py", "core/activity.py", "core/notify.py", "core/desktop.py", "core/updater.py", "core/botauth.py", "core/donations.py", "core/watchdog.py", "core/stream.py"]
 
 # a phrase that only the NEW version of each file contains
 NEW_IN = {
-    "main.py": ["open_browser", "updater.loop", "apply_launch_defaults", "python launcher.py", "botauth", "donations"],
-    "launcher.py": ["class Shell", "ensure_single_instance", "fail_no_window", "edgechromium", "read_port", "fail_no_dashboard"],
-    "core/store.py": ["ActivityLog", '"prefs"', "apply_launch_defaults", "disabled_builtins", "separate_bot", "donation", "tourDone"],
-    "core/bot.py": ["store.activity", "notify.event", "_log_chat", "disabled_builtins", "BY_TYPED", "bot_account", "send_test", "on_donation"],
+    "main.py": ["open_browser", "updater.loop", "apply_launch_defaults", "python launcher.py", "botauth", "donations", "watchdog"],
+    "launcher.py": ["min_size=(1000, 650)", "class Shell", "ensure_single_instance", "fail_no_window", "edgechromium", "read_port", "fail_no_dashboard"],
+    "core/store.py": ["ActivityLog", '"prefs"', "apply_launch_defaults", "disabled_builtins", "separate_bot", "donation", "tourDone", "gsDone", "stream_state"],
+    "core/bot.py": ["store.activity", "notify.event", "_log_chat", "disabled_builtins", "BY_TYPED", "bot_account", "send_test", "on_donation", "live_fail", "StreamSession", "event_stream_online"],
     "core/donations.py": ["class DonationManager", "parse_streamelements", "CryptProtectData"],
     "core/events.py": ["DECIMAL", "donation"],
     "core/notify.py": ["donation"],
     "core/botauth.py": ["def is_moderator", "bot_token.json"],
+    "core/stream.py": ["class StreamSession", "DEFAULT_TEXT", "STALE"],
+    "core/watchdog.py": ["class Watchdog", "channel.chat.message", "MAX_RESTARTS"],
     "core/manage.py": ["BUILTIN_NAMES", "BY_TYPED"],
-    "core/dashboard.py": ['"prefs"', "updater", "/api/update/check", "/api/show", "disabled_builtins", "bind_first_free", "/api/botaccount/connect", "restart_bot", "/api/donations/", "tourDone"],
+    "core/dashboard.py": ['"prefs"', "updater", "/api/update/check", "/api/show", "disabled_builtins", "bind_first_free", "/api/botaccount/connect", "restart_bot", "/api/donations/", "tourDone", "gsDone", "/api/restart", "health_info", "The stream messages are invalid"],
     "core/updater.py": ["def announce"],
     "core/desktop.py": ["quit_app", "show_window"],
-    "core/dashboard.html": ["data-pref", "spane-app", "updbtn", "toggleBuiltin", "transform-origin:15px 7px", 'class="sep"', "BNAME", "upop_title", "bac-cards", "botBanner", "dcards", "navActive", "ngrp", "startTour", "tourBtn", "v-greetings", "v-botaccount", "v-donations"],
+    "core/dashboard.html": ["data-pref", "spane-app", "updbtn", "toggleBuiltin", "transform-origin:15px 7px", 'class="sep"', "BNAME", "upop_title", "bac-cards", "botBanner", "dcards", "navActive", "ngrp", "startTour", "tourBtn", "v-greetings", "v-botaccount", "v-donations", "renderAccountMenu", "healthBanner", "renderStream"],
 }
 
 # a phrase that only the OLD version of a file contains (so it must NOT be there)

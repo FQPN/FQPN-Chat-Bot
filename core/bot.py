@@ -17,6 +17,7 @@ from twitchio.ext import commands
 from . import auth, botauth, events, greetings, manage, notify
 from .manage import CommandError
 from .store import Store
+from .stream import StreamSession
 from .variables import Context, expand, uses_variable
 
 log = logging.getLogger("twitchbot")
@@ -72,6 +73,13 @@ class TwitchBot(commands.Bot):
         self.separate = bot_account is not None and str(bot_account["user_id"]) != str(account["user_id"])
         self.store = store or Store()
         self.connected = False
+        self.live_fail = 0          # live checks that failed in a row (the watchdog warns when timers may be waiting because of it)
+        self.last_chat = 0.0        # when a chat message was last heard
+        self._live_wake = asyncio.Event()      # Twitch saying "online" or "offline" makes the live check run right now
+        self.session = StreamSession(          # the messages for when the stream starts, comes back and ends (Events > Stream)
+            self.store, send=lambda text: self._send(text), followers=lambda: self._follower_total(), channel=account["login"],
+            paused=lambda: bool(self.store.get("settings").get("paused")),
+            log_event=lambda kind: self._log_activity("event", "stream " + kind))
         self.is_live = False
         self.live_since: datetime | None = None
         self._cooldowns: dict[str, float] = {}
@@ -324,6 +332,10 @@ class TwitchBot(commands.Bot):
                 log.warning("Can't listen for %s events (%s). They need an extra Twitch permission: add it to auth.py and reconnect.",
                             name, e.__class__.__name__)
         owner = self.owner_id
+        # online / offline only wake the live check up early; the check itself is what decides, so if this is refused nothing is lost
+        await attempt("stream",
+                      lambda: eventsub.StreamOnlineSubscription(broadcaster_user_id=owner),
+                      lambda: eventsub.StreamOfflineSubscription(broadcaster_user_id=owner))
         # you are always allowed to see your own followers, so with a separate bot account you are the "moderator" here
         await attempt("follow", lambda: eventsub.ChannelFollowSubscription(broadcaster_user_id=owner, moderator_user_id=owner))
         await attempt("hype_train",
@@ -518,6 +530,7 @@ class TwitchBot(commands.Bot):
     # ---------- chat ----------
 
     async def event_message(self, payload) -> None:
+        self.last_chat = time.time()      # proof that chat is arriving (the watchdog quotes it when it has to reconnect)
         # Note: we do NOT ignore the streamer's own messages (the bot IS the
         # streamer's account), only the bot's own replies.
         if payload.source_broadcaster is not None or self._is_own_echo(payload):
@@ -669,9 +682,14 @@ class TwitchBot(commands.Bot):
                 async for s in self.fetch_streams(user_ids=[self.owner_id], type="live"):
                     stream = s
                     break
+                self.live_fail = 0
                 was_live = self.is_live
                 self.is_live = stream is not None
                 self.live_since = stream.started_at if stream else None
+                try:
+                    await self.session.step(stream is not None, self._stream_info(stream))
+                except Exception:
+                    log.exception("Stream messages failed")
                 if self.is_live and not was_live:
                     log.info("Stream went LIVE - bot active")
                 elif was_live and not self.is_live:
@@ -679,8 +697,34 @@ class TwitchBot(commands.Bot):
             except asyncio.CancelledError:
                 raise
             except Exception:
+                self.live_fail += 1
                 log.exception("Live check failed")
-            await asyncio.sleep(max(15, self.store.get("settings").get("live_check_seconds", 60)))
+            try:   # sleep until the next check, or until Twitch announces that the stream went online or offline
+                await asyncio.wait_for(self._live_wake.wait(), timeout=max(15, self.store.get("settings").get("live_check_seconds", 60)))
+            except asyncio.TimeoutError:
+                pass
+            self._live_wake.clear()
+
+    @staticmethod
+    def _stream_info(stream) -> dict | None:
+        if stream is None:
+            return None
+        started = getattr(stream, "started_at", None)
+        return {"started_at": started.timestamp() if started else None, "title": getattr(stream, "title", "") or "",
+                "category": getattr(stream, "game_name", "") or ""}
+
+    async def _follower_total(self):
+        """How many followers the channel has right now (None if Twitch will not say)."""
+        owner = self.create_partialuser(self.owner_id)
+        result = await owner.followers(first=1, token_for=self.owner_id)
+        total = getattr(result, "total", None)
+        return int(total) if total is not None else None
+
+    async def event_stream_online(self, payload) -> None:
+        self._live_wake.set()
+
+    async def event_stream_offline(self, payload) -> None:
+        self._live_wake.set()
 
     # ---------- timers ----------
 
