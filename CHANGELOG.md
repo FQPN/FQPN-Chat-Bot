@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.1.9
+- **New variable $(viewers):** how many people are watching right now. Use it in commands and timers, for example a timer with 【 $(viewers) viewers ⏰ $(uptime) 】. It updates with every live check (about once a minute) and shows 0 when you are offline. In a raid reply, $(viewers) still means the number of people who raided you, as before.
+
 ## 1.1.7
 - **The app is laid out for every window size.** The smallest window is now 1000 x 650 (bigger than a phone screen), and everything from there up to a very large monitor is arranged on purpose. The Commands table uses columns when there is room and tidy cards when there is not, so nothing is squeezed or cut off. On narrower windows the sidebar becomes a slim strip of icons (hover for the name). On very wide windows the content keeps a readable width, centered. Arabic answers line up with the rest, tab rows wrap instead of hiding, and short windows get tighter spacing.
 - **One account in the sidebar.** Your avatar opens a small menu with your channel account, the bot account (click it to manage it) and Disconnect.
