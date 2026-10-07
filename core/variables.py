@@ -1,5 +1,5 @@
 """Nightbot-style variables: $(user) $(touser) $(query) $(querystring)
-$(count) $(urlfetch URL) $(eval MATH) $(channel) $(game) $(title) $(uptime)
+$(count) $(urlfetch URL) $(eval MATH) $(channel) $(game) $(title) $(uptime) $(viewers)
 
 Safety rules:
 - Only the response template is expanded. Text that comes from chat (the
@@ -275,6 +275,7 @@ class Context:
     query: str = ""
     channel: str = ""
     uptime: str = ""
+    viewers: int = 0        # how many people are watching right now (updated with every live check)
     count: Callable[[], int] = lambda: 0
     game: Callable[[], Awaitable[str]] | None = None
     title: Callable[[], Awaitable[str]] | None = None
@@ -374,6 +375,8 @@ async def expand(template: str, ctx: Context) -> str:
             return f"followed {ctx.channel} on {follow_date(when)} ({follow_age(when)} ago)"
         if key == "streak" and ctx.streak is not None:
             return str(ctx.streak)
+        if key == "viewers" and "viewers" not in ctx.extra:
+            return str(ctx.viewers)          # in a raid reply, $(viewers) still means the size of the raid (it is in ctx.extra)
         if key in ctx.extra:
             return str(ctx.extra[key])
         if key == "eval":

@@ -81,6 +81,7 @@ class TwitchBot(commands.Bot):
             paused=lambda: bool(self.store.get("settings").get("paused")),
             log_event=lambda kind: self._log_activity("event", "stream " + kind))
         self.is_live = False
+        self.viewers = 0            # how many people are watching right now ($(viewers)), from the live check
         self.live_since: datetime | None = None
         self._cooldowns: dict[str, float] = {}
         self._sent_ids: set[str] = set()
@@ -308,6 +309,7 @@ class TwitchBot(commands.Bot):
             query=query,
             channel=self.account["login"],
             uptime=uptime,
+            viewers=self.viewers,
             count=(lambda: self._bump(counter_key)) if counter_key else (lambda: 0),
             game=self._game,
             title=self._title,
@@ -685,6 +687,7 @@ class TwitchBot(commands.Bot):
                 self.live_fail = 0
                 was_live = self.is_live
                 self.is_live = stream is not None
+                self.viewers = int(getattr(stream, "viewer_count", 0) or 0) if stream is not None else 0
                 self.live_since = stream.started_at if stream else None
                 try:
                     await self.session.step(stream is not None, self._stream_info(stream))
