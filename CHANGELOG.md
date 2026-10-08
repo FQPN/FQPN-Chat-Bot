@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.0
+- **New: Public command list.** Commands → **Public list** gives your channel one short link (for example `…/fqpn_`) to a web page that lists your commands, grouped by who can use them, with search, in English and Arabic. It updates by itself a few seconds after you change a command, and **Use for !cmlist** makes `!cmlist` send that link. It is off until you switch it on.
+- Only the names of switched-on commands and who can use them are shared, never the replies. Each command has a new **Show on the public list** switch to keep it off the page. Switching the list off removes it from the website.
+- Your Twitch login is sent with the list so the website can check which channel it is; the website does not keep it. If the website is down, the app keeps trying by itself and everything else works as before.
+- **Fixed:** the Dashboard's Bot status said "Message is off" instead of "Connected · offline" when you were connected but not live (since 1.1.7).
+
+## 1.1.10
+- **Fixed: the variable tooltips were shifted by one.** In 1.1.9, hovering a variable button from $(viewers) to $(raider) showed the explanation and example of the next button (for example $(viewers) explained $(follow)). Each button now shows its own text again, in English and Arabic. $(viewers) is explained as the number of people watching now (in a raid reply, the number of raiders). Replies and commands were never affected, only the help text.
+
 ## 1.1.9
 - **New variable $(viewers):** how many people are watching right now. Use it in commands and timers, for example a timer with 【 $(viewers) viewers ⏰ $(uptime) 】. It updates with every live check (about once a minute) and shows 0 when you are offline. In a raid reply, $(viewers) still means the number of people who raided you, as before.
 

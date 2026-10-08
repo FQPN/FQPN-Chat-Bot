@@ -18,6 +18,9 @@ DEFAULTS = {
         "end_after_minutes": 2,        # offline this long = the stream really ended (a shorter drop is ignored)
         "resume_within_minutes": 15,   # back within this long after a drop = the same stream continues
     },
+    "publist_state": {                # kept by the app, not a setting: what was last sent to the public list website
+        "uploaded": False, "digest": "", "login": "", "at": None,
+    },
     "stream_state": {                 # kept by the app, not a setting: where the current stream session stands
         "state": "idle", "seg_start": None, "live_seconds": 0.0, "offline_since": None, "ended_at": None,
         "last_seen": 0.0, "end_total": None, "title": "", "category": "",
@@ -55,6 +58,8 @@ DEFAULTS = {
         "commands_url": "",
         "disabled_builtins": [],   # built-in commands switched off in Commands > Built-in
         "separate_bot": False,     # the bot talks from its own Twitch account (Settings > Bot > Chat account)
+        "public_list": False,      # keep a public copy of the command list on the website (Commands > Public list)
+        "public_hidden": [],       # command names left off the public list (kept here so the commands themselves don't change)
     },
     "prefs": {   # how the installed app behaves (Settings > App, Notifications, Logs and data)
         "startup": False,          # start with Windows

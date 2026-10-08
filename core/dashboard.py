@@ -15,7 +15,7 @@ from pathlib import Path
 import aiohttp
 from aiohttp import web
 
-from . import auth, botauth, desktop, events, manage, notify, updater
+from . import auth, botauth, desktop, events, manage, notify, publiclist, updater
 from .store import Store
 
 log = logging.getLogger("twitchbot.dashboard")
@@ -142,6 +142,13 @@ def keep_tour_flag(section: str, raw, store: Store):
             if key not in raw:
                 raw[key] = bool(stored.get(key, False))
     return raw
+
+
+def publist_info(state: dict) -> dict:
+    """Where the public command list stands, for the page: off | nosite | login | waiting | saving | ok | offline | error."""
+    p = state.get("publist") or {}
+    return {"state": p.get("state", "off"), "url": p.get("url", ""), "error": p.get("error", ""), "at": p.get("at"),
+            "site": publiclist.SITE}
 
 
 def health_info(state: dict) -> dict:
@@ -384,6 +391,14 @@ def validate(section: str, data, prefix: str = "!"):
         url = _text(data.get("commands_url", ""), "Commands page link", 300, required=False)
         if url and not url.lower().startswith(("http://", "https://")):
             raise ValidationError("The commands page link must start with http:// or https://")
+        hidden = data.get("public_hidden", [])
+        if not isinstance(hidden, list) or len(hidden) > 1000:
+            raise ValidationError("The commands left off the public list must be a list.")
+        hidden_clean = []
+        for x in hidden:
+            x = _text(x, "Command name", 60, required=False)
+            if x and x not in hidden_clean:
+                hidden_clean.append(x)
         off = data.get("disabled_builtins", [])
         if not isinstance(off, list) or any(x not in manage.BUILTIN_KEYS for x in off):
             raise ValidationError("Choose built-in commands from the list.")
@@ -395,6 +410,8 @@ def validate(section: str, data, prefix: str = "!"):
             "commands_url": url,
             "disabled_builtins": sorted(set(off)),
             "separate_bot": _bool(data.get("separate_bot", False), "Use a separate bot account"),
+            "public_list": _bool(data.get("public_list", False), "Public command list"),
+            "public_hidden": hidden_clean,
         }
 
     if section == "stream":
@@ -512,6 +529,7 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             "health": health_info(state),
             "bot_account": bot_account_info(state, store.get("settings")),
             "donations": donation_status(state),
+            "publist": publist_info(state),
             "caps": dict(desktop.caps, updates=bool(desktop.FROZEN and not updater.is_dev())),
             "update": {k: updater.U.get(k) for k in ("status", "current", "latest", "notes", "progress", "error")},
         })
@@ -562,6 +580,8 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
                 return web.json_response({"error": "Couldn't change the Windows start-up setting: " + str(e)[:150]}, status=500)
         previous = store.get("settings") if section == "settings" else None
         store.save(section, data)
+        if section in ("commands", "settings") and state.get("publist_wake") is not None:
+            state["publist_wake"].set()         # the public command list follows the change in a few seconds
         if section == "settings" and previous is not None and bool(previous.get("separate_bot")) != bool(data.get("separate_bot")):
             restart_bot(state)          # the bot talks from another account now (or from yours again)
         if section == "prefs":
@@ -570,6 +590,12 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             if wake is not None and data.get("auto_update"):
                 wake.set()                      # look for updates now that automatic updates are on
         return web.json_response(data)
+
+    async def publist_sync(request):
+        syncer = state.get("publist_syncer")
+        if syncer is not None:
+            syncer.sync_now()
+        return web.json_response({"ok": True})
 
     async def update_check(request):
         await updater.check(updater.U)
@@ -705,6 +731,7 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
     app.router.add_post("/api/update/download", update_download)
     app.router.add_post("/api/update/install", update_install)
     app.router.add_post("/api/notify/test", notify_test)
+    app.router.add_post("/api/publist/sync", publist_sync)
     app.router.add_get("/api/{section}", read)
     app.router.add_put("/api/{section}", write)
     return app
