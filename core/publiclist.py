@@ -17,9 +17,9 @@ from .version import VERSION
 
 log = logging.getLogger("twitchbot.publiclist")
 
-# The website's address, with no slash at the end, e.g. "https://fqpn-commands.fqpn.workers.dev".
+# The website's address, with no slash at the end, e.g. "https://fqpn-asoom-commands.fqpn.workers.dev".
 # Empty = the feature is not set up in this build (the page says so and nothing is ever sent).
-SITE = "https://fqpn-commands.aymanxxxcrd.workers.dev"
+SITE = "https://fqpn-asoom-commands.aymanxxxcrd.workers.dev"
 
 FORMAT = 1              # the version of the data format; the website reads older formats too (room to add fields later)
 CHECK_EVERY = 5         # seconds between looks at the commands (a save in the app wakes it straight away)
