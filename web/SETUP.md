@@ -31,12 +31,13 @@ different name, look for the closest match.
    (This is your app's public Twitch client ID, the same one in `core/auth.py`. With it, only logins made by
    FQPN's Chat Bot can save lists.)
 
-## 5b. Your private users list (v1.4.0)
-1. Same worker → **Settings → Variables and Secrets → Add**.
-2. Type **Secret** (not Text), name `ADMIN_KEY`, value: a long password only you know (at least 12 characters) → **Deploy**.
-3. Open `https://<your website>/admin` and type that password. It shows every channel that uses the app: name (a link to
-   their Twitch), app version, last seen and first seen. Nobody without the password can see it.
-   Or in D1 → Console: `SELECT login, version, datetime(last_seen,'unixepoch') FROM seen ORDER BY last_seen DESC;`
+## 5b. Your users list (since v1.5.0: inside the app, developers only)
+The list of channels that use the app is the **Users** page inside the app. It appears only when the app is logged in with a
+developer's Twitch account (1asoom or fqpn_), and the website checks the Twitch user ID itself before answering. From there you
+can also turn the app off for a channel (and back on). No password is needed any more: if you added an `ADMIN_KEY` secret for
+v1.4.0, you can delete it (worker → Settings → Variables and Secrets). To add a developer: add their Twitch user ID to
+`DEVELOPERS` in `web/worker.js` AND in `core/greetings.py`.
+Or in D1 → Console: `SELECT login, version, datetime(last_seen,'unixepoch') FROM seen ORDER BY last_seen DESC;`
 
 ## 6. Check it
 - Open `https://fqpn-commands.<your-subdomain>.workers.dev/` → you should see "Public command lists".

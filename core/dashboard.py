@@ -15,7 +15,7 @@ from pathlib import Path
 import aiohttp
 from aiohttp import web
 
-from . import auth, botauth, desktop, events, manage, notify, publiclist, updater
+from . import auth, botauth, desktop, events, greetings, manage, moderation, notify, publiclist, updater
 from .store import Store
 
 log = logging.getLogger("twitchbot.dashboard")
@@ -47,7 +47,7 @@ async def bind_first_free(first: int, tries: int, bind) -> int:
 PAGE = Path(__file__).resolve().parent / "dashboard.html"
 ICON = Path(__file__).resolve().parent.parent / "icon.ico"   # next to main.py (and inside the installed program folder)
 PERMISSIONS = ("everyone", "subscriber", "vip", "moderator", "broadcaster")
-SECTIONS = ("commands", "timers", "greetings", "events", "blocklist", "settings", "ui", "prefs", "stream")
+SECTIONS = ("commands", "timers", "greetings", "events", "blocklist", "settings", "ui", "prefs", "stream", "moderation")
 _LOGIN = re.compile(r"[a-z0-9_]{1,25}")
 
 
@@ -435,6 +435,58 @@ def validate(section: str, data, prefix: str = "!"):
         out["resume_within_minutes"] = int(_number(data.get("resume_within_minutes", 15), "Minutes to come back and continue the stream", 1, 120))
         return out
 
+    if section == "moderation":
+        if not isinstance(data, dict):
+            raise ValidationError("The moderation settings are invalid.")
+        base = moderation.defaults()
+        out = {"shared_chat": _bool(data.get("shared_chat", False), "Shared chat")}
+
+        def listed(raw, label, limit=500):
+            if not isinstance(raw, list) or len(raw) > limit:
+                raise ValidationError(f"{label} must be a list of at most {limit}.")
+            return raw
+        for f in moderation.FILTERS:
+            c = data.get(f, base[f])
+            if not isinstance(c, dict):
+                raise ValidationError(f"The '{f}' filter is invalid.")
+            steps = c.get("steps", [0, 60, 600])
+            if not isinstance(steps, list) or not 1 <= len(steps) <= 6 or any(isinstance(x, bool) or not isinstance(x, int) or not 0 <= x <= 1209600 for x in steps):
+                raise ValidationError("Each punishment step is 0 (a warning) or a timeout of up to 14 days, in seconds (1 to 6 steps).")
+            action = c.get("action", "steps")
+            if action not in moderation.ACTIONS:
+                raise ValidationError("Choose what the filter does.")
+            o = {"enabled": _bool(c.get("enabled", False), "Filter switch"), "exempt_vip": _bool(c.get("exempt_vip", True), "Skip VIPs"),
+                 "exempt_sub": _bool(c.get("exempt_sub", False), "Skip subscribers"), "action": action, "steps": steps,
+                 "warn_text": _text(c.get("warn_text", ""), "Warning message", 300, required=False)}
+            if f == "badwords":
+                ws, seen = [], set()
+                for e in listed(c.get("words", []), "Bad words", 1000):
+                    w = _text(e.get("w", "") if isinstance(e, dict) else e, "Bad word", 60, required=False)
+                    if w and w.lower() not in seen:
+                        seen.add(w.lower())
+                        ws.append({"w": w, "anywhere": _bool(e.get("anywhere", False) if isinstance(e, dict) else False, "Anywhere")})
+                o["words"] = ws
+                o["allowed"] = list(dict.fromkeys(a for a in (_text(x, "Allowed word", 60, required=False) for x in listed(c.get("allowed", []), "Allowed words")) if a))
+            elif f == "links":
+                tr = []
+                for x in listed(c.get("trusted", []), "Trusted sites"):
+                    d = _text(x, "Trusted site", 100, required=False).lower().strip().removeprefix("https://").removeprefix("http://").removeprefix("www.").split("/")[0]
+                    if d and not re.fullmatch(r"[a-z0-9.-]+\.[a-z]{2,24}", d):
+                        raise ValidationError(f"'{d}' doesn't look like a website address (like example.com).")
+                    if d and d not in tr:
+                        tr.append(d)
+                o["trusted"] = tr
+            elif f in ("caps", "symbols"):
+                o["percent"] = int(_number(c.get("percent", base[f]["percent"]), "Percent", 10, 100))
+                o["min_length"] = int(_number(c.get("min_length", base[f]["min_length"]), "Minimum length", 1, 500))
+            elif f == "emotes":
+                o["max"] = int(_number(c.get("max", 7), "Most emotes", 1, 100))
+            elif f == "repeats":
+                o["word_repeats"] = int(_number(c.get("word_repeats", 6), "Repeated words", 2, 100))
+                o["same_message"] = int(_number(c.get("same_message", 3), "Same message", 2, 20))
+            out[f] = o
+        return out
+
     if section == "prefs":
         if not isinstance(data, dict):
             raise ValidationError("Settings are invalid.")
@@ -537,6 +589,9 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             "bot_account": bot_account_info(state, store.get("settings")),
             "donations": donation_status(state),
             "publist": publist_info(state),
+            "mod_problem": getattr(state.get("bot"), "mod_problem", None),
+            "banned": bool(state.get("banned")),                                       # the developer turned the app off here
+            "dev": str(state.get("account_id") or "") in greetings.DEVELOPERS,           # shows the Users page (the website checks again)   # Twitch refused a delete/timeout ("scopes" = reconnect)
             "caps": dict(desktop.caps, updates=bool(desktop.FROZEN and not updater.is_dev())),
             "update": {k: updater.U.get(k) for k in ("status", "current", "latest", "notes", "progress", "error")},
         })
@@ -603,6 +658,30 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
         if syncer is not None:
             syncer.sync_now()
         return web.json_response({"ok": True})
+
+    async def dev_users(request):
+        """Developers only: the list of channels that use the app, from the website (which checks the user ID itself)."""
+        if str(state.get("account_id") or "") not in greetings.DEVELOPERS:
+            return web.json_response({"error": "Not available."}, status=403)
+        token = (auth.load_token() or {}).get("access_token") or ""
+        code, body, _ = await publiclist.http_send("GET", token, None, path="/api/dev/users")
+        if code == 0:
+            return web.json_response({"error": "The website can't be reached right now."}, status=503)
+        return web.json_response(body, status=code if code in (200, 401, 403) else 502)
+
+    async def dev_ban(request):
+        if str(state.get("account_id") or "") not in greetings.DEVELOPERS:
+            return web.json_response({"error": "Not available."}, status=403)
+        try:
+            data = await request.json()
+            uid, ban = str(data["user_id"]), bool(data["banned"])
+        except Exception:
+            return web.json_response({"error": "The request couldn't be read."}, status=400)
+        token = (auth.load_token() or {}).get("access_token") or ""
+        code, body, _ = await publiclist.http_send("PUT", token, {"user_id": uid, "banned": ban}, path="/api/dev/ban")
+        if code == 0:
+            return web.json_response({"error": "The website can't be reached right now."}, status=503)
+        return web.json_response(body, status=code if code in (200, 400, 401, 403) else 502)
 
     async def update_check(request):
         await updater.check(updater.U)
@@ -743,6 +822,8 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
     app.router.add_post("/api/update/check", update_check)
     app.router.add_post("/api/update/download", update_download)
     app.router.add_post("/api/update/nudge", update_nudge)
+    app.router.add_get("/api/dev/users", dev_users)
+    app.router.add_post("/api/dev/ban", dev_ban)
     app.router.add_post("/api/update/install", update_install)
     app.router.add_post("/api/notify/test", notify_test)
     app.router.add_post("/api/publist/sync", publist_sync)

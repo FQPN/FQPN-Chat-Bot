@@ -18,6 +18,8 @@ SCOPES = [
     "user:write:chat",
     "moderator:manage:announcements",   # /announce (the bot must be a moderator)
     "user:read:moderated_channels",     # to check whether the bot is a moderator of your channel
+    "moderator:manage:chat_messages",    # Moderation: delete messages that break a filter (1.5.0)
+    "moderator:manage:banned_users",     # Moderation: time people out (1.5.0)
 ]
 last_problem: str | None = None         # "permissions" when the saved login lacks a permission and must be redone
 

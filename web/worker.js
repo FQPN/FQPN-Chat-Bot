@@ -9,8 +9,8 @@
 //   PUT    /api/list            save your list    (Authorization: OAuth <your Twitch login token from the app>)
 //   DELETE /api/list            remove your list  (same)
 //   PUT    /api/seen            "this channel uses the app, version X" (once a day from every app; same login check)
-//   GET    /admin               the developer's private users list (asks for ADMIN_KEY, a secret set in Cloudflare)
-//   GET    /api/admin/users     the same list as JSON (Authorization: Bearer <ADMIN_KEY>)
+//   GET    /api/dev/users       the users list, ONLY for the app's developers (their Twitch login, checked by user ID)
+//   PUT    /api/dev/ban         ban / unban a channel from using the app (developers only)
 //
 // The Twitch token is only used to ask Twitch whose channel it is. It is never stored or logged.
 
@@ -22,7 +22,9 @@ const MIN_GAP = 5;             // seconds between two saves of the same channel
 const PERMS = ["everyone", "subscriber", "vip", "moderator", "broadcaster"];
 const LOGIN_RE = /^[a-z0-9_]{1,25}$/;
 const VERSION_RE = /^[0-9A-Za-z.+-]{1,32}$/;
-const SEEN_GAP = 3600;         // one report per channel per hour is plenty (the app sends once a day)
+const SEEN_GAP = 3600;
+// The app's developers by permanent Twitch user ID (same list as core/greetings.py). To add one, add the ID in both places.
+const DEVELOPERS = new Set(["1299878164" /* 1asoom */, "754527671" /* fqpn_ */]);         // one report per channel per hour is plenty (the app sends once a day)
 const AVATAR_RE = /^https:\/\/static-cdn\.jtvnw\.net\/[A-Za-z0-9._\/-]+$/;
 
 let tablesReady = false;
@@ -32,6 +34,7 @@ async function setup(db) {
     db.prepare("CREATE TABLE IF NOT EXISTS lists (login TEXT PRIMARY KEY, user_id TEXT NOT NULL, display TEXT, avatar TEXT, data TEXT NOT NULL, updated INTEGER NOT NULL)"),
     db.prepare("CREATE INDEX IF NOT EXISTS lists_user ON lists(user_id)"),
     db.prepare("CREATE TABLE IF NOT EXISTS blocked (who TEXT PRIMARY KEY, note TEXT)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS bans (user_id TEXT PRIMARY KEY, login TEXT, at INTEGER NOT NULL, by TEXT)"),
     db.prepare("CREATE TABLE IF NOT EXISTS seen (user_id TEXT PRIMARY KEY, login TEXT NOT NULL, display TEXT, version TEXT, first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL)"),
   ]);
   tablesReady = true;
@@ -59,12 +62,15 @@ async function handle(req, env) {
     if (req.method === "PUT") return saveSeen(req, env);
     return json({ error: "Method not allowed." }, 405, { Allow: "PUT" });
   }
-  if (path === "/api/admin/users") {
+  if (path === "/api/dev/users") {
     if (req.method !== "GET") return json({ error: "Method not allowed." }, 405, { Allow: "GET" });
-    return adminUsers(req, env);
+    return devUsers(req, env);
+  }
+  if (path === "/api/dev/ban") {
+    if (req.method !== "PUT") return json({ error: "Method not allowed." }, 405, { Allow: "PUT" });
+    return devBan(req, env);
   }
   if (req.method !== "GET" && req.method !== "HEAD") return json({ error: "Method not allowed." }, 405, { Allow: "GET" });
-  if (path === "/admin" || path === "/admin/") return page(adminBody(), "Users · FQPN's Chat Bot", 200, 0, null, ADMIN_JS, "connect-src 'self'; ");
   if (path === "/") return page(homeBody(url.origin), "FQPN's Chat Bot · command lists", 200, 3600);
   if (path === "/robots.txt") return new Response("User-agent: *\nAllow: /\n", { headers: { "Content-Type": "text/plain; charset=utf-8" } });
   if (path === "/favicon.ico") return new Response(null, { status: 204 });
@@ -213,40 +219,53 @@ async function saveSeen(req, env) {
   if (who.error) return json({ error: who.error }, who.status);
   await setup(env.DB);
   const now = Math.floor(Date.now() / 1000);
+  const banned = !!(await env.DB.prepare("SELECT 1 FROM bans WHERE user_id = ?").bind(who.userId).first());
   const row = await env.DB.prepare("SELECT last_seen FROM seen WHERE user_id = ?").bind(who.userId).first();
-  if (row && now - row.last_seen < SEEN_GAP) return json({ ok: true, counted: false }, 429, { "Retry-After": String(SEEN_GAP) });
+  if (row && now - row.last_seen < SEEN_GAP) return json({ ok: true, counted: false, banned }, 429, { "Retry-After": String(SEEN_GAP) });
   const p = await profile(who);
   await env.DB.prepare("INSERT INTO seen (user_id, login, display, version, first_seen, last_seen) VALUES (?, ?, ?, ?, ?, ?) " +
                        "ON CONFLICT(user_id) DO UPDATE SET login = excluded.login, display = excluded.display, version = excluded.version, last_seen = excluded.last_seen")
     .bind(who.userId, who.login, p.display || who.login, version, now, now).run();
-  return json({ ok: true, counted: true });
+  return json({ ok: true, counted: true, banned });
 }
 
-// The admin key is compared in constant time, and every wrong try waits a second, so it can't be guessed quickly.
-async function adminOk(req, env) {
-  const key = String(env.ADMIN_KEY || "");
-  const m = (req.headers.get("Authorization") || "").match(/^Bearer (.+)$/);
-  const given = m ? m[1] : "";
-  if (key.length < 12 || !given) return false;
-  const a = new TextEncoder().encode(await sha256(key)), b = new TextEncoder().encode(await sha256(given));
-  let diff = a.length ^ b.length;
-  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
-  return diff === 0;
-}
-async function sha256(s) {
-  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
-  return [...new Uint8Array(d)].map((x) => x.toString(16).padStart(2, "0")).join("");
-}
-
-async function adminUsers(req, env) {
-  if (!env.ADMIN_KEY || String(env.ADMIN_KEY).length < 12) return json({ error: "Set the ADMIN_KEY secret in Cloudflare first (at least 12 characters)." }, 503);
-  if (!(await adminOk(req, env))) {
-    await new Promise((r) => setTimeout(r, 1000));
-    return json({ error: "Wrong password." }, 401);
+// ---- developers only: checked here by Twitch user ID, whatever the app shows
+async function devWho(req, env) {
+  const who = await whoIs(req, env);
+  if (who.error) return { res: json({ error: who.error }, who.status) };
+  if (!DEVELOPERS.has(who.userId)) {
+    await new Promise((r) => setTimeout(r, 500));
+    return { res: json({ error: "Only the app's developers can see this." }, 403) };
   }
+  return { who };
+}
+
+async function devUsers(req, env) {
+  const d = await devWho(req, env);
+  if (d.res) return d.res;
   await setup(env.DB);
-  const rows = (await env.DB.prepare("SELECT login, display, version, first_seen, last_seen FROM seen ORDER BY last_seen DESC").all()).results || [];
-  return json({ now: Math.floor(Date.now() / 1000), users: rows });
+  const rows = (await env.DB.prepare("SELECT s.user_id, s.login, s.display, s.version, s.first_seen, s.last_seen, (b.user_id IS NOT NULL) AS banned " +
+                                     "FROM seen s LEFT JOIN bans b ON b.user_id = s.user_id ORDER BY s.last_seen DESC").all()).results || [];
+  return json({ now: Math.floor(Date.now() / 1000), users: rows.map((r) => ({ ...r, banned: !!r.banned, developer: DEVELOPERS.has(String(r.user_id)) })) });
+}
+
+async function devBan(req, env) {
+  const d = await devWho(req, env);
+  if (d.res) return d.res;
+  let body;
+  try { body = JSON.parse(await req.text()); } catch { return json({ error: "The request couldn't be read." }, 400); }
+  const uid = String((body && body.user_id) || "");
+  if (!/^\d{1,20}$/.test(uid)) return json({ error: "The request couldn't be read." }, 400);
+  if (DEVELOPERS.has(uid)) return json({ error: "A developer can't be banned." }, 400);
+  await setup(env.DB);
+  if (body.banned) {
+    const s = await env.DB.prepare("SELECT login FROM seen WHERE user_id = ?").bind(uid).first();
+    await env.DB.prepare("INSERT INTO bans (user_id, login, at, by) VALUES (?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET at = excluded.at, by = excluded.by")
+      .bind(uid, (s && s.login) || "", Math.floor(Date.now() / 1000), d.who.login).run();
+  } else {
+    await env.DB.prepare("DELETE FROM bans WHERE user_id = ?").bind(uid).run();
+  }
+  return json({ ok: true, user_id: uid, banned: !!body.banned });
 }
 
 // ----------------------------------------------------------------------------------------------- answers
@@ -343,42 +362,6 @@ function listBody(view) {
 <footer class="foot"><span id="updated"></span><span data-t="made">${esc(TEXT.en.made)}</span></footer>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>`;
 }
-
-function adminBody() {
-  return `<header class="top"><div class="who"><div class="mark" aria-hidden="true"></div><div><h1>Users</h1><p class="meta">Channels that use FQPN's Chat Bot</p></div></div></header>
-<form id="login" class="adm-login" autocomplete="off"><label for="key">Password</label><div class="adm-row"><input id="key" type="password" autocomplete="current-password" required><button class="lang" type="submit">Open</button></div><p class="hint" id="err" role="alert"></p></form>
-<div id="panel" hidden>
-<div class="adm-totals"><div><b id="t-all">0</b><span>channels</span></div><div><b id="t-week">0</b><span>active this week</span></div><div><b id="t-day">0</b><span>active today</span></div></div>
-<div class="searchbox"><input id="q" type="search" placeholder="Search channels" aria-label="Search channels" autocomplete="off" spellcheck="false"></div>
-<div class="adm-wrap"><table class="adm"><thead><tr><th>Channel</th><th>Version</th><th>Last seen</th><th>First seen</th></tr></thead><tbody id="rows"></tbody></table></div>
-<p class="empty" id="none" hidden>No channels yet.</p>
-<footer class="foot"><button class="lang" id="out" type="button">Lock</button><span>Only you can see this page.</span></footer>
-</div>`;
-}
-
-// The admin page's script: the password stays in this tab only (sessionStorage) and every name goes in as text, never HTML.
-const ADMIN_JS = `(function(){
-var $=function(i){return document.getElementById(i)},data=null,key="";
-try{key=sessionStorage.getItem("adm")||""}catch(e){}
-function ago(sec){var d=Math.max(0,Math.floor(Date.now()/1000)-sec);if(d<60)return "just now";if(d<3600)return Math.floor(d/60)+" min ago";if(d<86400)return Math.floor(d/3600)+" h ago";var n=Math.floor(d/86400);return n+(n===1?" day ago":" days ago")}
-function day(sec){return new Date(sec*1000).toLocaleDateString("en",{year:"numeric",month:"short",day:"numeric"})}
-function draw(){var q=($("q").value||"").trim().toLowerCase(),tb=$("rows"),now=data.now,shown=0;tb.textContent="";
-  $("t-all").textContent=data.users.length;$("t-week").textContent=data.users.filter(function(u){return now-u.last_seen<7*86400}).length;$("t-day").textContent=data.users.filter(function(u){return now-u.last_seen<86400}).length;
-  data.users.forEach(function(u){if(q&&u.login.indexOf(q)<0&&String(u.display||"").toLowerCase().indexOf(q)<0)return;shown++;
-    var tr=document.createElement("tr"),a=document.createElement("a"),td=document.createElement("td");
-    a.href="https://twitch.tv/"+encodeURIComponent(u.login);a.target="_blank";a.rel="noopener noreferrer";a.textContent=(u.display||u.login)+" \u2197";td.appendChild(a);tr.appendChild(td);
-    [u.version||"-",ago(u.last_seen),day(u.first_seen)].forEach(function(v,i){var c=document.createElement("td");c.textContent=v;if(i===1)c.title=new Date(u.last_seen*1000).toLocaleString();tr.appendChild(c)});
-    tb.appendChild(tr)});
-  $("none").hidden=shown>0;$("none").textContent=data.users.length?"No channel matches your search.":"No channels yet."}
-function load(){$("err").textContent="";
-  fetch("/api/admin/users",{headers:{Authorization:"Bearer "+key},cache:"no-store"}).then(function(r){return r.json().then(function(j){return {s:r.status,j:j}})}).then(function(x){
-    if(x.s!==200){$("err").textContent=x.j.error||"Couldn't open the list.";$("login").hidden=false;$("panel").hidden=true;try{sessionStorage.removeItem("adm")}catch(e){}return}
-    data=x.j;try{sessionStorage.setItem("adm",key)}catch(e){}$("login").hidden=true;$("panel").hidden=false;draw()}).catch(function(){$("err").textContent="The website can't be reached."})}
-$("login").addEventListener("submit",function(e){e.preventDefault();key=$("key").value;load()});
-$("q").addEventListener("input",function(){if(data)draw()});
-$("out").addEventListener("click",function(){key="";data=null;try{sessionStorage.removeItem("adm")}catch(e){}$("panel").hidden=true;$("login").hidden=false;$("key").value=""});
-if(key)load();
-})();`;
 
 function langBtn() {
   return `<button class="lang" id="lang" type="button" lang="ar">${TEXT.en.lang}</button>`;

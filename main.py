@@ -25,7 +25,8 @@ async def main(open_browser=False):    # open_browser is ignored: the dashboard 
     state["watchdog_task"] = asyncio.create_task(state["watchdog"].run())
     state["publist_syncer"] = publiclist.Syncer(store, state)    # the public command list website (off until switched on)
     state["publist_task"] = asyncio.create_task(state["publist_syncer"].run())
-    state["usage_task"] = asyncio.create_task(usage.Reporter(state).run())     # channel name + app version, once a day (Settings > App explains it)
+    state["banned"] = bool((store.get("usage_state") or {}).get("banned"))     # the last answer, until the website says otherwise
+    state["usage_task"] = asyncio.create_task(usage.Reporter(state, store=store, on_change=lambda: dashboard.restart_bot(state)).run())     # channel name + app version, once a day (Settings > App explains it)
     last_error_notice = 0.0
 
     async def on_donation(d):   # a donation from Streamlabs / StreamElements: the running bot thanks the donor in chat
@@ -73,6 +74,12 @@ async def main(open_browser=False):    # open_browser is ignored: the dashboard 
         state["account"] = account["login"]
         state["avatar_task"] = asyncio.create_task(dashboard.load_avatar(state, account))   # profile picture for the dashboard
         state["account_id"] = account["user_id"]
+        if state.get("banned"):
+            # the developer turned the app off for this channel: no bot, the dashboard explains it; an unban wakes this up
+            state["bot"] = None
+            print("FQPN's Chat Bot has been turned off for this channel by its developer.")
+            await state["wake"].wait()
+            continue
 
         # "Use a separate bot account" (Settings > Bot): another Twitch account writes the replies in your chat.
         bot_account = await botauth.get_account()          # None when no bot account is connected

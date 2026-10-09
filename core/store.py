@@ -5,11 +5,13 @@ import copy
 import json
 from pathlib import Path
 
+from . import moderation
 from .activity import ActivityLog
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 DEFAULTS = {
+    "moderation": moderation.defaults(),     # the Moderation page: bad words, links, caps, emotes, symbols, repeats (all off at first)
     "stream": {                       # the messages the bot says when your stream starts, comes back and ends (off until switched on)
         "enabled": True,              # the master switch for all four (each one also has its own switch)
         "start": {"enabled": False, "text": ""},       # an empty text means "the default in the app's language"
@@ -19,6 +21,7 @@ DEFAULTS = {
         "end_after_minutes": 2,        # offline this long = the stream really ended (a shorter drop is ignored)
         "resume_within_minutes": 15,   # back within this long after a drop = the same stream continues
     },
+    "usage_state": {"banned": False},       # kept by the app, not a setting: did the developer turn the app off for this channel
     "publist_state": {                # kept by the app, not a setting: what was last sent to the public list website
         "uploaded": False, "digest": "", "login": "", "at": None,
     },
@@ -124,6 +127,7 @@ class Store:
                 self.save(name, copy.deepcopy(DEFAULTS[name]))
         self._migrate()
         self._migrate_events()
+        self._migrate_blocked_words()
         # the activity shown on the Logs page, saved so it survives a restart
         self.activity = ActivityLog(DATA_DIR / "activity.jsonl", days_fn=lambda: self.get("prefs").get("log_days", 30))
 
@@ -134,6 +138,25 @@ class Store:
         if bool(settings.get("paused")) != want_paused:
             settings["paused"] = want_paused
             self.save("settings", settings)
+
+    def _migrate_blocked_words(self) -> None:
+        """1.5.0 removed "Blocked words" from the Blocklist. Words saved there move into Moderation > Bad words, which stays
+        switched off, so nothing changes in chat until the streamer turns it on (blocked words only made the bot ignore a message)."""
+        block = self._read("blocklist")
+        if not isinstance(block, dict) or not block.get("words"):
+            return
+        mod = self._read("moderation")
+        mod = mod if isinstance(mod, dict) else copy.deepcopy(DEFAULTS["moderation"])
+        bw = mod.setdefault("badwords", copy.deepcopy(DEFAULTS["moderation"]["badwords"]))
+        have = {str(e.get("w", "")).lower() for e in bw.get("words", []) if isinstance(e, dict)}
+        for w in block["words"]:
+            w = " ".join(str(w).split())
+            if w and w.lower() not in have:
+                bw.setdefault("words", []).append({"w": w, "anywhere": True})   # blocked words matched anywhere, so they keep doing that
+                have.add(w.lower())
+        self.save("moderation", mod)
+        block["words"] = []
+        self.save("blocklist", block)
 
     def _migrate_events(self) -> None:
         """Older versions stored the Watch Streak reply as {response, min_streak}. It becomes one tier, and any

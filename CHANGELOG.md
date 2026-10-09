@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.0
+- New Moderation page: Bad words (Arabic and English, hard to dodge), Links, Excess caps, emotes and symbols, Repetitions and Shared chat. Each has an info button with examples and its own settings.
+- "Blocked words" moved from the Blocklist into Moderation > Bad words (switched off, so nothing changes until you turn it on).
+
 ## 1.4.0
 - The app tells its developer which Twitch channel uses it and which app version, about once a day. Nothing else is sent. Settings > App explains exactly what is sent.
 

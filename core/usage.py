@@ -15,6 +15,7 @@ log = logging.getLogger("twitchbot.usage")
 FIRST_DELAY = 30            # seconds after the app connects to Twitch
 EVERY = 24 * 3600           # then once a day
 RETRY = (300, 900, 1800, 3600)    # after a failure: 5 min, 15 min, 30 min, then every hour
+BANNED_EVERY = 3600         # while the developer has turned the app off for this channel: ask every hour (an unban works soon)
 
 
 def payload() -> dict:
@@ -23,8 +24,13 @@ def payload() -> dict:
 
 
 class Reporter:
-    def __init__(self, state, send=None, clock=time.time):
+    """Also learns from the answer whether the developer turned the app off for this channel (a ban). The answer is kept on
+    disk, so a restart doesn't run the bot even briefly; if the website can't be reached, the last answer stands."""
+
+    def __init__(self, state, send=None, clock=time.time, store=None, on_change=None):
         self.state = state
+        self.store = store
+        self.on_change = on_change
         self.send = send or (lambda token, data: publiclist.http_send("PUT", token, data, path="/api/seen"))
         self.clock = clock
         self.next_at = None          # when to send next (None = not yet planned)
@@ -45,12 +51,24 @@ class Reporter:
             return
         code, body, retry = await self.send(token, payload())
         if code in (200, 429):       # 429: already counted within the last hour, which is just as good
-            self.fails, self.last_ok, self.next_at = 0, now, now + EVERY
+            banned = bool((body or {}).get("banned"))
+            self.fails, self.last_ok, self.next_at = 0, now, now + (BANNED_EVERY if banned else EVERY)
+            self.set_banned(banned)
         else:
             wait = RETRY[min(self.fails, len(RETRY) - 1)]
             self.fails += 1
             self.next_at = now + max(wait, int(retry or 0))
             log.info("Could not reach the website (%s); trying again in %s s", code, wait)
+
+    def set_banned(self, banned: bool) -> None:
+        if bool(self.state.get("banned")) == banned:
+            return
+        self.state["banned"] = banned
+        if self.store is not None:
+            self.store.save("usage_state", {"banned": banned})
+        log.warning("The developer turned the app %s for this channel", "OFF" if banned else "back ON")
+        if self.on_change:
+            self.on_change()         # stops the bot (banned) or starts it again (unbanned)
 
     async def run(self) -> None:
         while True:

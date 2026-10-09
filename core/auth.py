@@ -16,6 +16,8 @@ SCOPES = [
     "channel:manage:broadcast",        # !title and !game changes
     "moderator:read:followers",
     "channel:read:hype_train",
+    "moderator:manage:chat_messages",    # Moderation: delete messages that break a filter (1.5.0)
+    "moderator:manage:banned_users",     # Moderation: time people out (1.5.0)
 ]
 last_problem: str | None = None  # set to "permissions" when a reconnect is needed for new scopes
 

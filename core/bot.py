@@ -15,7 +15,7 @@ import twitchio
 from twitchio import eventsub
 from twitchio.ext import commands
 
-from . import auth, botauth, events, greetings, manage, notify
+from . import auth, botauth, events, greetings, manage, moderation, notify
 from .manage import CommandError
 from .store import Store
 from .stream import StreamSession
@@ -102,6 +102,8 @@ class TwitchBot(commands.Bot):
         self.activity = self.store.activity.items   # recent activity (also saved to disk by the store)
         self._dash_closed = False
         self._greet_tasks: set[asyncio.Task] = set()
+        self.moderator = moderation.Moderator()          # the Moderation page's filters (strikes and recent messages live here)
+        self.mod_problem = None                           # why Twitch refused the last delete/timeout (shown on the page)
         self._seen_events: deque = deque(maxlen=50)   # so a repeated delivery of the same notice is answered once
         self.event_problems: dict[str, str] = {}      # events Twitch refused to send (usually a missing permission)
         self._hype_level = 0
@@ -250,10 +252,76 @@ class TwitchBot(commands.Bot):
     def _is_blocked(self, payload) -> bool:
         block = self.store.get("blocklist")
         login = (payload.chatter.name or "").lower()
-        if login in {u.lower() for u in block.get("users", [])}:
-            return True
-        text = payload.text.lower()
-        return any(w.lower() in text for w in block.get("words", []) if w)
+        return login in {u.lower() for u in block.get("users", [])}     # (blocked words moved to Moderation > Bad words in 1.5.0)
+
+    # ---------- moderation (the Moderation page) ----------
+
+    WARN = {
+        "en": {"badwords": "@$(user), please keep the chat friendly.", "links": "@$(user), only links to trusted sites are allowed here.",
+               "caps": "@$(user), please don't write in all capitals.", "emotes": "@$(user), that's too many emotes in one message.",
+               "symbols": "@$(user), that's too many symbols in one message.", "repeats": "@$(user), please don't repeat yourself."},
+        "ar": {"badwords": "‏@$(user) رجاءً حافظ على أسلوب لطيف في الدردشة.", "links": "‏@$(user) يُسمح فقط بروابط المواقع الموثوقة هنا.",
+               "caps": "‏@$(user) رجاءً لا تكتب بالأحرف الكبيرة فقط.", "emotes": "‏@$(user) عدد الإيموجيات كثير في رسالة واحدة.",
+               "symbols": "‏@$(user) عدد الرموز كثير في رسالة واحدة.", "repeats": "‏@$(user) رجاءً لا تكرر الكلام."},
+    }
+    LABEL = {"badwords": "Bad words", "links": "Links", "caps": "Excess caps", "emotes": "Excess emotes", "symbols": "Excess symbols", "repeats": "Repetitions"}
+
+    async def _moderate(self, payload) -> bool:
+        """Runs the filters. True when the message broke one: it is then deleted (and the person warned or timed out), so
+        nothing else answers it. Never touches the channel owner, the bot itself, mods or (by default) VIPs."""
+        if self.store.get("settings").get("paused"):
+            return False
+        settings = self.store.get("moderation") or {}
+        if not any((settings.get(f) or {}).get("enabled") for f in moderation.FILTERS):
+            return False
+        chatter = payload.chatter
+        uid = str(getattr(chatter, "id", "") or "")
+        if not uid or uid in (str(self.owner_id), str(self.bot_account["user_id"])):
+            return False
+        roles = {k: bool(getattr(chatter, k, False)) for k in ("broadcaster", "moderator", "vip", "subscriber")}
+        frags = getattr(payload, "fragments", None) or []
+        emote_words = [str(getattr(f, "text", "")) for f in frags if str(getattr(f, "type", "")) == "emote"]
+        hit = self.moderator.check(settings, payload.text or "", uid, roles, len(emote_words), emote_words)
+        if not hit:
+            return False
+        filt, _detail = hit
+        cfg = settings.get(filt) or {}
+        step = self.moderator.punishment(cfg, filt, uid)
+        user = chatter.display_name or chatter.name
+        await self._mod_api("DELETE", "moderation/chat", {"message_id": str(payload.id)})
+        did = "delete:0"
+        if step:
+            await self._mod_api("POST", "moderation/bans", {}, {"data": {"user_id": uid, "duration": int(step), "reason": f"{self.LABEL[filt]} filter"}})
+            did = f"timeout:{int(step)}"
+        elif step == 0:
+            lang = "ar" if (self.store.get("ui") or {}).get("language") == "ar" else "en"
+            text = (cfg.get("warn_text") or "").strip() or self.WARN[lang][filt]
+            await self._send(text.replace("$(user)", str(user)), payload)
+            did = "warn:0"
+        self._log_activity("moderation", f"{filt}:{did}", user)     # the Logs page turns this into words, in the app's language
+        return True
+
+    async def _mod_api(self, method: str, path: str, params: dict, body=None) -> bool:
+        """A Twitch moderation call made by whoever moderates: the separate bot account, or the channel account."""
+        if self.separate:
+            data = botauth.load_token() or {}
+            token = data.get("access_token") or self.bot_account.get("access_token")
+        else:
+            data = auth.load_token() or {}
+            token = data.get("access_token") or self.account.get("access_token")
+        q = dict(params, broadcaster_id=str(self.owner_id), moderator_id=str(self.bot_account["user_id"]))
+        headers = {"Authorization": f"Bearer {token}", "Client-Id": auth.CLIENT_ID}
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as s:
+                async with s.request(method, "https://api.twitch.tv/helix/" + path, params=q, headers=headers, json=body) as r:
+                    if r.status in (200, 204):
+                        self.mod_problem = None
+                        return True
+                    self.mod_problem = "scopes" if r.status in (401, 403) else f"twitch {r.status}"
+                    log.warning("Moderation %s %s answered %s", method, path, r.status)
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
+            log.warning("Moderation %s %s could not reach Twitch", method, path)
+        return False
 
     def _on_cooldown(self, key: str, seconds: float) -> bool:
         now = time.time()
@@ -546,10 +614,22 @@ class TwitchBot(commands.Bot):
         self.last_chat = time.time()      # proof that chat is arriving (the watchdog quotes it when it has to reconnect)
         # Note: we do NOT ignore the streamer's own messages (the bot IS the
         # streamer's account), only the bot's own replies.
-        if payload.source_broadcaster is not None or self._is_own_echo(payload):
+        if self._is_own_echo(payload):
+            return
+        if payload.source_broadcaster is not None:     # a message from a channel sharing this chat (Shared Chat)
+            if (self.store.get("moderation") or {}).get("shared_chat"):
+                try:
+                    await self._moderate(payload)
+                except Exception:
+                    log.exception("Moderation failed")
             return
         if self.separate and str(getattr(payload.chatter, "id", "")) == str(self.bot_id):
             return      # whatever the bot account writes is never treated as a command
+        try:
+            if await self._moderate(payload):
+                return      # removed by a Moderation filter: nothing else answers it
+        except Exception:
+            log.exception("Moderation failed")
         if self._is_blocked(payload):
             return
         self._log_chat(payload)
