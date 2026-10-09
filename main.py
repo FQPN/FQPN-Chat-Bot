@@ -2,7 +2,7 @@ import asyncio
 import logging
 import time
 
-from core import auth, botauth, dashboard, desktop, donations, notify, publiclist, updater, watchdog
+from core import auth, botauth, dashboard, desktop, donations, notify, publiclist, updater, usage, watchdog
 from core.bot import TwitchBot
 from core.store import Store
 
@@ -25,6 +25,7 @@ async def main(open_browser=False):    # open_browser is ignored: the dashboard 
     state["watchdog_task"] = asyncio.create_task(state["watchdog"].run())
     state["publist_syncer"] = publiclist.Syncer(store, state)    # the public command list website (off until switched on)
     state["publist_task"] = asyncio.create_task(state["publist_syncer"].run())
+    state["usage_task"] = asyncio.create_task(usage.Reporter(state).run())     # channel name + app version, once a day (Settings > App explains it)
     last_error_notice = 0.0
 
     async def on_donation(d):   # a donation from Streamlabs / StreamElements: the running bot thanks the donor in chat

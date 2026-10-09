@@ -50,12 +50,12 @@ def digest(payload: dict, login: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-async def http_send(method: str, token: str, payload):
+async def http_send(method: str, token: str, payload, path: str = "/api/list"):
     """(HTTP status, JSON body, Retry-After seconds or None). Status 0 = the website could not be reached."""
     headers = {"Authorization": f"OAuth {token}", "User-Agent": f"FQPN-Chat-Bot/{VERSION}"}
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=TIMEOUT)) as s:
-            async with s.request(method, SITE + "/api/list", headers=headers, json=payload) as r:
+            async with s.request(method, SITE + path, headers=headers, json=payload) as r:
                 try:
                     body = await r.json(content_type=None)
                 except (ValueError, aiohttp.ContentTypeError):

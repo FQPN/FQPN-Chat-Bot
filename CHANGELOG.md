@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.4.0
+- The app tells its developer which Twitch channel uses it and which app version, about once a day. Nothing else is sent. Settings > App explains exactly what is sent.
+
 ## 1.2.0
 - **New: Public command list.** Commands → **Public list** gives your channel one short link (for example `…/fqpn_`) to a web page that lists your commands, grouped by who can use them, with search, in English and Arabic. It updates by itself a few seconds after you change a command, and **Use for !cmlist** makes `!cmlist` send that link. It is off until you switch it on.
 - Only the names of switched-on commands and who can use them are shared, never the replies. Each command has a new **Show on the public list** switch to keep it off the page. Switching the list off removes it from the website.

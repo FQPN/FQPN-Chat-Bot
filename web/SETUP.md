@@ -31,6 +31,13 @@ different name, look for the closest match.
    (This is your app's public Twitch client ID, the same one in `core/auth.py`. With it, only logins made by
    FQPN's Chat Bot can save lists.)
 
+## 5b. Your private users list (v1.4.0)
+1. Same worker → **Settings → Variables and Secrets → Add**.
+2. Type **Secret** (not Text), name `ADMIN_KEY`, value: a long password only you know (at least 12 characters) → **Deploy**.
+3. Open `https://<your website>/admin` and type that password. It shows every channel that uses the app: name (a link to
+   their Twitch), app version, last seen and first seen. Nobody without the password can see it.
+   Or in D1 → Console: `SELECT login, version, datetime(last_seen,'unixepoch') FROM seen ORDER BY last_seen DESC;`
+
 ## 6. Check it
 - Open `https://fqpn-commands.<your-subdomain>.workers.dev/` → you should see "Public command lists".
 - Open `https://fqpn-commands.<your-subdomain>.workers.dev/fqpn_` → "No list here" (correct: nothing is saved yet).

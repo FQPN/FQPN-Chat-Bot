@@ -85,3 +85,9 @@ In detail:
 
 ## License
 [MIT](LICENSE)
+
+## What the app sends
+
+To know who uses FQPN's Chat Bot, the app sends two things to its developer about once a day: your Twitch channel name and the version of the app. That is all: never your commands, chat messages, viewers, followers, donations, settings or passwords. Your Twitch login is only used to prove the channel name is really yours, and it is never kept. (Settings > App explains this too.)
+
+If you switch on Commands > Public list, the names of your public commands and who can use them are also sent, so the list can be shown on the web.

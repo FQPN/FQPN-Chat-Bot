@@ -8,6 +8,9 @@
 //   GET    /api/list/<channel>  the same list as JSON
 //   PUT    /api/list            save your list    (Authorization: OAuth <your Twitch login token from the app>)
 //   DELETE /api/list            remove your list  (same)
+//   PUT    /api/seen            "this channel uses the app, version X" (once a day from every app; same login check)
+//   GET    /admin               the developer's private users list (asks for ADMIN_KEY, a secret set in Cloudflare)
+//   GET    /api/admin/users     the same list as JSON (Authorization: Bearer <ADMIN_KEY>)
 //
 // The Twitch token is only used to ask Twitch whose channel it is. It is never stored or logged.
 
@@ -18,6 +21,8 @@ const MAX_BODY = 64 * 1024;    // bytes
 const MIN_GAP = 5;             // seconds between two saves of the same channel
 const PERMS = ["everyone", "subscriber", "vip", "moderator", "broadcaster"];
 const LOGIN_RE = /^[a-z0-9_]{1,25}$/;
+const VERSION_RE = /^[0-9A-Za-z.+-]{1,32}$/;
+const SEEN_GAP = 3600;         // one report per channel per hour is plenty (the app sends once a day)
 const AVATAR_RE = /^https:\/\/static-cdn\.jtvnw\.net\/[A-Za-z0-9._\/-]+$/;
 
 let tablesReady = false;
@@ -27,6 +32,7 @@ async function setup(db) {
     db.prepare("CREATE TABLE IF NOT EXISTS lists (login TEXT PRIMARY KEY, user_id TEXT NOT NULL, display TEXT, avatar TEXT, data TEXT NOT NULL, updated INTEGER NOT NULL)"),
     db.prepare("CREATE INDEX IF NOT EXISTS lists_user ON lists(user_id)"),
     db.prepare("CREATE TABLE IF NOT EXISTS blocked (who TEXT PRIMARY KEY, note TEXT)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS seen (user_id TEXT PRIMARY KEY, login TEXT NOT NULL, display TEXT, version TEXT, first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL)"),
   ]);
   tablesReady = true;
 }
@@ -49,7 +55,16 @@ async function handle(req, env) {
     if (req.method === "DELETE") return deleteList(req, env);
     return json({ error: "Method not allowed." }, 405, { Allow: "PUT, DELETE" });
   }
+  if (path === "/api/seen") {
+    if (req.method === "PUT") return saveSeen(req, env);
+    return json({ error: "Method not allowed." }, 405, { Allow: "PUT" });
+  }
+  if (path === "/api/admin/users") {
+    if (req.method !== "GET") return json({ error: "Method not allowed." }, 405, { Allow: "GET" });
+    return adminUsers(req, env);
+  }
   if (req.method !== "GET" && req.method !== "HEAD") return json({ error: "Method not allowed." }, 405, { Allow: "GET" });
+  if (path === "/admin" || path === "/admin/") return page(adminBody(), "Users · FQPN's Chat Bot", 200, 0, null, ADMIN_JS, "connect-src 'self'; ");
   if (path === "/") return page(homeBody(url.origin), "FQPN's Chat Bot · command lists", 200, 3600);
   if (path === "/robots.txt") return new Response("User-agent: *\nAllow: /\n", { headers: { "Content-Type": "text/plain; charset=utf-8" } });
   if (path === "/favicon.ico") return new Response(null, { status: 204 });
@@ -185,6 +200,55 @@ async function deleteList(req, env) {
   return json({ ok: true });
 }
 
+// ----------------------------------------------------------------------------------------------- who uses the app
+
+async function saveSeen(req, env) {
+  const text = await req.text();
+  if (text.length > 1024) return json({ error: "Too big." }, 413);
+  let body;
+  try { body = JSON.parse(text); } catch { return json({ error: "The report couldn't be read." }, 400); }
+  const version = String((body && body.version) || "");
+  if (!VERSION_RE.test(version)) return json({ error: "The report couldn't be read." }, 400);
+  const who = await whoIs(req, env);
+  if (who.error) return json({ error: who.error }, who.status);
+  await setup(env.DB);
+  const now = Math.floor(Date.now() / 1000);
+  const row = await env.DB.prepare("SELECT last_seen FROM seen WHERE user_id = ?").bind(who.userId).first();
+  if (row && now - row.last_seen < SEEN_GAP) return json({ ok: true, counted: false }, 429, { "Retry-After": String(SEEN_GAP) });
+  const p = await profile(who);
+  await env.DB.prepare("INSERT INTO seen (user_id, login, display, version, first_seen, last_seen) VALUES (?, ?, ?, ?, ?, ?) " +
+                       "ON CONFLICT(user_id) DO UPDATE SET login = excluded.login, display = excluded.display, version = excluded.version, last_seen = excluded.last_seen")
+    .bind(who.userId, who.login, p.display || who.login, version, now, now).run();
+  return json({ ok: true, counted: true });
+}
+
+// The admin key is compared in constant time, and every wrong try waits a second, so it can't be guessed quickly.
+async function adminOk(req, env) {
+  const key = String(env.ADMIN_KEY || "");
+  const m = (req.headers.get("Authorization") || "").match(/^Bearer (.+)$/);
+  const given = m ? m[1] : "";
+  if (key.length < 12 || !given) return false;
+  const a = new TextEncoder().encode(await sha256(key)), b = new TextEncoder().encode(await sha256(given));
+  let diff = a.length ^ b.length;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
+}
+async function sha256(s) {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(d)].map((x) => x.toString(16).padStart(2, "0")).join("");
+}
+
+async function adminUsers(req, env) {
+  if (!env.ADMIN_KEY || String(env.ADMIN_KEY).length < 12) return json({ error: "Set the ADMIN_KEY secret in Cloudflare first (at least 12 characters)." }, 503);
+  if (!(await adminOk(req, env))) {
+    await new Promise((r) => setTimeout(r, 1000));
+    return json({ error: "Wrong password." }, 401);
+  }
+  await setup(env.DB);
+  const rows = (await env.DB.prepare("SELECT login, display, version, first_seen, last_seen FROM seen ORDER BY last_seen DESC").all()).results || [];
+  return json({ now: Math.floor(Date.now() / 1000), users: rows });
+}
+
 // ----------------------------------------------------------------------------------------------- answers
 
 function json(data, status = 200, headers = {}) {
@@ -204,7 +268,7 @@ function scriptJson(data) {
     .replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
 }
 
-function page(body, title, status, maxAge, data) {
+function page(body, title, status, maxAge, data, script = CLIENT, cspExtra = "") {
   const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
   const html = `<!doctype html>
 <html lang="en" dir="ltr">
@@ -220,15 +284,15 @@ function page(body, title, status, maxAge, data) {
 <body>
 <main class="wrap">${body}</main>
 ${data ? `<script type="application/json" id="data">${scriptJson(data)}</script>` : ""}
-<script nonce="${nonce}">${CLIENT}</script>
+<script nonce="${nonce}">${script}</script>
 </body>
 </html>`;
   return new Response(html, {
     status,
     headers: {
       "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": `public, max-age=${maxAge}`,
-      "Content-Security-Policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}' https://fonts.googleapis.com; ` +
+      "Cache-Control": maxAge ? `public, max-age=${maxAge}` : "no-store",
+      "Content-Security-Policy": `default-src 'none'; ${cspExtra}script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}' https://fonts.googleapis.com; ` +
         "font-src https://fonts.gstatic.com; img-src https://static-cdn.jtvnw.net; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
       "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "no-referrer",
@@ -280,6 +344,42 @@ function listBody(view) {
 <div class="toast" id="toast" role="status" aria-live="polite"></div>`;
 }
 
+function adminBody() {
+  return `<header class="top"><div class="who"><div class="mark" aria-hidden="true"></div><div><h1>Users</h1><p class="meta">Channels that use FQPN's Chat Bot</p></div></div></header>
+<form id="login" class="adm-login" autocomplete="off"><label for="key">Password</label><div class="adm-row"><input id="key" type="password" autocomplete="current-password" required><button class="lang" type="submit">Open</button></div><p class="hint" id="err" role="alert"></p></form>
+<div id="panel" hidden>
+<div class="adm-totals"><div><b id="t-all">0</b><span>channels</span></div><div><b id="t-week">0</b><span>active this week</span></div><div><b id="t-day">0</b><span>active today</span></div></div>
+<div class="searchbox"><input id="q" type="search" placeholder="Search channels" aria-label="Search channels" autocomplete="off" spellcheck="false"></div>
+<div class="adm-wrap"><table class="adm"><thead><tr><th>Channel</th><th>Version</th><th>Last seen</th><th>First seen</th></tr></thead><tbody id="rows"></tbody></table></div>
+<p class="empty" id="none" hidden>No channels yet.</p>
+<footer class="foot"><button class="lang" id="out" type="button">Lock</button><span>Only you can see this page.</span></footer>
+</div>`;
+}
+
+// The admin page's script: the password stays in this tab only (sessionStorage) and every name goes in as text, never HTML.
+const ADMIN_JS = `(function(){
+var $=function(i){return document.getElementById(i)},data=null,key="";
+try{key=sessionStorage.getItem("adm")||""}catch(e){}
+function ago(sec){var d=Math.max(0,Math.floor(Date.now()/1000)-sec);if(d<60)return "just now";if(d<3600)return Math.floor(d/60)+" min ago";if(d<86400)return Math.floor(d/3600)+" h ago";var n=Math.floor(d/86400);return n+(n===1?" day ago":" days ago")}
+function day(sec){return new Date(sec*1000).toLocaleDateString("en",{year:"numeric",month:"short",day:"numeric"})}
+function draw(){var q=($("q").value||"").trim().toLowerCase(),tb=$("rows"),now=data.now,shown=0;tb.textContent="";
+  $("t-all").textContent=data.users.length;$("t-week").textContent=data.users.filter(function(u){return now-u.last_seen<7*86400}).length;$("t-day").textContent=data.users.filter(function(u){return now-u.last_seen<86400}).length;
+  data.users.forEach(function(u){if(q&&u.login.indexOf(q)<0&&String(u.display||"").toLowerCase().indexOf(q)<0)return;shown++;
+    var tr=document.createElement("tr"),a=document.createElement("a"),td=document.createElement("td");
+    a.href="https://twitch.tv/"+encodeURIComponent(u.login);a.target="_blank";a.rel="noopener noreferrer";a.textContent=(u.display||u.login)+" \u2197";td.appendChild(a);tr.appendChild(td);
+    [u.version||"-",ago(u.last_seen),day(u.first_seen)].forEach(function(v,i){var c=document.createElement("td");c.textContent=v;if(i===1)c.title=new Date(u.last_seen*1000).toLocaleString();tr.appendChild(c)});
+    tb.appendChild(tr)});
+  $("none").hidden=shown>0;$("none").textContent=data.users.length?"No channel matches your search.":"No channels yet."}
+function load(){$("err").textContent="";
+  fetch("/api/admin/users",{headers:{Authorization:"Bearer "+key},cache:"no-store"}).then(function(r){return r.json().then(function(j){return {s:r.status,j:j}})}).then(function(x){
+    if(x.s!==200){$("err").textContent=x.j.error||"Couldn't open the list.";$("login").hidden=false;$("panel").hidden=true;try{sessionStorage.removeItem("adm")}catch(e){}return}
+    data=x.j;try{sessionStorage.setItem("adm",key)}catch(e){}$("login").hidden=true;$("panel").hidden=false;draw()}).catch(function(){$("err").textContent="The website can't be reached."})}
+$("login").addEventListener("submit",function(e){e.preventDefault();key=$("key").value;load()});
+$("q").addEventListener("input",function(){if(data)draw()});
+$("out").addEventListener("click",function(){key="";data=null;try{sessionStorage.removeItem("adm")}catch(e){}$("panel").hidden=true;$("login").hidden=false;$("key").value=""});
+if(key)load();
+})();`;
+
 function langBtn() {
   return `<button class="lang" id="lang" type="button" lang="ar">${TEXT.en.lang}</button>`;
 }
@@ -318,6 +418,14 @@ h1 .sub{color:var(--mute);font-weight:500}
 .toast{position:fixed;left:50%;bottom:max(24px,env(safe-area-inset-bottom));transform:translate(-50%,20px);background:var(--red2);color:#fff;padding:10px 18px;border-radius:8px;font-size:15px;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;max-width:calc(100% - 40px);overflow-wrap:anywhere}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 @media (prefers-reduced-motion:reduce){.toast{transition:none}}
+.adm-login{max-width:420px}.adm-login label{display:block;color:var(--soft);margin-bottom:6px}
+.adm-row{display:flex;gap:8px}.adm-row input{flex:1;min-width:0;border:1px solid var(--line);background:var(--panel);color:var(--text);padding:10px 14px;border-radius:8px;font:16px 'Outfit',sans-serif}
+.adm-totals{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}.adm-totals div{flex:1 1 150px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.adm-totals b{display:block;font-size:28px;font-weight:600}.adm-totals span{color:var(--mute);font-size:14px}
+.adm-wrap{overflow-x:auto;margin-top:14px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+table.adm{width:100%;border-collapse:collapse;font-size:15px}.adm th,.adm td{text-align:start;padding:10px 14px;border-bottom:1px solid var(--line);white-space:nowrap}
+.adm th{color:var(--mute);font-weight:500;font-size:13px}.adm tr:last-child td{border-bottom:0}.adm a{color:var(--text);text-decoration:none;font-weight:600}.adm a:hover{color:var(--red2);text-decoration:underline}
+#err{color:#e5484d}
 @media (max-width:520px){h1{font-size:23px}.wrap{padding-left:14px;padding-right:14px}}
 `;
 
