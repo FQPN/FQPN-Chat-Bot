@@ -10,6 +10,7 @@ import time
 from collections import deque
 from datetime import datetime, timezone
 
+import aiohttp
 import twitchio
 from twitchio import eventsub
 from twitchio.ext import commands
@@ -40,6 +41,14 @@ def user_level(chatter) -> int:
     if chatter.subscriber:
         return 1
     return 0
+
+
+SEARCH_URL = "https://api.twitch.tv/helix/search/categories"
+
+
+def _plain(name: str) -> str:
+    """A game name without capitals, spaces or punctuation, to compare "pubg battlegrounds" with "PUBG: BATTLEGROUNDS"."""
+    return re.sub(r"[\W_]+", "", str(name).casefold())
 
 
 def _tier_label(tier, prime: bool = False) -> str:
@@ -502,7 +511,9 @@ class TwitchBot(commands.Bot):
         login = (getattr(chatter, "name", None) or "").lower()
         if not login or self.store.get("settings").get("paused"):
             return
-        messages = greetings.messages_for(self.store.get("greetings"), login)
+        g = self.store.get("greetings")
+        messages = (greetings.messages_for(g, login)
+                    or greetings.developer_messages(g, login, getattr(chatter, "id", None), self.owner_id))
         if not messages:
             return
         state, text = greetings.claim(self.store.get("greeted"), self.live_since.isoformat(), login, messages)
@@ -578,9 +589,14 @@ class TwitchBot(commands.Bot):
         cmd = self.store.get("commands").get(owner)
         if not cmd or not cmd.get("enabled", True):
             return
-        if level < PERMISSION_LEVELS.get(cmd.get("permission", "everyone"), 0):
-            return
+        if level < PERMISSION_LEVELS.get(manage.effective_permission(cmd), 0):
+            return          # (a shortcut always needs a moderator or the broadcaster)
         if self._on_cooldown(f"cmd:{owner}", cmd.get("cooldown", 0)):
+            return
+        action = cmd.get("action", "text")
+        if action in ("game", "title"):
+            self._log_activity("command", owner, user)
+            await (self._set_game if action == "game" else self._set_title)(cmd["response"], payload)
             return
         if uses_variable(cmd["response"], "uptime") and not self.live_since:
             await self._send(f"{self.account['login']} is offline right now.", payload)
@@ -614,40 +630,81 @@ class TwitchBot(commands.Bot):
                 return
             visible = [
                 n for n, c in self.store.get("commands").items()
-                if c.get("enabled", True) and level >= PERMISSION_LEVELS.get(c.get("permission", "everyone"), 0)
+                if c.get("enabled", True) and level >= PERMISSION_LEVELS.get(manage.effective_permission(c), 0)
             ]
             await self._send("Commands: " + (", ".join(visible) if visible else "none yet"), payload)
             return
 
         if name == "title":
             if rest and is_mod:
-                try:
-                    await self.create_partialuser(self.owner_id).modify_channel(title=rest[:140])
-                    self._chan_ts = 0
-                    await self._send(f"Title updated to: {rest[:140]}", payload)
-                except Exception:
-                    log.exception("Title change failed")
-                    await self._send("Couldn't change the title. Reconnect Twitch to grant the new permission.", payload)
+                await self._set_title(rest, payload)
             elif not rest and not self._on_cooldown("builtin:title", 5):
                 await self._send(f"Title: {await self._title()}", payload)
             return
 
         if name == "game":
             if rest and is_mod:
-                try:
-                    games = await self.fetch_games(names=[rest], token_for=self.owner_id)
-                    if not games:
-                        await self._send(f"Couldn't find a game called '{rest}' on Twitch.", payload)
-                        return
-                    await self.create_partialuser(self.owner_id).modify_channel(game_id=games[0].id)
-                    self._chan_ts = 0
-                    await self._send(f"Game updated to: {games[0].name}", payload)
-                except Exception:
-                    log.exception("Game change failed")
-                    await self._send("Couldn't change the game. Reconnect Twitch to grant the new permission.", payload)
+                await self._set_game(rest, payload)
             elif not rest and not self._on_cooldown("builtin:game", 5):
                 await self._send(f"Game: {await self._game()}", payload)
             return
+
+    # ---------- changing the game and title (the built-ins and the shortcut commands) ----------
+
+    async def _set_title(self, text: str, payload) -> None:
+        text = " ".join(text.split())[:140]
+        try:
+            await self.create_partialuser(self.owner_id).modify_channel(title=text)
+            self._chan_ts = 0
+            await self._send(f"Title updated to: {text}", payload)
+        except Exception:
+            log.exception("Title change failed")
+            await self._send("Couldn't change the title. Reconnect Twitch to grant the new permission.", payload)
+
+    async def _set_game(self, query: str, payload) -> None:
+        query = " ".join(query.split())[:100]
+        try:
+            game = await self._find_game(query)
+            if game is None:
+                await self._send(f"Couldn't find a game called '{query}' on Twitch.", payload)
+                return
+            await self.create_partialuser(self.owner_id).modify_channel(game_id=game[0])
+            self._chan_ts = 0
+            await self._send(f"Game updated to: {game[1]}", payload)
+        except Exception:
+            log.exception("Game change failed")
+            await self._send("Couldn't change the game. Reconnect Twitch to grant the new permission.", payload)
+
+    async def _find_game(self, query: str):
+        """(id, name) of the game people mean, or None. The exact name first (any capitals); otherwise Twitch's own search,
+        preferring a name that only differs in spaces and punctuation, then Twitch's best match: "pubg" -> PUBG: BATTLEGROUNDS."""
+        games = await self.fetch_games(names=[query], token_for=self.owner_id)
+        if games:
+            return str(games[0].id), games[0].name
+        found = await self._search_games(query)
+        if not found:
+            return None
+        want = _plain(query)
+        for g in found:
+            if _plain(g["name"]) == want:
+                return g["id"], g["name"]
+        return found[0]["id"], found[0]["name"]
+
+    async def _search_games(self, query: str) -> list:
+        """Twitch's Search Categories, asked directly (like the watchdog does). [] if it can't be reached."""
+        token = (auth.load_token() or {}).get("access_token") or self.account.get("access_token")
+        headers = {"Authorization": f"Bearer {token}", "Client-Id": auth.CLIENT_ID}
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as s:
+                async with s.get(SEARCH_URL, params={"query": query, "first": "10"}, headers=headers) as r:
+                    if r.status != 200:
+                        log.warning("Game search answered %s", r.status)
+                        return []
+                    data = await r.json()
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
+            log.warning("Game search could not reach Twitch")
+            return []
+        return [{"id": str(g.get("id")), "name": str(g.get("name"))} for g in (data or {}).get("data", []) if g.get("id") and g.get("name")]
 
     async def _manage(self, payload, action, args, user, level, prefix) -> None:
         if action in ("add", "edit") and level < 4 and URLFETCH.search(args):

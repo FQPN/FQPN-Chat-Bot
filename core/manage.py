@@ -26,6 +26,20 @@ USERLEVELS = {
     "owner": "broadcaster", "broadcaster": "broadcaster",
 }
 USERLEVEL_HELP = "everyone, subscriber, vip, moderator, owner"
+# Shortcut commands: instead of a reply, the command changes the stream's game or title (like Nightbot's !pg -a=!game ...).
+# In !cmadd / !cmedit, -a=!setgame or -a=!settitle makes the command a shortcut; the text after the options is the game or title.
+ACTIONS = ("text", "game", "title")
+ACTION_BY_TARGET = {BUILTIN_PREFIX + BUILTIN_NAMES["game"]: "game", BUILTIN_PREFIX + BUILTIN_NAMES["title"]: "title"}
+ACTION_MAX = {"text": 450, "game": 100, "title": 140}
+ACTION_LEVEL = 3          # a shortcut changes the channel: only moderators and the broadcaster, whatever its user level says
+
+
+def effective_permission(cmd: dict) -> str:
+    """The user level a command really needs (a shortcut always needs at least moderator)."""
+    perm = cmd.get("permission", "everyone")
+    if cmd.get("action", "text") != "text" and perm not in ("moderator", "broadcaster"):
+        return "moderator"
+    return perm
 _FLAG = re.compile(r"^-(ul|cd|a)=(\S*)$", re.IGNORECASE)
 
 
@@ -105,9 +119,16 @@ def split_name(rest: str) -> tuple[str, str]:
 
 
 def parse_options(text: str, prefix: str = "!") -> tuple[dict, str]:
-    """Reads leading -ul= -cd= -a= flags. Everything after them is the response."""
+    """Reads -ul= -cd= -a= flags at the start, and (like Nightbot) at the end. Everything else is the response:
+    !cmadd !pg -a=!setgame pubg -ul=mod  ->  ({"action": "game", "permission": "moderator"}, "pubg")"""
     opts: dict = {}
-    rest = text.strip()
+    words = text.split()
+    tail = []
+    while words and _FLAG.match(words[-1]):     # flags written after the response
+        tail.insert(0, words.pop())
+    rest = " ".join(words + tail) if tail else text.strip()
+    if tail:                                      # put them in front, then read everything the usual way
+        rest = " ".join(tail + words)
     while True:
         first, _, remainder = rest.partition(" ")
         m = _FLAG.match(first)
@@ -125,7 +146,11 @@ def parse_options(text: str, prefix: str = "!") -> tuple[dict, str]:
             opts["cooldown"] = int(val)
         else:
             for a in filter(None, val.split(",")):
-                opts.setdefault("aliases", []).append(clean_name(a))
+                target = ACTION_BY_TARGET.get(a.lower())
+                if target:          # -a=!setgame / -a=!settitle: a shortcut, not an extra name
+                    opts["action"] = target
+                else:
+                    opts.setdefault("aliases", []).append(clean_name(a))
             if not val:
                 raise CommandError("-a needs an alias, like -a=!dc.")
         rest = remainder.strip()
@@ -148,19 +173,23 @@ def add_command(commands: dict, rest: str, prefix: str = "!") -> str:
     if name in names_in_use(commands):
         raise CommandError(f"{name} already exists. Use !cmedit to change it.")
     opts, response = parse_options(tail)
+    action = opts.get("action", "text")
     if not response:
-        raise CommandError("Add the response after the options.")
+        raise CommandError({"game": "Add the game after -a=!setgame, like: !cmadd !pg -a=!setgame pubg",
+                            "title": "Add the title after -a=!settitle."}.get(action, "Add the response after the options."))
     aliases = list(dict.fromkeys(opts.get("aliases", [])))
     if name in aliases:
         raise CommandError("A command can't be its own alias.")
     check_aliases(commands, name, aliases)
     commands[name] = {
-        "response": response[:450],
+        "response": response[:ACTION_MAX[action]],
         "permission": opts.get("permission", "everyone"),
         "cooldown": opts.get("cooldown", 5),
         "enabled": True,
         "aliases": aliases,
     }
+    if action != "text":
+        commands[name]["action"] = action
     return name
 
 
@@ -172,6 +201,10 @@ def edit_command(commands: dict, rest: str, prefix: str = "!", options_only: boo
     opts, response = parse_options(tail)
     if options_only and response:
         raise CommandError("Options only: -ul=, -cd= or -a=. Use edit to change the response.")
+    if "action" in opts:
+        if not response:
+            raise CommandError("Add the game or title after -a=!setgame / -a=!settitle.")
+        commands[owner]["action"] = opts["action"]
     if not opts and not response:
         raise CommandError("Nothing to change. Give a new response or options.")
     if "aliases" in opts:
@@ -184,7 +217,7 @@ def edit_command(commands: dict, rest: str, prefix: str = "!", options_only: boo
     if "cooldown" in opts:
         commands[owner]["cooldown"] = opts["cooldown"]
     if response:
-        commands[owner]["response"] = response[:450]
+        commands[owner]["response"] = response[:ACTION_MAX[commands[owner].get("action", "text")]]
     return owner
 
 

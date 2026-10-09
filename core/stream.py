@@ -155,7 +155,10 @@ class StreamSession:
     async def _say(self, kind: str, info: dict, **extra) -> None:
         if self.paused():
             return                      # the bot is paused: it says nothing (the session is still tracked)
-        c = (self.store.get("stream") or {}).get(kind) or {}
+        cfg = self.store.get("stream") or {}
+        if cfg.get("enabled", True) is False:
+            return                      # all stream messages switched off (the session is still tracked, so uptime stays right)
+        c = cfg.get(kind) or {}
         if not c.get("enabled"):
             return
         ctx = {"channel": self.channel, "category": info.get("category") or self.s["category"] or "-",

@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -23,7 +24,9 @@ REPO = "FQPN/FQPN-Chat-Bot"
 API_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
 ALLOWED_PREFIX = f"https://github.com/{REPO}/releases/download/"     # downloads must come from this project's releases
 ASSET_RE = re.compile(r"^FQPN-Chat-Bot-Setup-.+\.exe$")
-CHECK_EVERY = 6 * 3600
+CHECK_EVERY = 15 * 60                # a new release shows up within 15 minutes (GitHub allows 60 checks an hour per PC;
+                                     # a "nothing changed" answer (304) does not count, see fetch_latest)
+NUDGE_GAP = 120                      # opening or restoring the window checks at once, but at most every 2 minutes
 FIRST_CHECK_DELAY = 20               # seconds after start before the first look (so start-up stays quick)
 UPDATES_DIR = Path("updates")        # the launcher points this at the user's data folder
 HEADERS = {"User-Agent": "FQPNsChatBot-updater", "Accept": "application/vnd.github+json"}
@@ -70,10 +73,35 @@ def _get_json(url: str) -> dict:
         return json.load(r)
 
 
+_CACHE: dict = {"etag": None, "info": None}     # the last answer, so GitHub can say "nothing changed" (304)
+
+
 def fetch_latest() -> dict:
-    rel = _get_json(API_URL)
-    return {"version": str(rel.get("tag_name", "")).lstrip("v"), "notes": str(rel.get("body") or "")[:2000],
+    headers = dict(HEADERS)
+    if _CACHE["etag"] and _CACHE["info"] is not None:
+        headers["If-None-Match"] = _CACHE["etag"]
+    try:
+        with urllib.request.urlopen(urllib.request.Request(API_URL, headers=headers), timeout=20) as r:
+            rel = json.load(r)
+            etag = r.headers.get("ETag")
+    except urllib.error.HTTPError as e:
+        if e.code == 304 and _CACHE["info"] is not None:
+            return _CACHE["info"]          # the same release as last time
+        raise
+    info = {"version": str(rel.get("tag_name", "")).lstrip("v"), "notes": str(rel.get("body") or "")[:2000],
             "asset": pick_asset(rel)}
+    _CACHE.update(etag=etag, info=info)
+    return info
+
+
+def nudge(u: dict, store, wake) -> bool:
+    """The window was opened or brought back: look for an update now, unless we looked less than NUDGE_GAP seconds ago."""
+    if is_dev() or not store.get("prefs").get("auto_update", True) or u.get("status") in ("checking", "downloading", "ready"):
+        return False
+    if u.get("checked") and time.time() - u["checked"] < NUDGE_GAP:
+        return False
+    wake.set()
+    return True
 
 
 def _nice(e: Exception) -> str:
@@ -217,7 +245,7 @@ async def loop(u: dict, store, wake: asyncio.Event) -> None:
             log.exception("Update loop failed")
         wake.clear()
         try:
-            await asyncio.wait_for(wake.wait(), CHECK_EVERY)    # woken early when the setting is switched on
+            await asyncio.wait_for(wake.wait(), CHECK_EVERY)    # woken early: the setting was switched on, or the window was opened
         except asyncio.TimeoutError:
             pass
 

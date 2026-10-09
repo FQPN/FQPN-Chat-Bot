@@ -11,6 +11,7 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 DEFAULTS = {
     "stream": {                       # the messages the bot says when your stream starts, comes back and ends (off until switched on)
+        "enabled": True,              # the master switch for all four (each one also has its own switch)
         "start": {"enabled": False, "text": ""},       # an empty text means "the default in the app's language"
         "followers": {"enabled": False, "text": ""},
         "resume": {"enabled": False, "text": ""},

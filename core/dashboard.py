@@ -267,6 +267,11 @@ def validate(section: str, data, prefix: str = "!"):
                     aliases.append(a)
             if c.get("permission") not in PERMISSIONS:
                 raise ValidationError(f"Command '{name}' has an unknown permission.")
+            action = c.get("action", "text")
+            if action not in manage.ACTIONS:
+                raise ValidationError(f"Command '{name}' has an unknown reply type.")
+            if action != "text" and len(str(c.get("response") or "").strip()) > manage.ACTION_MAX[action]:
+                raise ValidationError(f"The {'game name' if action == 'game' else 'title'} of '{name}' can be at most {manage.ACTION_MAX[action]} characters.")
             out[name] = {
                 "response": _text(c.get("response"), f"Response for '{name}'"),
                 "permission": c["permission"],
@@ -274,6 +279,8 @@ def validate(section: str, data, prefix: str = "!"):
                 "enabled": _bool(c.get("enabled"), f"Enabled for '{name}'"),
                 "aliases": aliases,
             }
+            if action != "text":
+                out[name]["action"] = action      # only shortcuts carry it, so plain commands stay exactly as before
         used = {}
         for n, c in out.items():
             for key in [n, *c["aliases"]]:
@@ -417,7 +424,7 @@ def validate(section: str, data, prefix: str = "!"):
     if section == "stream":
         if not isinstance(data, dict):
             raise ValidationError("The stream messages are invalid.")
-        out = {}
+        out = {"enabled": _bool(data.get("enabled", True), "The stream messages switch")}   # older files have no master switch: on
         for kind in ("start", "followers", "resume", "end"):
             c = data.get(kind)
             if not isinstance(c, dict):
@@ -603,6 +610,12 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             state["update_task"] = asyncio.create_task(updater.download(updater.U))
         return web.json_response({"ok": True})
 
+    async def update_nudge(request):
+        """The page tells us the window was opened or brought back to the front."""
+        wake = state.get("update_wake")
+        started = updater.nudge(updater.U, store, wake) if wake is not None else False
+        return web.json_response({"ok": True, "checking": started})
+
     async def update_download(request):
         if updater.U["status"] in ("available", "error") and updater.U.get("asset"):
             state["update_task"] = asyncio.create_task(updater.download(updater.U))
@@ -729,6 +742,7 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
     app.router.add_post("/api/show", show_window)
     app.router.add_post("/api/update/check", update_check)
     app.router.add_post("/api/update/download", update_download)
+    app.router.add_post("/api/update/nudge", update_nudge)
     app.router.add_post("/api/update/install", update_install)
     app.router.add_post("/api/notify/test", notify_test)
     app.router.add_post("/api/publist/sync", publist_sync)

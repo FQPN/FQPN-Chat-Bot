@@ -12,12 +12,12 @@ import time
 
 import aiohttp
 
-from . import auth
+from . import auth, manage
 from .version import VERSION
 
 log = logging.getLogger("twitchbot.publiclist")
 
-# The website's address, with no slash at the end, e.g. "https://fqpn-asoom-commands.fqpn.workers.dev".
+# The website's address, with no slash at the end, e.g. "https://fqpn-commands.fqpn.workers.dev".
 # Empty = the feature is not set up in this build (the page says so and nothing is ever sent).
 SITE = "https://fqpn-asoom-commands.aymanxxxcrd.workers.dev"
 
@@ -41,7 +41,7 @@ def build(commands, settings) -> dict:
         c = commands[name]
         if not isinstance(c, dict) or c.get("enabled") is False or name in hidden:
             continue
-        out.append({"name": name, "perm": c.get("permission", "everyone")})
+        out.append({"name": name, "perm": manage.effective_permission(c)})
     return {"v": FORMAT, "commands": out[:MAX_COMMANDS]}
 
 
