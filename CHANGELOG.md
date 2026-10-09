@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.0
+- Logs now has three tabs: Activity, Moderation (the bot's filters and your mods' actions) and Bot (everything the bot said, and why), with search, counts and repeated rows grouped.
+- Fixed: the "developer" tag on the Users page showed as a big red bar.
+- The Users page is in its own Developer group in the sidebar.
+- Events no longer show Twitch permission names.
+- Moderation logs need six new read-only Twitch permissions: reconnect once when the app asks.
+
 ## 1.5.0
 - New Moderation page: Bad words (Arabic and English, hard to dodge), Links, Excess caps, emotes and symbols, Repetitions and Shared chat. Each has an info button with examples and its own settings.
 - "Blocked words" moved from the Blocklist into Moderation > Bad words (switched off, so nothing changes until you turn it on).

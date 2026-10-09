@@ -209,3 +209,64 @@ class Moderator:
             n = 0
         self.strikes[(filt, user_id)] = (n + 1, now)
         return steps[min(n, len(steps) - 1)]
+
+# ------------------------------------------------------------------------------------------------ your mods' actions (Logs)
+# Twitch's "channel.moderate" event. Read defensively: TwitchIO objects or Twitch's raw field names both work, and an action
+# this code doesn't know becomes a plain row instead of an error.
+_SIMPLE = {"clear", "slowoff", "followers", "followersoff", "emoteonly", "emoteonlyoff", "subscribers", "subscribersoff",
+           "uniquechat", "uniquechatoff", "unraid"}
+
+
+def _g(obj, *names):
+    for n in names:
+        v = obj.get(n) if isinstance(obj, dict) else getattr(obj, n, None)
+        if v is not None:
+            return v
+    return None
+
+
+def _who(u):
+    if u is None:
+        return ""
+    if isinstance(u, str):
+        return u
+    return str(_g(u, "display_name", "name", "user_name", "user_login", "login") or "")
+
+
+def describe_action(payload, now=None):
+    """{"name": "timeout:600", "user": target, "by": moderator, "text": reason or message, "shared": bool} or None."""
+    action = str(_g(payload, "action") or "").lower()
+    if not action:
+        return None
+    shared = action.startswith("shared_chat_")
+    key = action.removeprefix("shared_chat_")
+    sub = _g(payload, action, key) or {}
+    by = _who(_g(payload, "moderator")) or str(_g(payload, "moderator_user_name", "moderator_user_login") or "")
+    user = _who(_g(sub, "user")) or str(_g(sub, "user_name", "user_login") or "")
+    name, text = key, ""
+    if key in ("ban", "warn"):
+        text = _g(sub, "reason") or ""
+    elif key == "timeout":
+        text = _g(sub, "reason") or ""
+        ends = _g(sub, "expires_at", "ends_at")
+        secs = 0
+        try:
+            if hasattr(ends, "timestamp"):
+                secs = int(round(ends.timestamp() - (now if now is not None else time.time())))
+            elif isinstance(ends, str):
+                from datetime import datetime
+                secs = int(round(datetime.fromisoformat(ends.replace("Z", "+00:00")).timestamp() - (now if now is not None else time.time())))
+        except (ValueError, TypeError, OverflowError):
+            secs = 0
+        name = f"timeout:{max(secs, 0)}"
+    elif key == "delete":
+        text = _g(sub, "text", "message_body") or ""
+    elif key == "slow":
+        name = f"slow:{int(_g(sub, 'wait_time_seconds') or 0)}"
+    elif key == "raid":
+        user = user or _who(_g(sub, "user"))
+    elif key in ("unban", "untimeout", "mod", "unmod", "vip", "unvip") or key in _SIMPLE:
+        pass
+    else:
+        name = key                         # automod terms, unban requests, ... shown as "Moderation: <action>"
+    return {"name": name, "user": user, "by": by, "text": str(text)[:300], "shared": shared}

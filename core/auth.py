@@ -18,6 +18,12 @@ SCOPES = [
     "channel:read:hype_train",
     "moderator:manage:chat_messages",    # Moderation: delete messages that break a filter (1.5.0)
     "moderator:manage:banned_users",     # Moderation: time people out (1.5.0)
+    "moderator:read:blocked_terms",    # Logs: your mods' actions (1.6.0)
+    "moderator:read:chat_settings",    # Logs: chat mode changes
+    "moderator:read:unban_requests",   # Logs: unban requests
+    "moderator:read:warnings",         # Logs: warnings
+    "moderator:read:moderators",       # Logs: mod changes
+    "moderator:read:vips",             # Logs: VIP changes
 ]
 last_problem: str | None = None  # set to "permissions" when a reconnect is needed for new scopes
 

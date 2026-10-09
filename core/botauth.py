@@ -20,6 +20,12 @@ SCOPES = [
     "user:read:moderated_channels",     # to check whether the bot is a moderator of your channel
     "moderator:manage:chat_messages",    # Moderation: delete messages that break a filter (1.5.0)
     "moderator:manage:banned_users",     # Moderation: time people out (1.5.0)
+    "moderator:read:blocked_terms",    # Logs: your mods' actions (1.6.0)
+    "moderator:read:chat_settings",    # Logs: chat mode changes
+    "moderator:read:unban_requests",   # Logs: unban requests
+    "moderator:read:warnings",         # Logs: warnings
+    "moderator:read:moderators",       # Logs: mod changes
+    "moderator:read:vips",             # Logs: VIP changes
 ]
 last_problem: str | None = None         # "permissions" when the saved login lacks a permission and must be redone
 

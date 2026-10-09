@@ -86,7 +86,7 @@ class TwitchBot(commands.Bot):
         self.last_chat = 0.0        # when a chat message was last heard
         self._live_wake = asyncio.Event()      # Twitch saying "online" or "offline" makes the live check run right now
         self.session = StreamSession(          # the messages for when the stream starts, comes back and ends (Events > Stream)
-            self.store, send=lambda text: self._send(text), followers=lambda: self._follower_total(), channel=account["login"],
+            self.store, send=lambda text: self._send(text, why="stream"), followers=lambda: self._follower_total(), channel=account["login"],
             paused=lambda: bool(self.store.get("settings").get("paused")),
             log_event=lambda kind: self._log_activity("event", "stream " + kind))
         self.is_live = False
@@ -104,6 +104,7 @@ class TwitchBot(commands.Bot):
         self._greet_tasks: set[asyncio.Task] = set()
         self.moderator = moderation.Moderator()          # the Moderation page's filters (strikes and recent messages live here)
         self.mod_problem = None                           # why Twitch refused the last delete/timeout (shown on the page)
+        self._filtered: deque = deque(maxlen=50)          # (time, name) of people a filter just acted on, so Twitch's echo isn't logged twice
         self._seen_events: deque = deque(maxlen=50)   # so a repeated delivery of the same notice is answered once
         self.event_problems: dict[str, str] = {}      # events Twitch refused to send (usually a missing permission)
         self._hype_level = 0
@@ -208,9 +209,21 @@ class TwitchBot(commands.Bot):
             if len(self._sent_ids) > 200:
                 self._sent_ids.clear()
 
-    async def _send(self, text: str, payload=None) -> None:
+    def _log_bot(self, text: str, payload, why, user) -> None:
+        """The Logs page's Bot tab: what the bot said, and why ("cmd:!discord", "timer:name", "event:follow", ...)."""
+        try:
+            if why is None and payload is not None and getattr(payload, "text", None):
+                why = "cmd:" + str(payload.text).split(" ", 1)[0][:60]
+            if user is None and payload is not None and getattr(payload, "chatter", None) is not None:
+                user = payload.chatter.display_name or payload.chatter.name
+            self.store.activity.add("bot", text[:300], user or "", why=why or "")
+        except Exception:
+            log.exception("Could not log a bot message")
+
+    async def _send(self, text: str, payload=None, why: str | None = None, user: str | None = None) -> None:
         """Sends to chat. Text starting with /announce, /announceblue,
-        /announcegreen, /announceorange or /announcepurple becomes an announcement."""
+        /announcegreen, /announceorange or /announcepurple becomes an announcement.
+        `why` and `user` only label the message in the Logs page's Bot tab."""
         text = text.strip()
         if not text:
             return
@@ -222,6 +235,7 @@ class TwitchBot(commands.Bot):
             body = m.group(2).strip()[:500]
             try:
                 await owner.send_announcement(moderator=self.bot_id, message=body, color=color)
+                self._log_bot(body, payload, why, user)
                 return
             except Exception:
                 log.exception("Announcement failed (reconnect Twitch to grant the permission); sending as a normal message")
@@ -233,6 +247,7 @@ class TwitchBot(commands.Bot):
         else:   # a separate bot account (or a message with no trigger): say who sends it
             sent = await owner.send_message(text, sender=self.bot_id)
         self._remember(text, sent)
+        self._log_bot(text, payload, why, user)
 
     async def send_test(self) -> str:
         """The dashboard's "Send test message": says hello from the account the replies come from."""
@@ -288,6 +303,7 @@ class TwitchBot(commands.Bot):
         cfg = settings.get(filt) or {}
         step = self.moderator.punishment(cfg, filt, uid)
         user = chatter.display_name or chatter.name
+        self._filtered.append((time.time(), str(chatter.display_name or chatter.name).lower()))
         await self._mod_api("DELETE", "moderation/chat", {"message_id": str(payload.id)})
         did = "delete:0"
         if step:
@@ -296,9 +312,9 @@ class TwitchBot(commands.Bot):
         elif step == 0:
             lang = "ar" if (self.store.get("ui") or {}).get("language") == "ar" else "en"
             text = (cfg.get("warn_text") or "").strip() or self.WARN[lang][filt]
-            await self._send(text.replace("$(user)", str(user)), payload)
+            await self._send(text.replace("$(user)", str(user)), payload, why="warn:" + filt, user=str(user))
             did = "warn:0"
-        self._log_activity("moderation", f"{filt}:{did}", user)     # the Logs page turns this into words, in the app's language
+        self.store.activity.add("moderation", f"{filt}:{did}", user, text=(payload.text or "")[:300], by="", shared=payload.source_broadcaster is not None)   # the page turns the name into words
         return True
 
     async def _mod_api(self, method: str, path: str, params: dict, body=None) -> bool:
@@ -421,6 +437,12 @@ class TwitchBot(commands.Bot):
                       lambda: eventsub.HypeTrainBeginSubscription(broadcaster_user_id=owner),
                       lambda: eventsub.HypeTrainProgressSubscription(broadcaster_user_id=owner),
                       lambda: eventsub.HypeTrainEndSubscription(broadcaster_user_id=owner))
+        # what your human mods do (bans, timeouts, deletes, warnings, chat modes...) for the Logs page's Moderation tab
+        maker = getattr(eventsub, "ChannelModerateSubscription", None)
+        if maker is None:
+            self.event_problems["modlog"] = "This TwitchIO version can't listen for moderation actions."
+        else:
+            await attempt("modlog", lambda: maker(broadcaster_user_id=owner, moderator_user_id=owner))
 
     @staticmethod
     def _names(user):
@@ -456,7 +478,7 @@ class TwitchBot(commands.Bot):
             self._log_activity("event", f"donation {ctx.extra.get('amount', value)} {ctx.extra.get('currency', '')}".strip(), user)
         else:
             self._log_activity("event", f"{label} {value}" if value else label, user)
-        await self._send(await expand(template, ctx))
+        await self._send(await expand(template, ctx), why="event:" + key, user=user)
 
     async def on_donation(self, d: dict) -> None:
         """A donation arrived from Streamlabs or StreamElements (see donations.py): thank the donor in chat."""
@@ -528,6 +550,26 @@ class TwitchBot(commands.Bot):
                 "raid", viewers, raider or "someone", raider_login,
                 {"raider": raider or "someone", "viewers": viewers},
                 dedupe=nid or f"raid:{raider_login}:{viewers}")
+
+    async def event_mod_action(self, payload) -> None:
+        """Twitch "channel.moderate": a moderator (or you) did something in chat. Written to Logs > Moderation.
+        The bot's own filter actions are already there with more detail, so its own account's actions are skipped."""
+        try:
+            mid = str(getattr(getattr(payload, "moderator", None), "id", "") or "")
+            if mid and mid == str(self.bot_account["user_id"]) and self.separate:
+                return
+            e = moderation.describe_action(payload)
+            if e is None:
+                return
+            if mid == str(self.bot_account["user_id"]) and e["name"].split(":")[0] in ("delete", "timeout") and self._recently_filtered(e["user"]):
+                return      # a filter just did this (as the moderating account): already logged with the filter's details
+            self.store.activity.add("modaction", e["name"], e["user"], by=e["by"], text=e["text"], shared=e["shared"])
+        except Exception:
+            log.exception("Could not log a moderation action")
+
+    def _recently_filtered(self, user: str) -> bool:
+        now, who = time.time(), str(user).lower()
+        return any(u == who and now - at < 30 for at, u in list(self._filtered))
 
     async def event_follow(self, payload) -> None:
         try:
@@ -602,7 +644,7 @@ class TwitchBot(commands.Bot):
             user = chatter.display_name or chatter.name
             self._log_activity("greeting", login, user)
             ctx = self._ctx(user, "", counter_key=f"greet:{login}", chatter=chatter)
-            await self._send(await expand(template, ctx))
+            await self._send(await expand(template, ctx), why="greeting", user=user)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -891,9 +933,8 @@ class TwitchBot(commands.Bot):
                         last[key] = now
                         continue
                     if now - last[key] >= t["interval_minutes"] * 60:
-                        self._log_activity("timer", key)
                         ctx = self._ctx(self.account["login"], counter_key=f"timer:{key}")
-                        await self._send(await expand(t["message"], ctx))
+                        await self._send(await expand(t["message"], ctx), why="timer:" + key, user="")   # (shown in the Bot tab)
                         last[key] = now
             except asyncio.CancelledError:
                 raise

@@ -597,7 +597,12 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
         })
 
     async def logs(request):
-        return web.json_response(store.activity.recent(200))      # newest first, saved on disk
+        tab = request.query.get("tab", "activity")
+        if tab == "all":       # the Logs page: all three tabs at once, with how many entries each got today
+            return web.json_response({t: store.activity.recent(300, t) for t in ("activity", "moderation", "bot")} | {"counts": store.activity.counts()})
+        if tab not in ("activity", "moderation", "bot"):
+            tab = "activity"
+        return web.json_response(store.activity.recent(200, tab))      # newest first, saved on disk
 
     async def connect(request):
         if state.get("account"):

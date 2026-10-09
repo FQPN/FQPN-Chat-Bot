@@ -22,7 +22,7 @@ NEW_IN = {
     "main.py": ["open_browser", "updater.loop", "apply_launch_defaults", "python launcher.py", "botauth", "donations", "watchdog", "publiclist.Syncer", "usage.Reporter"],
     "launcher.py": ["min_size=(1000, 650)", "class Shell", "ensure_single_instance", "fail_no_window", "edgechromium", "read_port", "fail_no_dashboard"],
     "core/store.py": ["ActivityLog", '"prefs"', "apply_launch_defaults", "disabled_builtins", "separate_bot", "donation", "tourDone", "gsDone", "stream_state", "public_hidden", "publist_state"],
-    "core/bot.py": ["store.activity", "notify.event", "_log_chat", "disabled_builtins", "BY_TYPED", "bot_account", "send_test", "on_donation", "live_fail", "StreamSession", "event_stream_online", "_find_game", "SEARCH_URL", "developer_messages"],
+    "core/bot.py": ["store.activity", "notify.event", "_log_chat", "disabled_builtins", "BY_TYPED", "bot_account", "send_test", "on_donation", "live_fail", "StreamSession", "event_stream_online", "_find_game", "SEARCH_URL", "developer_messages", "event_mod_action", "ChannelModerateSubscription", "def _log_bot"],
     "core/donations.py": ["class DonationManager", "parse_streamelements", "CryptProtectData"],
     "core/events.py": ["DECIMAL", "donation"],
     "core/notify.py": ["donation"],
@@ -30,15 +30,16 @@ NEW_IN = {
     "core/stream.py": ["class StreamSession", "DEFAULT_TEXT", "STALE"],
     "core/watchdog.py": ["class Watchdog", "channel.chat.message", "MAX_RESTARTS"],
     "core/manage.py": ["BUILTIN_NAMES", "BY_TYPED", "ACTION_BY_TARGET", "def effective_permission"],
+    "core/activity.py": ["def tab_of", "def counts", "EXTRA ="],
     "core/usage.py": ["class Reporter", "def payload", "def set_banned"],
-    "core/moderation.py": ["class Moderator", "def bad_word", "def bad_link"],
+    "core/moderation.py": ["class Moderator", "def bad_word", "def bad_link", "def describe_action"],
     "core/greetings.py": ["DEVELOPERS", "def developer_messages"],
     "core/updater.py": ["NUDGE_GAP", "If-None-Match", "def nudge"],
     "core/publiclist.py": ["class Syncer", "SITE =", "def build", "effective_permission"],
     "core/dashboard.py": ['"prefs"', "updater", "/api/update/check", "/api/show", "disabled_builtins", "bind_first_free", "/api/botaccount/connect", "restart_bot", "/api/donations/", "tourDone", "gsDone", "/api/restart", "health_info", "The stream messages are invalid", "publist_info", "/api/publist/sync", "unknown reply type", "/api/update/nudge", "section == \"moderation\"", "/api/dev/users", "/api/dev/ban"],
     "core/updater.py": ["def announce"],
     "core/desktop.py": ["quit_app", "show_window"],
-    "core/dashboard.html": ["data-pref", "spane-app", "updbtn", "toggleBuiltin", "transform-origin:15px 7px", 'class="sep"', "BNAME", "upop_title", "bac-cards", "botBanner", "dcards", "navActive", "ngrp", "startTour", "tourBtn", "v-greetings", "v-botaccount", "v-donations", "renderAccountMenu", "healthBanner", "renderStream", "renderPublist", "plmodal", "st_msg_on", "applyType", "mtype", "nudgeUpdate", "tr20_t", "usenote", "stmaster", "renderModeration", "mfmodal", "renderUsers", "appoff"],
+    "core/dashboard.html": ["data-pref", "spane-app", "updbtn", "toggleBuiltin", "transform-origin:15px 7px", 'class="sep"', "BNAME", "upop_title", "bac-cards", "botBanner", "dcards", "navActive", "ngrp", "startTour", "tourBtn", "v-greetings", "v-botaccount", "v-donations", "renderAccountMenu", "healthBanner", "renderStream", "renderPublist", "plmodal", "st_msg_on", "applyType", "mtype", "nudgeUpdate", "tr20_t", "usenote", "stmaster", "renderModeration", "mfmodal", "renderUsers", "appoff", "logtabs", "modRow", "botRow", "devgrp", "uspill"],
 }
 
 # a phrase that only the OLD version of a file contains (so it must NOT be there)
