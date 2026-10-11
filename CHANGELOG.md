@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.8.0
+- A "What's new" window after every update, in English and Arabic side by side.
+- Commands are listed A to Z (Arabic أ to ي), with pages at the bottom: show 10, 25, 50 or 100.
+- In Arabic, the sidebar stays on the left, like in English.
+
 ## 1.7.0
 - The bot heals itself when Twitch rejects its login (it used to go silent until restarted), warns when two copies of the app are running, and reconnects if chat goes completely quiet while you're live.
 - No Twitch login keys in bot.log any more.

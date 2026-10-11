@@ -141,6 +141,8 @@ def keep_tour_flag(section: str, raw, store: Store):
         for key in ("tourDone", "gsDone"):
             if key not in raw:
                 raw[key] = bool(stored.get(key, False))
+        if "wnSeen" not in raw:
+            raw["wnSeen"] = str(stored.get("wnSeen", ""))          # the last version whose "What's new" was seen (1.8.0)
     return raw
 
 
@@ -571,6 +573,7 @@ def validate(section: str, data, prefix: str = "!"):
             "reduceMotion": _bool(data.get("reduceMotion", False), "Reduce motion"),
             "tourDone": _bool(data.get("tourDone", False), "Tutorial"),
             "gsDone": _bool(data.get("gsDone", False), "Getting started"),
+            "wnSeen": str(data.get("wnSeen", ""))[:20] if re.fullmatch(r"[0-9a-z.\-]{0,20}", str(data.get("wnSeen", ""))) else "",
         }
 
     raise ValidationError("Unknown section.")

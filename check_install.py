@@ -39,10 +39,10 @@ NEW_IN = {
     "core/greetings.py": ["DEVELOPERS", "def developer_messages"],
     "core/updater.py": ["NUDGE_GAP", "If-None-Match", "def nudge"],
     "core/publiclist.py": ["class Syncer", "SITE =", "def build", "effective_permission"],
-    "core/dashboard.py": ['"prefs"', "updater", "/api/update/check", "/api/show", "disabled_builtins", "bind_first_free", "/api/botaccount/connect", "restart_bot", "/api/donations/", "tourDone", "gsDone", "/api/restart", "health_info", "The stream messages are invalid", "publist_info", "/api/publist/sync", "unknown reply type", "/api/update/nudge", "section == \"moderation\"", "/api/dev/users", "/api/dev/ban"],
+    "core/dashboard.py": ['"prefs"', "updater", "/api/update/check", "/api/show", "disabled_builtins", "bind_first_free", "/api/botaccount/connect", "restart_bot", "/api/donations/", "tourDone", "gsDone", "/api/restart", "health_info", "The stream messages are invalid", "publist_info", "/api/publist/sync", "unknown reply type", "/api/update/nudge", "wnSeen", "section == \"moderation\"", "/api/dev/users", "/api/dev/ban"],
     "core/updater.py": ["def announce"],
     "core/desktop.py": ["quit_app", "show_window"],
-    "core/dashboard.html": ["data-pref", "spane-app", "updbtn", "toggleBuiltin", "transform-origin:15px 7px", 'class="sep"', "BNAME", "upop_title", "bac-cards", "botBanner", "dcards", "navActive", "ngrp", "startTour", "tourBtn", "v-greetings", "v-botaccount", "v-donations", "renderAccountMenu", "healthBanner", "renderStream", "renderPublist", "plmodal", "st_msg_on", "applyType", "mtype", "nudgeUpdate", "tr20_t", "usenote", "stmaster", "renderModeration", "mfmodal", "renderUsers", "appoff", "logtabs", "modRow", "botRow", "devgrp", "uspill", "renderMinigames", "mgmodal", "hl_heal_login", "tr22_t"],
+    "core/dashboard.html": ["data-pref", "spane-app", "updbtn", "toggleBuiltin", "transform-origin:15px 7px", 'class="sep"', "BNAME", "upop_title", "bac-cards", "botBanner", "dcards", "navActive", "ngrp", "startTour", "tourBtn", "v-greetings", "v-botaccount", "v-donations", "renderAccountMenu", "healthBanner", "renderStream", "renderPublist", "plmodal", "st_msg_on", "applyType", "mtype", "nudgeUpdate", "tr20_t", "usenote", "stmaster", "renderModeration", "mfmodal", "renderUsers", "appoff", "logtabs", "modRow", "botRow", "devgrp", "uspill", "renderMinigames", "mgmodal", "hl_heal_login", "tr22_t", "wnmodal", "wnCheck", "cmdSort", "cpager"],
 }
 
 # a phrase that only the OLD version of a file contains (so it must NOT be there)
