@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.7.0
+- The bot heals itself when Twitch rejects its login (it used to go silent until restarted), warns when two copies of the app are running, and reconnects if chat goes completely quiet while you're live.
+- No Twitch login keys in bot.log any more.
+- Shortcuts can use $(query): a !g command with $(query) makes "!g Valorant" change the game.
+- $(eval) now understands Nightbot-style code (variables, lists, text).
+- $(followage) shows the full time: years, months, days, hours, minutes and seconds.
+- Fixed: the "new followers since the last stream" message.
+- New Mini games page with «اسم، جماد، نبات، حيوان، بلاد» (!حروف, !صح, !فوز, !الأوائل).
+- The tour shows Mini games.
+
 ## 1.6.0
 - Logs now has three tabs: Activity, Moderation (the bot's filters and your mods' actions) and Bot (everything the bot said, and why), with search, counts and repeated rows grouped.
 - Fixed: the "developer" tag on the Users page showed as a big red bar.

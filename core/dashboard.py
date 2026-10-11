@@ -15,7 +15,7 @@ from pathlib import Path
 import aiohttp
 from aiohttp import web
 
-from . import auth, botauth, desktop, events, greetings, manage, moderation, notify, publiclist, updater
+from . import auth, botauth, desktop, events, greetings, manage, minigames, moderation, notify, publiclist, updater
 from .store import Store
 
 log = logging.getLogger("twitchbot.dashboard")
@@ -47,7 +47,7 @@ async def bind_first_free(first: int, tries: int, bind) -> int:
 PAGE = Path(__file__).resolve().parent / "dashboard.html"
 ICON = Path(__file__).resolve().parent.parent / "icon.ico"   # next to main.py (and inside the installed program folder)
 PERMISSIONS = ("everyone", "subscriber", "vip", "moderator", "broadcaster")
-SECTIONS = ("commands", "timers", "greetings", "events", "blocklist", "settings", "ui", "prefs", "stream", "moderation")
+SECTIONS = ("commands", "timers", "greetings", "events", "blocklist", "settings", "ui", "prefs", "stream", "moderation", "games", "game_wins")
 _LOGIN = re.compile(r"[a-z0-9_]{1,25}")
 
 
@@ -435,6 +435,48 @@ def validate(section: str, data, prefix: str = "!"):
         out["resume_within_minutes"] = int(_number(data.get("resume_within_minutes", 15), "Minutes to come back and continue the stream", 1, 120))
         return out
 
+    if section == "games":
+        if not isinstance(data, dict) or not isinstance(data.get("letters", {}), dict):
+            raise ValidationError("The mini games settings are invalid.")
+        c, base = data.get("letters", {}), minigames.defaults()["letters"]
+        cmds = {}
+        for k in ("start_cmd", "approve_cmd", "wins_cmd", "top_cmd"):
+            v = _text(c.get(k, base[k]), "Command name", 30).strip()
+            if " " in v:
+                raise ValidationError("A game command is one word, like !حروف.")
+            if v.lower() in cmds.values():
+                raise ValidationError(f"Two game commands are both called {v}.")
+            cmds[k] = v.lower() if v.isascii() else v
+        if c.get("who_starts", "moderator") not in minigames.WHO:
+            raise ValidationError("Choose who can start a round.")
+        cats = [x for x in (c.get("categories") or []) if x in minigames.CATEGORIES]
+        if not cats:
+            raise ValidationError("Choose at least one category.")
+        letters = "".join(dict.fromkeys(ch for ch in str(c.get("letters", "")) if "\u0621" <= ch <= "\u064a"))
+        if not letters:
+            raise ValidationError("Choose at least one Arabic letter.")
+        words = {}
+        for cat in minigames.CATEGORIES:
+            raw = (c.get("words") or {}).get(cat, [])
+            if not isinstance(raw, list) or len(raw) > 2000:
+                raise ValidationError("A word list is invalid.")
+            words[cat] = list(dict.fromkeys(w for w in (_text(x, "Word", 40, required=False).strip() for x in raw) if w))
+        return {"letters": dict(cmds, enabled=_bool(c.get("enabled", False), "Game switch"), who_starts=c.get("who_starts", "moderator"),
+                                round_seconds=int(_number(c.get("round_seconds", 60), "Round time", 15, 600)),
+                                auto_minutes=int(_number(c.get("auto_minutes", 0), "Automatic rounds", 0, 240)),
+                                categories=cats, letters=letters, words=words,
+                                announce=_bool(c.get("announce", True), "Announcements"))}
+
+    if section == "game_wins":
+        if not isinstance(data, dict) or len(data) > 100000:
+            raise ValidationError("The wins list is invalid.")
+        out = {}
+        for uid, e in data.items():
+            if not isinstance(e, dict):
+                raise ValidationError("The wins list is invalid.")
+            out[str(uid)[:30]] = {"name": _text(e.get("name", "?"), "Name", 40, required=False) or "?", "wins": int(_number(e.get("wins", 0), "Wins", 0, 10 ** 9))}
+        return out
+
     if section == "moderation":
         if not isinstance(data, dict):
             raise ValidationError("The moderation settings are invalid.")
@@ -590,6 +632,8 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             "donations": donation_status(state),
             "publist": publist_info(state),
             "mod_problem": getattr(state.get("bot"), "mod_problem", None),
+            "last_reconnect": state.get("last_reconnect"),
+            "two_copies": bool(state.get("two_copies")),                            # the bot reconnected by itself (why, when)
             "banned": bool(state.get("banned")),                                       # the developer turned the app off here
             "dev": str(state.get("account_id") or "") in greetings.DEVELOPERS,           # shows the Users page (the website checks again)   # Twitch refused a delete/timeout ("scopes" = reconnect)
             "caps": dict(desktop.caps, updates=bool(desktop.FROZEN and not updater.is_dev())),
@@ -611,6 +655,7 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
         return web.json_response({"ok": True})
 
     async def disconnect(request):
+        state["user_logout"] = True          # (so the app doesn't say "your login expired" afterwards)
         task = state.get("login_task")
         if task and not task.done():
             task.cancel()

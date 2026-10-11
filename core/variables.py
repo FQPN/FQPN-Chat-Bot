@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Awaitable, Callable
 from urllib.parse import quote, urljoin, urlsplit
+from . import jseval
 
 import aiohttp
 from aiohttp.abc import AbstractResolver
@@ -98,7 +99,7 @@ async def fetch_url(url: str, cache_seconds: int = 20) -> str:
             raise FetchError("blocked address")
 
         connector = aiohttp.TCPConnector(resolver=_SafeResolver())
-        async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=5)) as s:
+        async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=10)) as s:     # slow sites (like muckzz.com) get 10 s
             async with s.get(url, allow_redirects=False, headers={"User-Agent": "TwitchBot/1.0"}) as r:
                 if r.status in (301, 302, 303, 307, 308) and r.headers.get("Location"):
                     url = urljoin(url, r.headers["Location"])
@@ -144,8 +145,19 @@ _MATH_CONSTS = {"Math.PI": math.pi, "Math.E": math.e}
 
 
 def safe_eval(expr: str) -> str:
-    """Evaluates numbers, + - * / %, parentheses and the Math functions above, like Nightbot's
-    $(eval Math.floor(Math.random() * 101)). Anything else raises EvalError."""
+    """$(eval ...): Nightbot-style JavaScript (variables, lists, text, Math, ...) run by core/jseval.py, which never runs
+    real code. Raises EvalError when it can't (the old math-only reader below is kept only as a fallback)."""
+    try:
+        return jseval.evaluate(expr)
+    except jseval.EvalError as e:
+        try:
+            return _math_eval(expr)
+        except EvalError:
+            raise EvalError(str(e))
+
+
+def _math_eval(expr: str) -> str:
+    """The old reader: numbers, + - * / %, parentheses and Math functions only."""
     if len(expr) > 200:
         raise EvalError("expression too long")
     toks, pos = [], 0
@@ -252,21 +264,40 @@ def follow_date(dt: datetime) -> str:
     return f"{dt:%B} {dt.day}, {dt.year}"
 
 
-def follow_age(start: datetime, now: datetime | None = None) -> str:
-    """'1 year, 2 months, 3 days' between start and now."""
+def _add_months(dt: datetime, n: int) -> datetime:
+    y, m = divmod(dt.month - 1 + n, 12)
+    year, month = dt.year + y, m + 1
+    return dt.replace(year=year, month=month, day=min(dt.day, calendar.monthrange(year, month)[1]))
+
+
+_AR_UNITS = {"year": ("سنة", "سنتين", "سنوات"), "month": ("شهر", "شهرين", "أشهر"), "day": ("يوم", "يومين", "أيام"),
+             "hour": ("ساعة", "ساعتين", "ساعات"), "minute": ("دقيقة", "دقيقتين", "دقائق"), "second": ("ثانية", "ثانيتين", "ثوانٍ")}
+
+
+def _unit(n: int, word: str, lang: str) -> str:
+    if lang == "ar":
+        one, two, few = _AR_UNITS[word]
+        return one if n == 1 else two if n == 2 else f"{n} {few}" if 3 <= n % 100 <= 10 else f"{n} {one}"
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def follow_age(start: datetime, now: datetime | None = None, lang: str = "en") -> str:
+    """The full time between start and now, every part that isn't zero (long form, 1.7.0):
+    '7 months, 5 hours, 26 seconds' / '1 year, 2 months, 3 days, 4 hours, 10 minutes, 8 seconds' (Arabic too)."""
     now = now or datetime.now(timezone.utc)
     if start.tzinfo is None:
         start = start.replace(tzinfo=timezone.utc)
-    y, m, d = now.year - start.year, now.month - start.month, now.day - start.day
-    if d < 0:
-        m -= 1
-        prev_year, prev_month = (now.year, now.month - 1) if now.month > 1 else (now.year - 1, 12)
-        d += calendar.monthrange(prev_year, prev_month)[1]
-    if m < 0:
-        y -= 1
-        m += 12
-    parts = [f"{n} {word}{'' if n == 1 else 's'}" for n, word in ((y, "year"), (m, "month"), (d, "day")) if n]
-    return ", ".join(parts) or "less than a day"
+    if now <= start:
+        return "الآن" if lang == "ar" else "just now"
+    months = (now.year - start.year) * 12 + now.month - start.month
+    if _add_months(start, months) > now:
+        months -= 1
+    anchor = _add_months(start, months)
+    rest = now - anchor
+    d, secs = rest.days, rest.seconds
+    h, mi, s = secs // 3600, secs % 3600 // 60, secs % 60
+    parts = [_unit(n, w, lang) for n, w in ((months // 12, "year"), (months % 12, "month"), (d, "day"), (h, "hour"), (mi, "minute"), (s, "second")) if n]
+    return ("، " if lang == "ar" else ", ").join(parts) or ("الآن" if lang == "ar" else "just now")
 
 
 @dataclass
@@ -280,6 +311,7 @@ class Context:
     game: Callable[[], Awaitable[str]] | None = None
     title: Callable[[], Awaitable[str]] | None = None
     followed_at: Callable[[], Awaitable[datetime | None]] | None = None
+    lang: str = "en"        # the app's language: $(followage) in English or Arabic
     is_owner: bool = False
     login: str = ""          # the viewer's Twitch login name (always plain letters/numbers)
     streak: int | None = None   # a viewer's Watch Streak (only set for the Watch Streak reply)
@@ -371,7 +403,7 @@ async def expand(template: str, ctx: Context) -> str:
             if key == "followdate":
                 return follow_date(when)
             if key == "followage":
-                return follow_age(when)
+                return follow_age(when, lang=ctx.lang)
             return f"followed {ctx.channel} on {follow_date(when)} ({follow_age(when)} ago)"
         if key == "streak" and ctx.streak is not None:
             return str(ctx.streak)

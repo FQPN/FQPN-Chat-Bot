@@ -324,6 +324,8 @@ def run() -> None:
             RotatingFileHandler(home / "bot.log", maxBytes=1_000_000, backupCount=2, encoding="utf-8"),
         ],
     )
+    from core import logsafe
+    logsafe.install()          # no Twitch login keys in bot.log
     configure(home, resource_dir())
     log.info("Data folder: %s", home)
 

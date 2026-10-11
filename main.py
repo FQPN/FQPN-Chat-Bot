@@ -10,6 +10,30 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("twitchbot")
 
 
+async def _two_copies_watch(store, state, clock=time.time, every=20):
+    """Two copies of the app (for example the installed one and one started from VS Code) share one Twitch login and burn
+    each other's renewal key, which makes the bot go silent. Each copy writes "I'm alive" here; a fresh note from another
+    copy means two are running: say so (once), in the log, a desktop pop-up and the dashboard."""
+    import json, os
+    from core import store as _store
+    path = _store.DATA_DIR / "running.json"
+    me, warned, sightings = os.getpid(), False, set()
+    while True:
+        try:
+            other = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+            if other.get("pid") not in (None, me) and clock() - float(other.get("at", 0)) < 3 * every:
+                sightings.add(other.get("at"))     # a closed copy writes once at most; a running one keeps writing
+            if len(sightings) >= 2 and not warned:
+                warned = True
+                state["two_copies"] = True
+                log.warning("Another copy of the app is running (process %s): two copies break each other's Twitch login", other.get("pid"))
+                notify.error(store.get("prefs"), "Two copies of FQPN's Chat Bot are running. Close one: together they break the Twitch login and the bot goes silent.")
+            path.write_text(json.dumps({"pid": me, "at": clock()}), encoding="utf-8")
+        except (OSError, ValueError):
+            pass
+        await asyncio.sleep(every)
+
+
 async def main(open_browser=False):    # open_browser is ignored: the dashboard is only shown in the app window
     store = Store()
     store.apply_launch_defaults()   # "Start the bot when the app opens" (Settings > Bot)
@@ -26,6 +50,7 @@ async def main(open_browser=False):    # open_browser is ignored: the dashboard 
     state["publist_syncer"] = publiclist.Syncer(store, state)    # the public command list website (off until switched on)
     state["publist_task"] = asyncio.create_task(state["publist_syncer"].run())
     state["banned"] = bool((store.get("usage_state") or {}).get("banned"))     # the last answer, until the website says otherwise
+    state["copies_task"] = asyncio.create_task(_two_copies_watch(store, state))
     state["usage_task"] = asyncio.create_task(usage.Reporter(state, store=store, on_change=lambda: dashboard.restart_bot(state)).run())     # channel name + app version, once a day (Settings > App explains it)
     last_error_notice = 0.0
 
@@ -56,6 +81,11 @@ async def main(open_browser=False):    # open_browser is ignored: the dashboard 
         state["restart"] = False
         account = await auth.get_account()
         if account is None:
+            if state.get("had_login") and not state.get("user_logout"):
+                # the login was rejected and the saved one is dead too: say so once (instead of a silent bot)
+                notify.error(store.get("prefs"), "Your Twitch login expired. Open the app and connect Twitch again.")
+                log.warning("The saved Twitch login is no longer valid: waiting for the user to connect again")
+            state["had_login"] = False
             state["account"] = None
             state["avatar"] = None
             state["bot"] = None
@@ -72,6 +102,7 @@ async def main(open_browser=False):    # open_browser is ignored: the dashboard 
         auto_login = False
         print(f"Connected as {account['login']}")
         state["account"] = account["login"]
+        state["had_login"], state["user_logout"] = True, False
         state["avatar_task"] = asyncio.create_task(dashboard.load_avatar(state, account))   # profile picture for the dashboard
         state["account_id"] = account["user_id"]
         if state.get("banned"):
@@ -96,6 +127,10 @@ async def main(open_browser=False):    # open_browser is ignored: the dashboard 
             state["mod_task"] = asyncio.create_task(dashboard.refresh_bot_mod(state))
         bot = TwitchBot(account, store, bot_account=bot_account if separate else None)
         state["bot"] = bot
+        def _reconnect(why, st=state):
+            st["last_reconnect"] = {"why": why, "at": time.time()}
+            dashboard.restart_bot(st)
+        bot.request_restart = _reconnect          # a rejected login / a silent chat: reconnect by itself
         try:
             await bot.start(
                 token=(bot_account if separate else account)["access_token"],

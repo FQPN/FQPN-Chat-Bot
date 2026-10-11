@@ -5,13 +5,15 @@ import copy
 import json
 from pathlib import Path
 
-from . import moderation
+from . import minigames, moderation
 from .activity import ActivityLog
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 DEFAULTS = {
-    "moderation": moderation.defaults(),     # the Moderation page: bad words, links, caps, emotes, symbols, repeats (all off at first)
+    "moderation": moderation.defaults(),
+    "games": minigames.defaults(),          # Mini games (the letters game: اسم، جماد، نبات، حيوان، بلاد); off at first
+    "game_wins": {},                        # wins per viewer: {user_id: {"name": ..., "wins": n}}     # the Moderation page: bad words, links, caps, emotes, symbols, repeats (all off at first)
     "stream": {                       # the messages the bot says when your stream starts, comes back and ends (off until switched on)
         "enabled": True,              # the master switch for all four (each one also has its own switch)
         "start": {"enabled": False, "text": ""},       # an empty text means "the default in the app's language"

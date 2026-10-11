@@ -6,6 +6,7 @@ import asyncio
 import copy
 import logging
 import re
+import sys
 import time
 from collections import deque
 from datetime import datetime, timezone
@@ -15,7 +16,7 @@ import twitchio
 from twitchio import eventsub
 from twitchio.ext import commands
 
-from . import auth, botauth, events, greetings, manage, moderation, notify
+from . import auth, botauth, events, greetings, logsafe, manage, minigames, moderation, notify
 from .manage import CommandError
 from .store import Store
 from .stream import StreamSession
@@ -104,6 +105,15 @@ class TwitchBot(commands.Bot):
         self._greet_tasks: set[asyncio.Task] = set()
         self.moderator = moderation.Moderator()          # the Moderation page's filters (strikes and recent messages live here)
         self.mod_problem = None                           # why Twitch refused the last delete/timeout (shown on the page)
+        self.request_restart = None                       # set by main.py: reconnect the bot (re-reads the saved login)
+        self._throttle = logsafe.Throttle()               # repeated errors once a minute in bot.log
+        self._login_heal_at = 0.0
+        self._chat_at = 0.0                               # last chat message heard (the quiet-chat check)
+        self._chat_seen = 0
+        self._quiet_restarts: list = []
+        self.round = None                                 # the Mini games round in progress (minigames.Round)
+        self._round_task = None
+        self._last_round_end = time.time()
         self._filtered: deque = deque(maxlen=50)          # (time, name) of people a filter just acted on, so Twitch's echo isn't logged twice
         self._seen_events: deque = deque(maxlen=50)   # so a repeated delivery of the same notice is answered once
         self.event_problems: dict[str, str] = {}      # events Twitch refused to send (usually a missing permission)
@@ -242,10 +252,14 @@ class TwitchBot(commands.Bot):
             text = body
 
         text = text[:500]
-        if payload is not None and not self.separate:
-            sent = await payload.respond(text)
-        else:   # a separate bot account (or a message with no trigger): say who sends it
-            sent = await owner.send_message(text, sender=self.bot_id)
+        try:
+            if payload is not None and not self.separate:
+                sent = await payload.respond(text)
+            else:   # a separate bot account (or a message with no trigger): say who sends it
+                sent = await owner.send_message(text, sender=self.bot_id)
+        except Exception as e:
+            self._login_trouble(e)          # a rejected login heals itself (reconnect with the saved login)
+            raise
         self._remember(text, sent)
         self._log_bot(text, payload, why, user)
 
@@ -408,6 +422,7 @@ class TwitchBot(commands.Bot):
             title=self._title,
             followed_at=(lambda: self._followed_at(str(chatter.id))) if chatter is not None else None,
             is_owner=bool(chatter is not None and chatter.broadcaster),
+            lang="ar" if (self.store.get("ui") or {}).get("language") == "ar" else "en",
         )
 
     # ---------- Twitch events ----------
@@ -652,8 +667,46 @@ class TwitchBot(commands.Bot):
 
     # ---------- chat ----------
 
+    # ---------- staying alive: a rejected login heals itself, and a chat that went silent reconnects ----------
+
+    @staticmethod
+    def _is_login_failure(exc) -> bool:
+        """True when Twitch rejected the login (the chain of errors mentions an invalid token / refresh token / a 401)."""
+        seen = 0
+        while exc is not None and seen < 6:
+            t = str(exc)
+            if "Invalid refresh token" in t or "Invalid OAuth token" in t or "status 401" in t:
+                return True
+            exc, seen = exc.__cause__ or exc.__context__, seen + 1
+        return False
+
+    def _login_trouble(self, exc) -> None:
+        """The login the bot holds was rejected (usually: it was renewed elsewhere and this copy is now stale). Reconnect: the
+        restart re-reads the saved login, which is the newest one; if that's dead too, the app asks to connect Twitch again."""
+        if not self._is_login_failure(exc) or self.request_restart is None or time.time() - self._login_heal_at < 120:
+            return
+        self._login_heal_at = time.time()
+        log.warning("Twitch rejected the bot's login: reconnecting with the saved login")
+        self.request_restart("login")
+
+    def _quiet_check(self) -> None:
+        """Live, chat was active, and then nothing at all for 15 minutes: the chat connection probably died silently."""
+        now = time.time()
+        seen, last, hook = getattr(self, "_chat_seen", 0), getattr(self, "_chat_at", 0.0), getattr(self, "request_restart", None)
+        if not getattr(self, "is_live", False) or seen < 5 or not last or now - last < 900 or hook is None:
+            return
+        self._quiet_restarts = [t for t in self._quiet_restarts if now - t < 3600]
+        if len(self._quiet_restarts) >= 3:
+            return
+        self._quiet_restarts.append(now)
+        self._chat_at = now
+        log.warning("No chat messages for 15 minutes while live: reconnecting the bot to be safe")
+        self.request_restart("quiet")
+
     async def event_message(self, payload) -> None:
         self.last_chat = time.time()      # proof that chat is arriving (the watchdog quotes it when it has to reconnect)
+        if not self._is_own_echo(payload):
+            self._chat_at = self.last_chat; self._chat_seen += 1   # the quiet-chat check
         # Note: we do NOT ignore the streamer's own messages (the bot IS the
         # streamer's account), only the bot's own replies.
         if self._is_own_echo(payload):
@@ -685,6 +738,11 @@ class TwitchBot(commands.Bot):
             await self._on_cheer(payload)
         except Exception:
             log.exception("Bits handling failed")
+        try:
+            if await self._game_message(payload):
+                return          # a game command, or the winning answer: nothing else answers it
+        except Exception:
+            log.exception("Mini game failed")
 
         text = payload.text.strip()
         chatter = payload.chatter
@@ -718,7 +776,13 @@ class TwitchBot(commands.Bot):
         action = cmd.get("action", "text")
         if action in ("game", "title"):
             self._log_activity("command", owner, user)
-            await (self._set_game if action == "game" else self._set_title)(cmd["response"], payload)
+            value = cmd["response"]
+            if "$(" in value:      # e.g. !g with "$(query)": "!g Valorant" changes the game to what was typed
+                value = (await expand(value, self._ctx(user, rest, chatter=payload.chatter))).strip()
+            if not value:          # "!g" with nothing after it: say the current game / title instead
+                await self._send(f"Game: {await self._game()}" if action == "game" else f"Title: {await self._title()}", payload)
+                return
+            await (self._set_game if action == "game" else self._set_title)(value, payload)
             return
         if uses_variable(cmd["response"], "uptime") and not self.live_since:
             await self._send(f"{self.account['login']} is offline right now.", payload)
@@ -828,6 +892,110 @@ class TwitchBot(commands.Bot):
             return []
         return [{"id": str(g.get("id")), "name": str(g.get("name"))} for g in (data or {}).get("data", []) if g.get("id") and g.get("name")]
 
+    # ---------- Mini games: «اسم، جماد، نبات، حيوان، بلاد» ----------
+
+    def _level_of(self, chatter) -> int:
+        return 4 if chatter.broadcaster else 3 if chatter.moderator else 2 if chatter.vip else 1 if chatter.subscriber else 0
+
+    async def _game_message(self, payload) -> bool:
+        cfg = (self.store.get("games") or {}).get("letters") or {}
+        if not cfg.get("enabled"):
+            return False
+        text = (payload.text or "").strip()
+        first = text.split(" ", 1)[0]
+        key = first.lower() if first.isascii() else first
+        ch = payload.chatter
+        user, uid, level = ch.display_name or ch.name, str(ch.id), self._level_of(ch)
+        if key == cfg.get("start_cmd"):
+            if level >= PERMISSION_LEVELS.get(cfg.get("who_starts", "moderator"), 3):
+                if self.round and not self.round.over:
+                    if not self._on_cooldown("game:busy", 10):
+                        await self._send("في جولة شغالة الحين! ⏳", payload, why="game")
+                else:
+                    await self._game_start(cfg)
+            return True
+        if key == cfg.get("wins_cmd"):
+            if not self._on_cooldown(f"game:wins:{uid}", 5):
+                n = int(((self.store.get("game_wins") or {}).get(uid) or {}).get("wins", 0))
+                await self._send(f"‏@{user} عندك {n} فوز 🏆" if n else f"‏@{user} ما عندك فوز بعد، جرّب في الجولة الجاية!", payload, why="game")
+            return True
+        if key == cfg.get("top_cmd"):
+            if not self._on_cooldown("game:top", 10):
+                best = minigames.top(self.store.get("game_wins") or {}, 5)
+                await self._send("🏆 الأوائل: " + " | ".join(f"{i}. {n} ({w})" for i, (n, w) in enumerate(best, 1)) if best else "ما في فائزين بعد.", payload, why="game")
+            return True
+        if key == cfg.get("approve_cmd"):
+            if level >= 3 and self.round and not self.round.over:
+                pend = self.round.pending
+                who = text.split(" ", 1)[1].strip().lstrip("@").lower() if " " in text else ""
+                pick = next((p for p in reversed(pend) if not who or p[1].lower() == who), None)
+                if pick is None:
+                    await self._send("ما في كلمة تنتظر الموافقة.", payload, why="game")
+                else:
+                    games = self.store.get("games")
+                    words = games["letters"].setdefault("words", {}).setdefault(self.round.cat, [])
+                    if minigames.norm(pick[2]) not in {minigames.norm(w) for w in words}:
+                        words.append(pick[2])
+                        self.store.save("games", games)       # the approved word joins the list for next time
+                    await self._game_win(pick[0], pick[1], pick[2])
+            return True
+        r = self.round
+        if r is None or r.over or text.startswith("!"):
+            return False
+        verdict = r.check(text, (cfg.get("words") or {}).get(r.cat, []))
+        if verdict == "win":
+            await self._game_win(uid, user, text)
+            return True
+        if verdict == "unknown":
+            r.pending = [p for p in r.pending if p[0] != uid][-9:] + [(uid, user, text)]
+        return False
+
+    async def _game_start(self, cfg) -> None:
+        self.round = minigames.new_round(cfg)
+        r = self.round
+        await self._send(self._game_ann(cfg) + f"🎲 الفئة: {r.cat} — بحرف: {r.letter}. أول واحد يكتب الإجابة الصحيحة يفوز! ({int(r.ends - time.time() + 0.5)} ثانية)", why="game")
+        self._log_activity("game", f"start:{r.cat}:{r.letter}")
+        self._round_task = asyncio.create_task(self._game_timeout(r))
+
+    async def _game_timeout(self, r) -> None:
+        await asyncio.sleep(max(0.0, r.ends - time.time()))
+        if self.round is r and not r.done:
+            r.done = True
+            self._last_round_end = time.time()
+            cfg = (self.store.get("games") or {}).get("letters") or {}
+            ex = minigames.examples(r.cat, r.letter, (cfg.get("words") or {}).get(r.cat, []))
+            await self._send(self._game_ann(cfg) + "⏰ انتهى الوقت! ما أحد فاز." + (f" أمثلة: {'، '.join(ex)}" if ex else ""), why="game")
+
+    async def _game_win(self, uid, user, word) -> None:
+        r = self.round
+        if r is None or r.done:
+            return
+        r.done = True
+        self._last_round_end = time.time()
+        if self._round_task:
+            self._round_task.cancel()
+        wins = self.store.get("game_wins") or {}
+        n = minigames.add_win(wins, uid, user)
+        self.store.save("game_wins", wins)
+        self._log_activity("game", f"win:{r.cat}:{word}", user)
+        cfg = (self.store.get("games") or {}).get("letters") or {}
+        await self._send(self._game_ann(cfg) + f"🎉 ‏@{user} فاز بكلمة «{word}»! " + ("أول فوز له 🥇" if n == 1 else f"هذا فوزه رقم {n}"), why="game", user=user)
+
+    @staticmethod
+    def _game_ann(cfg) -> str:
+        """Rounds, winners and "time's up" are announcements (the highlighted box), unless switched off in the game's settings."""
+        return "/announce " if cfg.get("announce", True) else ""
+
+    def _game_auto(self) -> None:
+        """Automatic rounds every N minutes while live (the Mini games page; 0 = off)."""
+        cfg = (self.store.get("games") or {}).get("letters") or {}
+        every = int(cfg.get("auto_minutes") or 0)
+        if not (cfg.get("enabled") and every and getattr(self, "is_live", False)) or self.store.get("settings").get("paused"):
+            return
+        if (self.round is None or self.round.over) and time.time() - self._last_round_end >= every * 60:
+            self._last_round_end = time.time()
+            asyncio.create_task(self._game_start(cfg))
+
     async def _manage(self, payload, action, args, user, level, prefix) -> None:
         if action in ("add", "edit") and level < 4 and URLFETCH.search(args):
             await self._send(f"@{user} Only the broadcaster can use $(urlfetch) in a command.", payload)
@@ -859,6 +1027,9 @@ class TwitchBot(commands.Bot):
     async def _live_loop(self) -> None:
         while True:
             try:
+                TwitchBot._quiet_check(self)        # (works for any bot object, also the tests' minimal ones)
+                if hasattr(self, "_game_auto"):
+                    self._game_auto()
                 stream = None
                 async for s in self.fetch_streams(user_ids=[self.owner_id], type="live"):
                     stream = s
@@ -880,7 +1051,8 @@ class TwitchBot(commands.Bot):
                 raise
             except Exception:
                 self.live_fail += 1
-                log.exception("Live check failed")
+                self._throttle.exception(log, "live", "Live check failed")
+                self._login_trouble(sys.exc_info()[1])
             try:   # sleep until the next check, or until Twitch announces that the stream went online or offline
                 await asyncio.wait_for(self._live_wake.wait(), timeout=max(15, self.store.get("settings").get("live_check_seconds", 60)))
             except asyncio.TimeoutError:
@@ -896,10 +1068,19 @@ class TwitchBot(commands.Bot):
                 "category": getattr(stream, "game_name", "") or ""}
 
     async def _follower_total(self):
-        """How many followers the channel has right now (None if Twitch will not say)."""
-        owner = self.create_partialuser(self.owner_id)
-        result = await owner.followers(first=1, token_for=self.owner_id)
-        total = getattr(result, "total", None)
+        """How many followers the channel has right now (None if Twitch will not say). Asked directly (TwitchIO 3's
+        PartialUser has no .followers, which is why the "new followers" stream message never worked before 1.7.0)."""
+        token = (auth.load_token() or {}).get("access_token") or self.account.get("access_token")
+        headers = {"Authorization": f"Bearer {token}", "Client-Id": auth.CLIENT_ID}
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as s:
+                async with s.get("https://api.twitch.tv/helix/channels/followers", params={"broadcaster_id": str(self.owner_id), "first": "1"}, headers=headers) as r:
+                    if r.status != 200:
+                        log.warning("Follower total: Twitch answered %s", r.status)
+                        return None
+                    total = (await r.json()).get("total")
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
+            return None
         return int(total) if total is not None else None
 
     async def event_stream_online(self, payload) -> None:
@@ -939,4 +1120,5 @@ class TwitchBot(commands.Bot):
             except asyncio.CancelledError:
                 raise
             except Exception:
-                log.exception("Timer loop error")
+                self._throttle.exception(log, "timer", "Timer loop error")
+                self._login_trouble(sys.exc_info()[1])
