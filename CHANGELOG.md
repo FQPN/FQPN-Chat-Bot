@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.0
+- New mini game «رتب»: the bot shuffles the letters of a word (!رتب) and the first viewer to write it wins. A hint gives the first letter halfway through; 700+ built-in words, and you can add your own.
+- Leaderboards per game: the Mini games page has tabs for All games, حروف and رتب, and "Reset this game". In chat, !فوز shows your wins per game and "!الأوائل رتب" shows one game's top 5.
+- While a round runs, its card shows the letter or the shuffled letters and the time left.
+- Only one round of any game runs at a time; automatic rounds of the two games take turns.
+- Everyone's earlier wins are kept, as «اسم، جماد، نبات، حيوان، بلاد» wins.
+- New "All games" settings under the game cards on the Mini games page. The wins and top 5 commands moved there from the «اسم، جماد، نبات، حيوان، بلاد» settings, because they work for every game.
+- Rounds per stream (0 = no limit): every round counts, from chat or automatic, in any game. It refills when the next stream starts; a short drop or an app restart doesn't refill it. When it runs out, chat is told.
+- Cooldown between rounds (0 to 3600 seconds, for every game): after a round ends, the next one waits; chat is told how long. Automatic rounds wait too. The broadcaster can always start a round.
+- Every game command can have up to 5 names (aliases), like an Arabic and an English one. New defaults: !فوز and !wins, !الأوائل and !top. Names you had already changed stay as they are, and !wins / !top are only added where they don't clash with your own commands.
+- A game command and one of your own commands can no longer have the same name (the game would answer first and your command would stop working): the save is refused and says which, from the app and from chat (!addcom).
+- Lighter while you play: the app runs at "below normal" priority on Windows, so games get the CPU first. The dashboard sleeps while it is minimized or in the tray (no refreshing, no animations), looks less often while another program has the focus, and reloads your settings and logs only when something changed (it used to download all of them every 6 seconds).
+- Fixed: the bot reconnected far more often than needed. The connection check now reads Twitch's whole list (old entries from earlier connections used to hide the live one, and each needless reconnect added another), never reconnects while chat messages are arriving, doesn't reconnect a quiet chat when Twitch confirms the connection, and a missing Twitch permission no longer counts as a broken login.
+- Fixed: in the mini game settings, the note under the command box overlapped the box.
+- Fixed: the app window could end up off the screen after being minimized (or after a monitor was unplugged or the resolution changed), where it couldn't be seen or moved. It now always comes back onto a screen.
+
 ## 1.8.0
 - A "What's new" window after every update, in English and Arabic side by side.
 - Commands are listed A to Z (Arabic أ to ي), with pages at the bottom: show 10, 25, 50 or 100.

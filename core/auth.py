@@ -18,12 +18,24 @@ SCOPES = [
     "channel:read:hype_train",
     "moderator:manage:chat_messages",    # Moderation: delete messages that break a filter (1.5.0)
     "moderator:manage:banned_users",     # Moderation: time people out (1.5.0)
+    
     "moderator:read:blocked_terms",    # Logs: your mods' actions (1.6.0)
     "moderator:read:chat_settings",    # Logs: chat mode changes
     "moderator:read:unban_requests",   # Logs: unban requests
     "moderator:read:warnings",         # Logs: warnings
     "moderator:read:moderators",       # Logs: mod changes
     "moderator:read:vips",             # Logs: VIP changes
+
+    "user:read:emotes",                # OBS dock: emote picker (1.9.0)
+    "moderator:read:chatters",         # OBS dock: viewers list
+    "moderator:manage:chat_settings",  # OBS dock: slow / followers / emote-only modes
+    "bits:read",                       # OBS dock: Bits leaderboard
+    "channel:read:goals",              # OBS dock: goals
+    "channel:read:subscriptions",      # OBS dock: subs / gift subs
+    "channel:read:redemptions",        # OBS dock: channel point redemptions
+    "channel:manage:redemptions",      # OBS dock: switch rewards on/off, mark done / refund
+    "moderation:read",                 # OBS dock: list every moderator in Viewers
+    "channel:read:vips",               # OBS dock: list every VIP in Viewers
 ]
 last_problem: str | None = None  # set to "permissions" when a reconnect is needed for new scopes
 

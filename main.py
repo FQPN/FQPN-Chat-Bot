@@ -131,6 +131,7 @@ async def main(open_browser=False):    # open_browser is ignored: the dashboard 
             st["last_reconnect"] = {"why": why, "at": time.time()}
             dashboard.restart_bot(st)
         bot.request_restart = _reconnect          # a rejected login / a silent chat: reconnect by itself
+        bot.chat_verified = state["watchdog"].chat_verified   # a quiet chat with a confirmed connection is not reconnected
         try:
             await bot.start(
                 token=(bot_account if separate else account)["access_token"],

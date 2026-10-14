@@ -675,6 +675,8 @@ class TwitchBot(commands.Bot):
         seen = 0
         while exc is not None and seen < 6:
             t = str(exc)
+            if "scope" in t.lower():      # "Missing scope ...": a permission Twitch wants, not a dead login (a reconnect can't fix it)
+                return False
             if "Invalid refresh token" in t or "Invalid OAuth token" in t or "status 401" in t:
                 return True
             exc, seen = exc.__cause__ or exc.__context__, seen + 1
@@ -697,6 +699,11 @@ class TwitchBot(commands.Bot):
             return
         self._quiet_restarts = [t for t in self._quiet_restarts if now - t < 3600]
         if len(self._quiet_restarts) >= 3:
+            return
+        verified = getattr(self, "chat_verified", None)
+        if verified is not None and verified():
+            self._chat_at = now              # Twitch confirmed the chat connection a moment ago: the chat is just quiet
+            log.info("No chat messages for 15 minutes, but Twitch confirms the chat connection: no reconnect")
             return
         self._quiet_restarts.append(now)
         self._chat_at = now
@@ -892,57 +899,122 @@ class TwitchBot(commands.Bot):
             return []
         return [{"id": str(g.get("id")), "name": str(g.get("name"))} for g in (data or {}).get("data", []) if g.get("id") and g.get("name")]
 
-    # ---------- Mini games: «اسم، جماد، نبات، حيوان، بلاد» ----------
+    # ---------- Mini games: «اسم، جماد، نبات، حيوان، بلاد» (letters) and «رتب» (scramble). One round at a time. ----------
 
     def _level_of(self, chatter) -> int:
         return 4 if chatter.broadcaster else 3 if chatter.moderator else 2 if chatter.vip else 1 if chatter.subscriber else 0
 
+    def _game_cfg(self, key: str) -> dict:
+        """A game's settings ("letters", "scramble", or "shared" = All games), with the defaults for anything missing."""
+        return dict(minigames.defaults()[key], **((self.store.get("games") or {}).get(key) or {}))
+
+    def _stream_id(self):
+        """Which stream this is (the stream messages' session: a short drop or an app restart is still the same stream)."""
+        session = getattr(self, "session", None)
+        return (getattr(session, "s", None) or {}).get("stream_id")
+
+    def _rounds_used(self) -> int:
+        st = self.store.get("game_rounds") or {}
+        return int(st.get("rounds") or 0) if st.get("stream") == self._stream_id() else 0      # a new stream: refilled
+
+    def _count_round(self) -> None:
+        sid = self._stream_id()
+        st = dict(self.store.get("game_rounds") or {})
+        n = int(st.get("rounds") or 0) + 1 if st.get("stream") == sid else 1
+        self.store.save("game_rounds", dict(st, stream=sid, rounds=n))
+
+    def _round_ended(self) -> None:
+        """A round just ended (won or time's up): the cooldown counts from now. Saved, so a reconnect keeps it."""
+        self._last_round_end = time.time()
+        self.store.save("game_rounds", dict(self.store.get("game_rounds") or {}, ended_at=self._last_round_end))
+
+    def _round_block(self, shared=None):
+        """Why a new round can't start now: ("limit", rounds) | ("cooldown", seconds left) | None. Settings: All games."""
+        sh = shared if shared is not None else self._game_cfg("shared")
+        limit, cool = int(sh.get("rounds_per_stream") or 0), int(sh.get("cooldown_seconds") or 0)
+        if limit and self._rounds_used() >= limit:
+            return "limit", limit
+        ended = float((self.store.get("game_rounds") or {}).get("ended_at") or 0)
+        left = cool - (time.time() - ended) if ended else 0
+        if cool and left > 0:
+            return "cooldown", left
+        return None
+
+    @staticmethod
+    def _wait_text(seconds: float) -> str:
+        s = max(1, int(seconds + 0.999))
+        return f"{s} ثانية" if s < 60 else f"{s // 60}:{s % 60:02d} دقيقة"
+
+    def game_limits(self) -> dict:
+        """For the page (All games): rounds used this stream, the limit, and the cooldown still to wait."""
+        sh = self._game_cfg("shared")
+        block = self._round_block(sh)
+        return {"used": self._rounds_used(), "limit": int(sh.get("rounds_per_stream") or 0),
+                "wait": round(block[1]) if block and block[0] == "cooldown" else 0}
+
     async def _game_message(self, payload) -> bool:
-        cfg = (self.store.get("games") or {}).get("letters") or {}
-        if not cfg.get("enabled"):
+        cfgs = {k: self._game_cfg(k) for k in minigames.GAME_KEYS}
+        if not any(c.get("enabled") for c in cfgs.values()):
             return False
+        lc, sh = cfgs["letters"], self._game_cfg("shared")      # !فوز and !الأوائل: All games (any of their names)
         text = (payload.text or "").strip()
-        first = text.split(" ", 1)[0]
-        key = first.lower() if first.isascii() else first
+        first, _, arg = text.partition(" ")
+        key = minigames.cmd_key(first)
         ch = payload.chatter
         user, uid, level = ch.display_name or ch.name, str(ch.id), self._level_of(ch)
-        if key == cfg.get("start_cmd"):
-            if level >= PERMISSION_LEVELS.get(cfg.get("who_starts", "moderator"), 3):
-                if self.round and not self.round.over:
-                    if not self._on_cooldown("game:busy", 10):
-                        await self._send("في جولة شغالة الحين! ⏳", payload, why="game")
-                else:
-                    await self._game_start(cfg)
-            return True
-        if key == cfg.get("wins_cmd"):
+        for game, cfg in cfgs.items():
+            if cfg.get("enabled") and key in minigames.aliases(cfg.get("start_cmd")):
+                if level >= PERMISSION_LEVELS.get(cfg.get("who_starts", "moderator"), 3):
+                    block = None if level >= 4 else self._round_block(sh)     # the broadcaster can always start one
+                    if self.round and not self.round.over:
+                        if not self._on_cooldown("game:busy", 10):
+                            await self._send("في جولة شغالة الحين! ⏳", payload, why="game")
+                    elif block and block[0] == "limit":
+                        if not self._on_cooldown("game:limit", 30):
+                            await self._send(f"🚫 خلصت جولات هالبث ({block[1]}/{block[1]}). ترجع الجولات مع البث الجاي!", payload, why="game")
+                    elif block:
+                        if not self._on_cooldown("game:cool", 10):
+                            await self._send(f"⏳ الجولة الجاية بعد {self._wait_text(block[1])}", payload, why="game")
+                    else:
+                        await self._game_start(game, cfg)
+                return True
+        if key in minigames.aliases(sh.get("wins_cmd")):
             if not self._on_cooldown(f"game:wins:{uid}", 5):
-                n = int(((self.store.get("game_wins") or {}).get(uid) or {}).get("wins", 0))
-                await self._send(f"‏@{user} عندك {n} فوز 🏆" if n else f"‏@{user} ما عندك فوز بعد، جرّب في الجولة الجاية!", payload, why="game")
+                e = (self.store.get("game_wins") or {}).get(uid) or {}
+                n, parts = minigames.wins_of(e), minigames.breakdown(e)
+                await self._send((f"‏@{user} عندك {n} فوز 🏆" + (f" ({parts})" if parts else ""))
+                                 if n else f"‏@{user} ما عندك فوز بعد، جرّب في الجولة الجاية!", payload, why="game")
             return True
-        if key == cfg.get("top_cmd"):
-            if not self._on_cooldown("game:top", 10):
-                best = minigames.top(self.store.get("game_wins") or {}, 5)
-                await self._send("🏆 الأوائل: " + " | ".join(f"{i}. {n} ({w})" for i, (n, w) in enumerate(best, 1)) if best else "ما في فائزين بعد.", payload, why="game")
+        if key in minigames.aliases(sh.get("top_cmd")):
+            game = minigames.game_named(arg) if arg.strip() else None
+            if not self._on_cooldown(f"game:top:{game or 'all'}", 10):
+                best = minigames.top(self.store.get("game_wins") or {}, 5, game)
+                head = f"🏆 الأوائل في {minigames.GAME_NAMES[game]}: " if game else "🏆 الأوائل: "
+                await self._send(head + " | ".join(f"{i}. {n} ({w})" for i, (n, w) in enumerate(best, 1)) if best else "ما في فائزين بعد.", payload, why="game")
             return True
-        if key == cfg.get("approve_cmd"):
-            if level >= 3 and self.round and not self.round.over:
-                pend = self.round.pending
-                who = text.split(" ", 1)[1].strip().lstrip("@").lower() if " " in text else ""
-                pick = next((p for p in reversed(pend) if not who or p[1].lower() == who), None)
+        r = self.round
+        if key in minigames.aliases(lc.get("approve_cmd")) and lc.get("enabled"):
+            if level >= 3 and r and getattr(r, "key", "letters") == "letters" and not r.over:
+                who = arg.strip().lstrip("@").lower()
+                pick = next((p for p in reversed(r.pending) if not who or p[1].lower() == who), None)
                 if pick is None:
                     await self._send("ما في كلمة تنتظر الموافقة.", payload, why="game")
                 else:
                     games = self.store.get("games")
-                    words = games["letters"].setdefault("words", {}).setdefault(self.round.cat, [])
+                    words = games["letters"].setdefault("words", {}).setdefault(r.cat, [])
                     if minigames.norm(pick[2]) not in {minigames.norm(w) for w in words}:
                         words.append(pick[2])
                         self.store.save("games", games)       # the approved word joins the list for next time
                     await self._game_win(pick[0], pick[1], pick[2])
             return True
-        r = self.round
-        if r is None or r.over or text.startswith("!"):
+        if r is None or r.over or text.startswith("!") or not cfgs.get(getattr(r, "key", "letters"), {}).get("enabled"):
             return False
-        verdict = r.check(text, (cfg.get("words") or {}).get(r.cat, []))
+        if getattr(r, "key", "letters") == "scramble":
+            if r.check(text) == "win":
+                await self._game_win(uid, user, r.word)
+                return True
+            return False
+        verdict = r.check(text, (lc.get("words") or {}).get(r.cat, []))
         if verdict == "win":
             await self._game_win(uid, user, text)
             return True
@@ -950,19 +1022,41 @@ class TwitchBot(commands.Bot):
             r.pending = [p for p in r.pending if p[0] != uid][-9:] + [(uid, user, text)]
         return False
 
-    async def _game_start(self, cfg) -> None:
-        self.round = minigames.new_round(cfg)
-        r = self.round
-        await self._send(self._game_ann(cfg) + f"🎲 الفئة: {r.cat} — بحرف: {r.letter}. أول واحد يكتب الإجابة الصحيحة يفوز! ({int(r.ends - time.time() + 0.5)} ثانية)", why="game")
-        self._log_activity("game", f"start:{r.cat}:{r.letter}")
+    async def _game_start(self, game="letters", cfg=None) -> None:
+        if isinstance(game, dict):          # older callers passed only the letters game's settings
+            game, cfg = "letters", game
+        cfg = cfg if cfg is not None else self._game_cfg(game)
+        if game == "scramble":
+            recent = getattr(self, "_recent_words", None)
+            if recent is None:
+                recent = self._recent_words = deque(maxlen=40)       # no word comes back until 40 others were played
+            self.round = r = minigames.new_scramble(cfg, recent)
+            recent.append(r.word)
+            await self._send(self._game_ann(cfg) + f"🔀 رتب الحروف: {minigames.tiles_text(r.tiles)} — أول واحد يكتب الكلمة يفوز! ({int(r.ends - time.time() + 0.5)} ثانية)", why="game")
+            self._log_activity("game", f"start:رتب:{''.join(r.tiles)}")
+        else:
+            self.round = r = minigames.new_round(cfg)
+            await self._send(self._game_ann(cfg) + f"🎲 الفئة: {r.cat} — بحرف: {r.letter}. أول واحد يكتب الإجابة الصحيحة يفوز! ({int(r.ends - time.time() + 0.5)} ثانية)", why="game")
+            self._log_activity("game", f"start:{r.cat}:{r.letter}")
+        self._auto_started()[game] = time.time()       # an automatic round of this game waits its full time again
+        self._count_round()                             # counts toward "rounds per stream" (All games)
         self._round_task = asyncio.create_task(self._game_timeout(r))
 
     async def _game_timeout(self, r) -> None:
+        game = getattr(r, "key", "letters")
+        if game == "scramble" and self._game_cfg("scramble").get("hint", True):
+            await asyncio.sleep(max(0.0, r.hint_at - time.time()))
+            if self.round is r and not r.over and not r.hinted:      # halfway: the first letter
+                r.hinted = True
+                await self._send(f"💡 تلميح: الكلمة تبدأ بحرف «{r.word[0]}»", why="game")
         await asyncio.sleep(max(0.0, r.ends - time.time()))
         if self.round is r and not r.done:
             r.done = True
-            self._last_round_end = time.time()
-            cfg = (self.store.get("games") or {}).get("letters") or {}
+            self._round_ended()
+            cfg = self._game_cfg(game)
+            if game == "scramble":
+                await self._send(self._game_ann(cfg) + f"⏰ انتهى الوقت! الكلمة كانت «{r.word}»", why="game")
+                return
             ex = minigames.examples(r.cat, r.letter, (cfg.get("words") or {}).get(r.cat, []))
             await self._send(self._game_ann(cfg) + "⏰ انتهى الوقت! ما أحد فاز." + (f" أمثلة: {'، '.join(ex)}" if ex else ""), why="game")
 
@@ -971,30 +1065,71 @@ class TwitchBot(commands.Bot):
         if r is None or r.done:
             return
         r.done = True
-        self._last_round_end = time.time()
+        self._round_ended()
         if self._round_task:
             self._round_task.cancel()
+        game = getattr(r, "key", "letters")
         wins = self.store.get("game_wins") or {}
-        n = minigames.add_win(wins, uid, user)
+        n = minigames.add_win(wins, uid, user, game)
         self.store.save("game_wins", wins)
+        cfg = self._game_cfg(game)
+        tail = "أول فوز له 🥇" if n == 1 else f"هذا فوزه رقم {n}"
+        if game == "scramble":
+            self._log_activity("game", f"win:رتب:{word}", user)
+            await self._send(self._game_ann(cfg) + f"🎉 ‏@{user} رتّب الكلمة «{word}»! " + tail, why="game", user=user)
+            return
         self._log_activity("game", f"win:{r.cat}:{word}", user)
-        cfg = (self.store.get("games") or {}).get("letters") or {}
-        await self._send(self._game_ann(cfg) + f"🎉 ‏@{user} فاز بكلمة «{word}»! " + ("أول فوز له 🥇" if n == 1 else f"هذا فوزه رقم {n}"), why="game", user=user)
+        await self._send(self._game_ann(cfg) + f"🎉 ‏@{user} فاز بكلمة «{word}»! " + tail, why="game", user=user)
 
     @staticmethod
     def _game_ann(cfg) -> str:
         """Rounds, winners and "time's up" are announcements (the highlighted box), unless switched off in the game's settings."""
         return "/announce " if cfg.get("announce", True) else ""
 
+    def game_view(self):
+        """The round in progress, for the page (the game card's live box), or None."""
+        r = self.round
+        if r is None or r.over:
+            return None
+        now = time.time()
+        out = {"game": getattr(r, "key", "letters"), "left": max(0, round(r.ends - now, 1)), "seconds": getattr(r, "seconds", 0) or max(1, round(r.ends - now))}
+        if out["game"] == "scramble":
+            out["tiles"] = list(r.tiles)
+            out["hint"] = r.word[0] if r.hinted else ""
+        else:
+            out["cat"], out["letter"] = r.cat, r.letter
+        return out
+
     def _game_auto(self) -> None:
-        """Automatic rounds every N minutes while live (the Mini games page; 0 = off)."""
-        cfg = (self.store.get("games") or {}).get("letters") or {}
-        every = int(cfg.get("auto_minutes") or 0)
-        if not (cfg.get("enabled") and every and getattr(self, "is_live", False)) or self.store.get("settings").get("paused"):
+        """Automatic rounds while live: each game every N minutes of its own (its settings; 0 = off), counted from that
+        game's last round. Never two rounds at once, and at least a minute after any round ended (no rounds back to back)."""
+        if not getattr(self, "is_live", False) or self.store.get("settings").get("paused"):
             return
-        if (self.round is None or self.round.over) and time.time() - self._last_round_end >= every * 60:
-            self._last_round_end = time.time()
-            asyncio.create_task(self._game_start(cfg))
+        if self.round is not None and not self.round.over:
+            return
+        now = time.time()
+        if now - self._last_round_end < 60 and getattr(self, "_auto_last", None) is not None:
+            return
+        if self._round_block() is not None:             # the round limit or the cooldown (All games) applies here too
+            return
+        last = self._auto_started()
+        due = []
+        for game in minigames.GAME_KEYS:
+            cfg = self._game_cfg(game)
+            every = int(cfg.get("auto_minutes") or 0)
+            if cfg.get("enabled") and every and now - last[game] >= every * 60:
+                due.append((last[game], game, cfg))
+        if due:
+            _, game, cfg = min(due, key=lambda d: d[0])      # the game that waited longest goes first
+            self._last_round_end = now
+            asyncio.create_task(self._game_start(game, cfg))
+
+    def _auto_started(self) -> dict:
+        """When each game last had a round (for automatic rounds). Starts at the app's start (or the last round's end)."""
+        last = getattr(self, "_auto_last", None)
+        if last is None:
+            last = self._auto_last = {k: self._last_round_end for k in minigames.GAME_KEYS}
+        return last
 
     async def _manage(self, payload, action, args, user, level, prefix) -> None:
         if action in ("add", "edit") and level < 4 and URLFETCH.search(args):
@@ -1015,6 +1150,12 @@ class TwitchBot(commands.Bot):
                     counters = self.store.get("counters")
                     if counters.pop(f"cmd:{name}", None) is not None:
                         self.store.save("counters", counters)
+            if action in ("add", "edit"):
+                games = minigames.command_names(self.store.get("games") or {})
+                mine = [name] + list((work.get(name) or {}).get("aliases", []))
+                clash = next((n for n in mine if n in games), None)
+                if clash:          # a mini game would answer first and the command would never work
+                    raise CommandError(f"{clash} is a mini game command. Choose another name.")
         except CommandError as e:
             await self._send(f"@{user} {e}", payload)
             return

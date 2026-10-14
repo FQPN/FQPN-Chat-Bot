@@ -3,17 +3,19 @@ so the future web dashboard can edit them while the bot is running."""
 
 import copy
 import json
+import time
 from pathlib import Path
 
-from . import minigames, moderation
+from . import manage, minigames, moderation
 from .activity import ActivityLog
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 DEFAULTS = {
-    "moderation": moderation.defaults(),
-    "games": minigames.defaults(),          # Mini games (the letters game: اسم، جماد، نبات، حيوان، بلاد); off at first
-    "game_wins": {},                        # wins per viewer: {user_id: {"name": ..., "wins": n}}     # the Moderation page: bad words, links, caps, emotes, symbols, repeats (all off at first)
+    "moderation": moderation.defaults(),    # the Moderation page: bad words, links, caps, emotes, symbols, repeats (all off at first)
+    "games": minigames.defaults(),          # Mini games: letters (اسم، جماد، نبات، حيوان، بلاد) and scramble (رتب); off at first
+    "game_rounds": {"stream": None, "rounds": 0},   # rounds played this stream (the "rounds per stream" limit; refills each stream)
+    "game_wins": {},                        # wins per viewer: {user_id: {"name": ..., "wins": total, "games": {"letters": n, "scramble": m}}}
     "stream": {                       # the messages the bot says when your stream starts, comes back and ends (off until switched on)
         "enabled": True,              # the master switch for all four (each one also has its own switch)
         "start": {"enabled": False, "text": ""},       # an empty text means "the default in the app's language"
@@ -124,12 +126,17 @@ class Store:
     def __init__(self):
         DATA_DIR.mkdir(exist_ok=True)
         self._cache: dict[str, tuple[float, object]] = {}
+        # 1.9.0: counts every save, so the dashboard reloads the settings only when something changed (it used to download
+        # every section every 6 seconds). "boot" makes the value new after a restart.
+        self.boot = int(time.time() * 1000)
+        self.rev = 0
         for name in DEFAULTS:
             if self._read(name) is None:  # missing, empty, or broken file
                 self.save(name, copy.deepcopy(DEFAULTS[name]))
         self._migrate()
         self._migrate_events()
         self._migrate_blocked_words()
+        self._migrate_games()
         # the activity shown on the Logs page, saved so it survives a restart
         self.activity = ActivityLog(DATA_DIR / "activity.jsonl", days_fn=lambda: self.get("prefs").get("log_days", 30))
 
@@ -159,6 +166,22 @@ class Store:
         self.save("moderation", mod)
         block["words"] = []
         self.save("blocklist", block)
+
+    def _migrate_games(self) -> None:
+        """1.9.0 added «رتب»: a game missing from games.json gets its default settings (switched off), and saved wins
+        get the per-game count (every win before 1.9.0 was a letters-game win), so the leaderboards keep everyone's wins."""
+        games = self._read("games")
+        if isinstance(games, dict):
+            missing = [k for k in minigames.GAME_KEYS if not isinstance(games.get(k), dict)]
+            for k in missing:
+                games[k] = copy.deepcopy(DEFAULTS["games"][k])
+            commands = self._read("commands")
+            custom = manage.names_in_use(commands) if isinstance(commands, dict) else {}
+            if minigames.upgrade_games(games, custom) or missing:      # the shared commands move to "All games"
+                self.save("games", games)
+        wins = self._read("game_wins")
+        if isinstance(wins, dict) and minigames.upgrade_wins(wins):
+            self.save("game_wins", wins)
 
     def _migrate_events(self) -> None:
         """Older versions stored the Watch Streak reply as {response, min_streak}. It becomes one tier, and any
@@ -235,3 +258,4 @@ class Store:
             json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
         )
         self._cache.pop(name, None)
+        self.rev = getattr(self, "rev", 0) + 1

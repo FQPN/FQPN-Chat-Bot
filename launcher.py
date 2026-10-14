@@ -213,6 +213,25 @@ def tray_image(resources: Path):
         return Image.new("RGBA", (64, 64), (154, 17, 24, 255))     # a plain red square if the icon is missing
 
 
+WINDOW_TITLE = "FQPN's Chat Bot"
+BELOW_NORMAL = 0x00004000      # Windows priority class
+
+
+def background_priority() -> bool:
+    """1.9.0: the app runs at "below normal" priority on Windows, so a game always gets the CPU first (the bot mostly waits
+    for Twitch, so it loses nothing). Done before the window opens: its Edge (WebView2) helpers start from this process and
+    get the same priority. True when it was set."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        k = ctypes.windll.kernel32
+        return bool(k.SetPriorityClass(k.GetCurrentProcess(), BELOW_NORMAL))
+    except Exception:
+        log.exception("Could not lower the app's priority")
+        return False
+
+
 class Shell:
     """The app window plus its tray icon. Everything about the tray is optional: if it cannot start, the app simply
     behaves as it did before (closing the window stops the bot)."""
@@ -230,7 +249,22 @@ class Shell:
         threading.Thread(target=self.hide, daemon=True).start()
         return False
 
+    def page_visible(self, visible: bool) -> None:
+        """Tells the dashboard whether anyone can see it: hidden or minimized, it stops refreshing and animating."""
+        try:
+            self.window.evaluate_js("window.appVisible&&window.appVisible(%s)" % ("true" if visible else "false"))
+        except Exception:
+            pass                               # the page may not be loaded yet: it also watches for this itself
+
+    def visibility_handler(self, visible: bool):
+        """A handler for pywebview's minimized / restored / ... events. It takes NO arguments on purpose: pywebview passes
+        the window to handlers that accept one, which would replace `visible`."""
+        def handler():
+            threading.Thread(target=self.page_visible, args=(visible,), daemon=True).start()
+        return handler
+
     def hide(self):
+        self.page_visible(False)
         try:
             self.window.hide()
         except Exception:
@@ -243,6 +277,17 @@ class Shell:
                 self.window.restore()
         except Exception:
             log.exception("Could not show the window")
+        threading.Thread(target=self.page_visible, args=(True,), daemon=True).start()
+        threading.Thread(target=self.bring_on_screen, daemon=True).start()
+
+    def bring_on_screen(self, wait: float = 0.4):
+        """After showing it from the tray / a second launch: if Windows put it off the screen, move it back."""
+        try:
+            from core import winpos
+            time.sleep(wait)                              # let Windows finish restoring it first
+            winpos.keep_on_screen(WINDOW_TITLE)
+        except Exception:
+            log.exception("Could not check the window position")
 
     def quit(self):
         """Really closes the app (the tray's Quit, and installing an update)."""
@@ -260,6 +305,11 @@ class Shell:
     def start_tray(self, started_hidden: bool = False):
         """Runs on a helper thread once the window exists."""
         from core import desktop, notify
+        try:      # keeps the window reachable: never lost off the screen after minimizing, the tray, or a monitor change
+            from core import winpos
+            winpos.start_watching(WINDOW_TITLE, stop=lambda: self.quitting)
+        except Exception:
+            log.exception("Could not start the window position check")
         try:
             import pystray
             image = tray_image(self.resources)
@@ -339,6 +389,7 @@ def run() -> None:
         except Exception:
             log.exception("The bot crashed")
 
+    background_priority()                    # before anything else starts: games get the CPU first
     threading.Thread(target=bot_thread, daemon=True).start()
 
     # Wait until OUR dashboard is listening (not just until "something" answers on port 5000: another program may use it).
@@ -350,8 +401,12 @@ def run() -> None:
         # Started by Windows with "Start minimized" on: go straight to the tray (only if a tray icon is possible)
         hidden = "--minimized" in sys.argv and tray_importable()
         shell = Shell(home, resource_dir())
-        shell.window = webview.create_window("FQPN's Chat Bot", url, width=1280, height=800, min_size=(1000, 650), hidden=hidden)
+        shell.window = webview.create_window(WINDOW_TITLE, url, width=1280, height=800, min_size=(1000, 650), hidden=hidden)
         shell.window.events.closing += shell.closing
+        for name, visible in (("minimized", False), ("restored", True), ("maximized", True), ("shown", True)):
+            ev = getattr(shell.window.events, name, None)        # (older pywebview versions don't have every event)
+            if ev is not None:
+                ev += shell.visibility_handler(visible)
         desktop.show_window = shell.show              # a second launch asks this copy to show its window
         # private_mode=False + storage_path keeps the dashboard's theme/language between launches
         # On Windows the window must be the Edge (WebView2) one: the old built-in engine cannot show this dashboard properly.

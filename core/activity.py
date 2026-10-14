@@ -50,6 +50,7 @@ class ActivityLog:
         self._days = days_fn            # how many days to keep (0 = forever), read each time so Settings changes apply
         self._items: deque = deque(maxlen=MAX_SHOWN)
         self._since_prune = 0
+        self.rev = 0                    # counts changes, so the dashboard reloads the logs only when there is something new
         self.prune()
         self._load()
 
@@ -76,6 +77,7 @@ class ActivityLog:
             if v not in (None, "", False):
                 item[k] = v if isinstance(v, (int, bool)) else str(v)[:500]
         self._items.append(item)
+        self.rev += 1
         try:
             with open(self.path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(item, ensure_ascii=False) + "\n")
@@ -106,6 +108,7 @@ class ActivityLog:
     def prune(self) -> None:
         """Drops entries older than the chosen number of days, and keeps the file from growing without limit."""
         self._since_prune = 0
+        self.rev = getattr(self, "rev", 0) + 1
         try:
             days = int(self._days())
         except (TypeError, ValueError):

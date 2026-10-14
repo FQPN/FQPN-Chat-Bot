@@ -23,6 +23,8 @@ MAX_RESTARTS = 6          # automatic restarts within an hour; after that it onl
 HOUR = 3600
 NOTICE_EVERY = 600        # at most one pop-up every 10 minutes
 CALIBRATE = 4             # checks that never see the chat registration: this token cannot list it, so the check is not used
+ALIVE = 120               # chat heard this recently proves the connection works: never restart then
+MAX_PAGES = 20            # Twitch lists 100 registrations per page; old dropped ones from earlier connections can fill page 1
 SUBS_URL = "https://api.twitch.tv/helix/eventsub/subscriptions"
 
 
@@ -38,6 +40,7 @@ class Watchdog:
         self.seen_ok = False          # the chat registration was seen as enabled at least once on this connection
         self.unseen = 0
         self.subs_usable = True
+        self.verified_at = 0.0        # when Twitch last confirmed the bot's chat registration as enabled
         self.set("ok")
 
     # ---------------------------------------------------------------- what the dashboard shows
@@ -63,28 +66,42 @@ class Watchdog:
             return "offline"
 
     async def http_subs(self, token: str, owner_id) -> str:
-        """enabled | bad:<status> | missing | login | unavailable | unknown | offline, for the bot's chat registration."""
+        """enabled | bad:<status> | missing | login | unavailable | unknown | offline, for the bot's chat registration.
+        Reads EVERY page: each reconnect leaves an old "disconnected" registration listed for a while, and when they filled the
+        first page the live one was never seen, so a healthy bot was restarted (which left one more old one: it snowballed)."""
         headers = {"Authorization": f"Bearer {token}", "Client-Id": auth.CLIENT_ID}
+        statuses, cursor, pages = [], None, 0
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as s:
-                async with s.get(SUBS_URL, params={"type": "channel.chat.message", "first": "100"}, headers=headers) as r:
-                    if r.status == 401:
-                        return "login"
-                    if r.status in (400, 403, 404):
-                        return "unavailable"
-                    if r.status != 200:
-                        return "unknown"
-                    data = await r.json()
+                while True:
+                    params = {"type": "channel.chat.message", "first": "100"}
+                    if cursor:
+                        params["after"] = cursor
+                    async with s.get(SUBS_URL, params=params, headers=headers) as r:
+                        if r.status == 401:
+                            return "login"
+                        if r.status in (400, 403, 404):
+                            return "unavailable"
+                        if r.status != 200:
+                            return "unknown"
+                        data = await r.json()
+                    for sub in (data or {}).get("data", []):
+                        cond = sub.get("condition") or {}
+                        if str(cond.get("broadcaster_user_id")) == str(owner_id) and (sub.get("transport") or {}).get("method") == "websocket":
+                            if str(sub.get("status")) == "enabled":
+                                return "enabled"
+                            statuses.append(str(sub.get("status")))
+                    pages += 1
+                    cursor = ((data or {}).get("pagination") or {}).get("cursor")
+                    if not cursor:
+                        break
+                    if pages >= MAX_PAGES:
+                        return "unknown"            # too many to read: don't guess
         except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
             return "offline"
-        statuses = []
-        for sub in (data or {}).get("data", []):
-            cond = sub.get("condition") or {}
-            if str(cond.get("broadcaster_user_id")) == str(owner_id) and (sub.get("transport") or {}).get("method") == "websocket":
-                statuses.append(str(sub.get("status")))
         if not statuses:
             return "missing"
-        return "enabled" if "enabled" in statuses else "bad:" + statuses[0]
+        return "bad:" + statuses[0]
 
     async def probe(self, bot):
         """(kind, detail): ok | unknown | bad | offline | login."""
@@ -99,6 +116,7 @@ class Watchdog:
         s = await self.http_subs(token, bot.owner_id)
         if s == "enabled":
             self.seen_ok, self.unseen = True, 0
+            self.verified_at = self.clock()
             return "ok", ""
         if s == "offline":
             return "offline", "No internet connection"
@@ -116,6 +134,10 @@ class Watchdog:
         return "unknown", ""
 
     # ---------------------------------------------------------------- deciding
+    def chat_verified(self, within: float = ALIVE) -> bool:
+        """Twitch confirmed the bot's chat connection a moment ago (the bot asks before reconnecting over a quiet chat)."""
+        return bool(self.verified_at) and self.clock() - self.verified_at <= within
+
     def warning(self, bot) -> str:
         return "live" if getattr(bot, "live_fail", 0) >= 3 else ""      # the live check keeps failing: timers may be waiting
 
@@ -143,6 +165,11 @@ class Watchdog:
         elif kind in ("offline", "login"):
             self.bad = 0
             self.set(kind, detail)
+        elif self.clock() - getattr(bot, "last_chat", 0) <= ALIVE:
+            # Twitch's list says otherwise, but chat arrived moments ago: only a working connection delivers chat, so it is fine
+            self.bad = 0
+            self.set("ok", warn=self.warning(bot))
+            log.info("Check said \"%s\", but chat is arriving: the connection works, no restart", detail)
         else:
             self.bad += 1
             log.warning("Check failed (%s), %d of %d", detail, self.bad, BAD_LIMIT)

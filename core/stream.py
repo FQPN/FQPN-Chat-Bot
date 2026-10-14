@@ -34,7 +34,7 @@ DEFAULT_TEXT = {
 VARIABLES = ("channel", "category", "title", "uptime", "newfollowers")
 
 STATE_DEFAULT = {"state": "idle", "seg_start": None, "live_seconds": 0.0, "offline_since": None, "ended_at": None,
-                 "last_seen": 0.0, "end_total": None, "title": "", "category": ""}
+                 "last_seen": 0.0, "end_total": None, "title": "", "category": "", "stream_id": None}
 
 
 def duration(seconds: float) -> str:
@@ -111,7 +111,8 @@ class StreamSession:
         started = float(info.get("started_at") or now)
         interval = int((self.store.get("settings") or {}).get("live_check_seconds", 60))
         fresh = (now - started) <= max(FRESH, interval * 2)
-        s.update(state="live", seg_start=started, live_seconds=0.0, offline_since=None, ended_at=None)
+        s.update(state="live", seg_start=started, live_seconds=0.0, offline_since=None, ended_at=None,
+                 stream_id=started)       # a new stream (a resumed one keeps its id): the mini games' rounds refill
         if not fresh:
             return                      # the app was opened in the middle of a stream: track it, announce nothing
         total = await self._total()

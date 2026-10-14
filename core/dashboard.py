@@ -4,6 +4,7 @@ It only edits the JSON files through Store. The bot re-reads those files
 automatically, so changes apply without restarting anything."""
 
 import asyncio
+import copy
 import os
 import logging
 import re
@@ -131,6 +132,16 @@ def restart_bot(state: dict) -> None:
     bot = state.get("bot")
     if bot is not None:
         state["close_task"] = asyncio.create_task(bot.close())
+
+
+def game_command_clash(games, commands):
+    """A plain reason when a game command and one of your own commands have the same name, else None. The game would
+    answer first and your command would silently stop working, so the save is refused instead."""
+    used = manage.names_in_use(commands or {})
+    for name in minigames.command_names(games or {}):
+        if name in used:
+            return f"{name} is both a mini game command and your command {used[name]}. Rename one of them."
+    return None
 
 
 def keep_tour_flag(section: str, raw, store: Store):
@@ -438,17 +449,45 @@ def validate(section: str, data, prefix: str = "!"):
         return out
 
     if section == "games":
-        if not isinstance(data, dict) or not isinstance(data.get("letters", {}), dict):
+        if not isinstance(data, dict) or not all(isinstance(data.get(k, {}), dict) for k in minigames.GAME_KEYS):
             raise ValidationError("The mini games settings are invalid.")
-        c, base = data.get("letters", {}), minigames.defaults()["letters"]
-        cmds = {}
-        for k in ("start_cmd", "approve_cmd", "wins_cmd", "top_cmd"):
-            v = _text(c.get(k, base[k]), "Command name", 30).strip()
-            if " " in v:
-                raise ValidationError("A game command is one word, like !حروف.")
-            if v.lower() in cmds.values():
-                raise ValidationError(f"Two game commands are both called {v}.")
-            cmds[k] = v.lower() if v.isascii() else v
+        if "shared" in data and not isinstance(data["shared"], dict):
+            raise ValidationError("The mini games settings are invalid.")
+        data = copy.deepcopy(data)
+        minigames.upgrade_games(data)            # a save in the pre-1.9.0 shape (one name per command) still works
+        c, sc, sh = data.get("letters", {}), data.get("scramble", {}), data.get("shared", {})
+        if not isinstance(sh, dict):
+            raise ValidationError("The mini games settings are invalid.")
+        dflt = minigames.defaults()
+        found = {"letters": {}, "scramble": {}, "shared": {}}
+        seen = {}
+        for part, fields in minigames.GAME_CMDS.items():
+            src = {"letters": c, "scramble": sc, "shared": sh}[part]
+            for k in fields:
+                raw = src.get(k, dflt[part][k])
+                if isinstance(raw, str):
+                    raw = [raw]
+                if not isinstance(raw, list):
+                    raise ValidationError("A game command's names couldn't be read.")
+                names = []
+                for v in raw:
+                    v = _text(v, "Command name", 30).strip()
+                    if " " in v:
+                        raise ValidationError("A game command name is one word, like !حروف.")
+                    v = minigames.cmd_key(v)
+                    if manage.is_reserved(v):
+                        raise ValidationError(f"{v} is a built-in command and can't be a game command.")
+                    if v in seen or v in names:          # every game command name must be different, across the games too
+                        raise ValidationError(f"Two game commands are both called {v}.")
+                    names.append(v)
+                if not names:
+                    raise ValidationError("Every game command needs at least one name.")
+                if len(names) > minigames.MAX_ALIASES:
+                    raise ValidationError(f"A game command can have at most {minigames.MAX_ALIASES} names.")
+                for v in names:
+                    seen[v] = True
+                found[part][k] = names
+        cmds, scmds = found["letters"], found["scramble"]
         if c.get("who_starts", "moderator") not in minigames.WHO:
             raise ValidationError("Choose who can start a round.")
         cats = [x for x in (c.get("categories") or []) if x in minigames.CATEGORIES]
@@ -463,11 +502,28 @@ def validate(section: str, data, prefix: str = "!"):
             if not isinstance(raw, list) or len(raw) > 2000:
                 raise ValidationError("A word list is invalid.")
             words[cat] = list(dict.fromkeys(w for w in (_text(x, "Word", 40, required=False).strip() for x in raw) if w))
+        if sc.get("who_starts", "moderator") not in minigames.WHO:
+            raise ValidationError("Choose who can start a round.")
+        raw = sc.get("words", [])
+        if not isinstance(raw, list) or len(raw) > 2000:
+            raise ValidationError("A word list is invalid.")
+        swords = list(dict.fromkeys(w for w in (_text(x, "Word", 40, required=False).strip() for x in raw) if w))
+        bad = next((w for w in swords if not minigames.scramble_ok(w)), None)
+        if bad is not None:
+            raise ValidationError(f"«{bad}»: a word for «رتب» is one Arabic word of 3 to 7 letters.")
         return {"letters": dict(cmds, enabled=_bool(c.get("enabled", False), "Game switch"), who_starts=c.get("who_starts", "moderator"),
                                 round_seconds=int(_number(c.get("round_seconds", 60), "Round time", 15, 600)),
                                 auto_minutes=int(_number(c.get("auto_minutes", 0), "Automatic rounds", 0, 240)),
                                 categories=cats, letters=letters, words=words,
-                                announce=_bool(c.get("announce", True), "Announcements"))}
+                                announce=_bool(c.get("announce", True), "Announcements")),
+                "scramble": dict(scmds, enabled=_bool(sc.get("enabled", False), "Game switch"), who_starts=sc.get("who_starts", "moderator"),
+                                 round_seconds=int(_number(sc.get("round_seconds", 45), "Round time", 15, 600)),
+                                 hint=_bool(sc.get("hint", True), "Hint"),
+                                 auto_minutes=int(_number(sc.get("auto_minutes", 0), "Automatic rounds", 0, 240)),
+                                 announce=_bool(sc.get("announce", True), "Announcements"), words=swords),
+                "shared": dict(found["shared"],
+                               rounds_per_stream=int(_number(sh.get("rounds_per_stream", 0), "Rounds per stream", 0, minigames.MAX_ROUNDS)),
+                               cooldown_seconds=int(_number(sh.get("cooldown_seconds", 0), "Cooldown between rounds", 0, minigames.MAX_COOLDOWN)))}
 
     if section == "game_wins":
         if not isinstance(data, dict) or len(data) > 100000:
@@ -476,7 +532,11 @@ def validate(section: str, data, prefix: str = "!"):
         for uid, e in data.items():
             if not isinstance(e, dict):
                 raise ValidationError("The wins list is invalid.")
-            out[str(uid)[:30]] = {"name": _text(e.get("name", "?"), "Name", 40, required=False) or "?", "wins": int(_number(e.get("wins", 0), "Wins", 0, 10 ** 9))}
+            g = e.get("games", {})
+            if not isinstance(g, dict):
+                raise ValidationError("The wins list is invalid.")
+            out[str(uid)[:30]] = {"name": _text(e.get("name", "?"), "Name", 40, required=False) or "?", "wins": int(_number(e.get("wins", 0), "Wins", 0, 10 ** 9)),
+                                  "games": {k: int(_number(g[k], "Wins", 0, 10 ** 9)) for k in minigames.GAME_KEYS if k in g}}
         return out
 
     if section == "moderation":
@@ -638,6 +698,11 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             "last_reconnect": state.get("last_reconnect"),
             "two_copies": bool(state.get("two_copies")),                            # the bot reconnected by itself (why, when)
             "banned": bool(state.get("banned")),                                       # the developer turned the app off here
+            "game": bot.game_view() if bot and hasattr(bot, "game_view") else None,
+            "game_limits": bot.game_limits() if bot and hasattr(bot, "game_limits") else None,
+            # what changed since the page last looked: it reloads the settings / the logs only when these move (1.9.0)
+            "rev": f"{getattr(store, 'boot', 0)}:{getattr(store, 'rev', 0)}",
+            "logrev": f"{getattr(store, 'boot', 0)}:{getattr(store.activity, 'rev', 0)}",   # All games: rounds used, cooldown left      # the Mini games round in progress (the card's live box)
             "dev": str(state.get("account_id") or "") in greetings.DEVELOPERS,           # shows the Users page (the website checks again)   # Twitch refused a delete/timeout ("scopes" = reconnect)
             "caps": dict(desktop.caps, updates=bool(desktop.FROZEN and not updater.is_dev())),
             "update": {k: updater.U.get(k) for k in ("status", "current", "latest", "notes", "progress", "error")},
@@ -687,6 +752,10 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             return web.json_response({"error": str(e)}, status=400)
         except (ValueError, AttributeError):
             return web.json_response({"error": "That data couldn't be read."}, status=400)
+        clash = game_command_clash(data if section == "games" else store.get("games"),
+                                   data if section == "commands" else store.get("commands")) if section in ("games", "commands") else None
+        if clash:
+            return web.json_response({"error": clash}, status=400)
         if section == "prefs":
             try:
                 desktop.apply_prefs(data)      # the Windows start-up entry
