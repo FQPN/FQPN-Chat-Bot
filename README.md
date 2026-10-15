@@ -12,7 +12,7 @@ The dashboard is in English and Arabic.
 - **Blocklist, Logs and a Pause switch**
 
 ## Install (Windows, no Python needed)
-1. Open the website, **https://commands.fqpnbot.workers.dev**, and click **Download for Windows** (or open the **Releases** page of this project and download **FQPN-Chat-Bot-Setup-x.y.z.exe**).
+1. Open the website, **https://fqpnbot.com**, and click **Download for Windows** (or open the **Releases** page of this project and download **FQPN-Chat-Bot-Setup-x.y.z.exe**).
 2. Run it and follow the steps. It installs for your user only; no administrator rights are needed.
 3. Start **FQPN's Chat Bot** from the Start menu (or the desktop shortcut).
 

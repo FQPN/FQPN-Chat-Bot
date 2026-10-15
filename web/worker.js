@@ -87,6 +87,14 @@ export default {
     try {
       return await handle(request, env);
     } catch (e) {
+      // The usual reason after moving the worker (a new Cloudflare account): no database connected. Say exactly that.
+      if (!env || !env.DB) {
+        const msg = "The website's database isn't connected. In Cloudflare: this worker → Settings → Bindings → Add → D1 database, variable name DB.";
+        if (new URL(request.url).pathname.startsWith("/api/")) return json({ error: msg }, 503);
+        return page(`<section class="hero"><h1>Website not set up yet</h1><p class="lead">${esc(msg)}</p>` +
+          `<p class="lead" dir="rtl" lang="ar">قاعدة بيانات الموقع غير موصولة. في Cloudflare: هذا الـ worker ← Settings ← Bindings ← Add ← D1 database، والاسم DB.</p></section>`,
+          "Website not set up", 503, 0);
+      }
       return json({ error: "Something went wrong on the website. Try again later." }, 500);
     }
   },

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.10.1
+- The website is now fqpnbot.com. Your public command list link is fqpnbot.com/<your channel>, and it moves there by itself.
+- Fixed: after the website address changed, the app never sent the command list to the new address.
+
 ## 1.10.0
 - «رتب» shows the category of the word (like حيوان or بلاد), so it is much easier to guess. You can switch it off.
 - Choose which categories are played, and give your own words a category of your own (like فواكه).

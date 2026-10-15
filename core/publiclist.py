@@ -20,7 +20,7 @@ log = logging.getLogger("twitchbot.publiclist")
 
 # The website's address, with no slash at the end, e.g. "https://fqpn-commands.fqpn.workers.dev".
 # Empty = the feature is not set up in this build (the page says so and nothing is ever sent).
-SITE = "https://commands.fqpnbot.workers.dev"           # 1.10.0: the new address (was fqpn-asoom-commands.aymanxxxcrd.workers.dev)
+SITE = "https://fqpnbot.com"           # 1.10.1: the domain (1.10.0 used commands.fqpnbot.workers.dev: the same worker, still works)
 
 FORMAT = 1              # the version of the data format; the website reads older formats too (room to add fields later)
 CHECK_EVERY = 5         # seconds between looks at the commands (a save in the app wakes it straight away)
@@ -139,7 +139,9 @@ class Syncer:
             return
         payload = build(self.store.get("commands"), settings)
         d = digest(payload, login)
-        if saved.get("uploaded") and saved.get("digest") == d and saved.get("login") == login:
+        # 1.10.1: also the SAME website. After the address changes (a new domain, a new Cloudflare account with an empty
+        # database) the list is sent again once, instead of "already uploaded" forever.
+        if saved.get("uploaded") and saved.get("digest") == d and saved.get("login") == login and saved.get("site") == SITE:
             self.pending = None
             self.set("ok", url=page_url(login), at=saved.get("at"))
             return
@@ -155,7 +157,7 @@ class Syncer:
         if code == 200 and body.get("ok"):
             who = str(body.get("login") or login)
             self.fails, self.next_try, self.pending = 0, 0.0, None
-            self._remember(uploaded=True, digest=d, login=login, at=int(now))
+            self._remember(uploaded=True, digest=d, login=login, at=int(now), site=SITE)
             self.set("ok", url=page_url(who), at=int(now))
         elif code == 0:
             self._failed("offline", "offline", retry)
