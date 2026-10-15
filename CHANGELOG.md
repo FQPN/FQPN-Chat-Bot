@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.10.0
+- «رتب» shows the category of the word (like حيوان or بلاد), so it is much easier to guess. You can switch it off.
+- Choose which categories are played, and give your own words a category of your own (like فواكه).
+- New website address: commands.fqpnbot.workers.dev. Public command list links move there by themselves.
+- New installs start with the public command list switched on. If you already use the app, nothing changes.
+- Fixed: the category checkboxes in the mini game settings sat above their names.
+
 ## 1.9.0
 - New mini game «رتب»: the bot shuffles the letters of a word (!رتب) and the first viewer to write it wins. A hint gives the first letter halfway through; 700+ built-in words, and you can add your own.
 - Leaderboards per game: the Mini games page has tabs for All games, حروف and رتب, and "Reset this game". In chat, !فوز shows your wins per game and "!الأوائل رتب" shows one game's top 5.

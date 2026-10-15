@@ -12,7 +12,7 @@ The dashboard is in English and Arabic.
 - **Blocklist, Logs and a Pause switch**
 
 ## Install (Windows, no Python needed)
-1. Open the **Releases** page of this project and download **FQPN-Chat-Bot-Setup-x.y.z.exe**.
+1. Open the website, **https://commands.fqpnbot.workers.dev**, and click **Download for Windows** (or open the **Releases** page of this project and download **FQPN-Chat-Bot-Setup-x.y.z.exe**).
 2. Run it and follow the steps. It installs for your user only; no administrator rights are needed.
 3. Start **FQPN's Chat Bot** from the Start menu (or the desktop shortcut).
 
@@ -90,4 +90,4 @@ In detail:
 
 To know who uses FQPN's Chat Bot, the app sends two things to its developer about once a day: your Twitch channel name and the version of the app. That is all: never your commands, chat messages, viewers, followers, donations, settings or passwords. Your Twitch login is only used to prove the channel name is really yours, and it is never kept. The developer can turn the app off for a channel that misuses it. (Settings > App explains this too.)
 
-If you switch on Commands > Public list, the names of your public commands and who can use them are also sent, so the list can be shown on the web.
+Commands > Public list is on from the start (new installs since 1.10.0): the names of your public commands and who can use them are also sent, so the list can be shown on the web. Switch it off there and nothing is shared.

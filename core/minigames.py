@@ -34,7 +34,10 @@ def defaults() -> dict:
                         "who_starts": "moderator", "round_seconds": 60, "auto_minutes": 0, "categories": list(CATEGORIES), "announce": True,
                         "letters": DEFAULT_LETTERS, "words": {c: [] for c in CATEGORIES}},
             "scramble": {"enabled": False, "start_cmd": ["!رتب"], "who_starts": "moderator", "round_seconds": 45, "hint": True,
-                         "auto_minutes": 0, "announce": True, "words": []}}
+                         "auto_minutes": 0, "announce": True, "words": [],
+                         # 1.10.0: categories make it easier. The built-in words keep the category they come from (the five
+                         # of the first game); your own words can have one (word -> category). Turned-off categories aren't played.
+                         "show_category": True, "word_cats": {}, "categories_off": []}}
 
 
 def cmd_key(word: str) -> str:
@@ -192,6 +195,7 @@ def scramble_ok(word: str) -> bool:
 
 
 _POOL: list = []
+_POOL_CATS: list = []        # the same built-in words with the category each comes from
 
 
 def scramble_pool(extra=()) -> list:
@@ -204,8 +208,41 @@ def scramble_pool(extra=()) -> list:
                 if scramble_ok(w) and not w.startswith("ال") and norm(w) not in seen:
                     seen.add(norm(w))
                     _POOL.append(w)
+                    _POOL_CATS.append((w, cat))
     own = [_TASHKEEL.sub("", str(w)).strip() for w in extra]
     return list(dict.fromkeys(_POOL + [w for w in own if scramble_ok(w)]))
+
+
+MAX_CATEGORY = 20           # characters in a category name of your own
+
+
+def clean_word(w) -> str:
+    return _TASHKEEL.sub("", str(w)).strip()
+
+
+def scramble_entries(cfg: dict) -> list:
+    """[(word, category), ...] the game can use: the built-in words (category = the first game's category they come from) and
+    your own words (category = the one you gave them, or "" for none; yours wins when a word is in both). Without the
+    categories you turned off. Words without a category are always played."""
+    scramble_pool()                                   # (fills the built-in pool once)
+    off = set((cfg or {}).get("categories_off") or [])
+    cats = (cfg or {}).get("word_cats") or {}
+    out, seen = [], {}
+    for w in [clean_word(x) for x in (cfg or {}).get("words") or []]:
+        if scramble_ok(w) and norm(w) not in seen:
+            seen[norm(w)] = len(out)
+            out.append((w, str(cats.get(w) or "").strip()))
+    for w, cat in _POOL_CATS:
+        if norm(w) not in seen:
+            seen[norm(w)] = len(out)
+            out.append((w, cat))
+    return [(w, c) for w, c in out if not c or c not in off]
+
+
+def scramble_categories(cfg: dict) -> list:
+    """Every category that has words: the built-in ones first, then your own (for the "categories in play" list)."""
+    own = [str(c).strip() for c in ((cfg or {}).get("word_cats") or {}).values() if str(c).strip()]
+    return list(dict.fromkeys(list(CATEGORIES) + own))
 
 
 def shuffle_letters(word: str, rng=random) -> list:
@@ -225,8 +262,8 @@ def tiles_text(tiles) -> str:
 class ScrambleRound:
     key = "scramble"
 
-    def __init__(self, word: str, seconds: int, clock=time.time, rng=random):
-        self.word, self.clock = word, clock
+    def __init__(self, word: str, seconds: int, clock=time.time, rng=random, category: str = ""):
+        self.word, self.clock, self.category = word, clock, category
         self.tiles = shuffle_letters(word, rng)
         self.started = clock()
         self.seconds = seconds
@@ -248,9 +285,11 @@ class ScrambleRound:
 
 
 def new_scramble(cfg: dict, avoid=(), clock=time.time, rng=random) -> ScrambleRound:
-    pool = scramble_pool(cfg.get("words") or [])
-    fresh = [w for w in pool if norm(w) not in {norm(a) for a in avoid}] or pool
-    return ScrambleRound(rng.choice(fresh), int(cfg.get("round_seconds") or 45), clock, rng)
+    pool = scramble_entries(cfg) or scramble_entries(dict(cfg, categories_off=[]))     # (never empty: then every category)
+    recent = {norm(a) for a in avoid}
+    fresh = [e for e in pool if norm(e[0]) not in recent] or pool
+    word, cat = rng.choice(fresh)
+    return ScrambleRound(word, int(cfg.get("round_seconds") or 45), clock, rng, category=cat)
 
 
 # ---------- wins: a total per viewer plus how many came from each game ----------

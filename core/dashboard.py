@@ -511,6 +511,25 @@ def validate(section: str, data, prefix: str = "!"):
         bad = next((w for w in swords if not minigames.scramble_ok(w)), None)
         if bad is not None:
             raise ValidationError(f"«{bad}»: a word for «رتب» is one Arabic word of 3 to 7 letters.")
+        # 1.10.0: categories. Your own words may have one; categories can be turned off (not played).
+        raw_cats = sc.get("word_cats", {}) or {}
+        if not isinstance(raw_cats, dict):
+            raise ValidationError("The word categories couldn't be read.")
+        word_cats = {}
+        for w, cat in raw_cats.items():
+            w = str(w).strip()
+            cat = " ".join(_text(cat, "Category", 60, required=False).split())
+            if w in swords and cat:                   # (a removed word takes its category with it)
+                if len(cat) > minigames.MAX_CATEGORY:
+                    raise ValidationError(f"«{cat}»: a category name can be at most {minigames.MAX_CATEGORY} characters.")
+                word_cats[w] = cat
+        off = sc.get("categories_off", []) or []
+        if not isinstance(off, list) or len(off) > 200:
+            raise ValidationError("The categories in play couldn't be read.")
+        known_cats = minigames.scramble_categories({"word_cats": word_cats})
+        off = [c for c in dict.fromkeys(str(x).strip() for x in off) if c in known_cats]
+        if not minigames.scramble_entries({"words": swords, "word_cats": word_cats, "categories_off": off}):
+            raise ValidationError("Keep at least one category in play, or the game has no words.")
         return {"letters": dict(cmds, enabled=_bool(c.get("enabled", False), "Game switch"), who_starts=c.get("who_starts", "moderator"),
                                 round_seconds=int(_number(c.get("round_seconds", 60), "Round time", 15, 600)),
                                 auto_minutes=int(_number(c.get("auto_minutes", 0), "Automatic rounds", 0, 240)),
@@ -520,7 +539,9 @@ def validate(section: str, data, prefix: str = "!"):
                                  round_seconds=int(_number(sc.get("round_seconds", 45), "Round time", 15, 600)),
                                  hint=_bool(sc.get("hint", True), "Hint"),
                                  auto_minutes=int(_number(sc.get("auto_minutes", 0), "Automatic rounds", 0, 240)),
-                                 announce=_bool(sc.get("announce", True), "Announcements"), words=swords),
+                                 announce=_bool(sc.get("announce", True), "Announcements"), words=swords,
+                                 show_category=_bool(sc.get("show_category", True), "Show the category"),
+                                 word_cats=word_cats, categories_off=off),
                 "shared": dict(found["shared"],
                                rounds_per_stream=int(_number(sh.get("rounds_per_stream", 0), "Rounds per stream", 0, minigames.MAX_ROUNDS)),
                                cooldown_seconds=int(_number(sh.get("cooldown_seconds", 0), "Cooldown between rounds", 0, minigames.MAX_COOLDOWN)))}

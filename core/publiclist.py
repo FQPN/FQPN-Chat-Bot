@@ -1,5 +1,6 @@
 """Public command list: keeps a copy of the channel's public commands on the command-list website, so viewers can open one
-short link (SITE/<channel>) that always shows the latest list. It is off until the streamer switches it on (Commands page).
+short link (SITE/<channel>) that always shows the latest list. On by default for new installs since 1.10.0 (existing users keep
+their choice); the streamer can switch it off on the Commands page.
 
 What is sent: only the names of the switched-on commands that are not hidden from the public list, and who can use them.
 The channel's Twitch login goes with it so the website can ask Twitch whose channel it is; the website does not keep it.
@@ -19,7 +20,7 @@ log = logging.getLogger("twitchbot.publiclist")
 
 # The website's address, with no slash at the end, e.g. "https://fqpn-commands.fqpn.workers.dev".
 # Empty = the feature is not set up in this build (the page says so and nothing is ever sent).
-SITE = "https://fqpn-asoom-commands.aymanxxxcrd.workers.dev"
+SITE = "https://commands.fqpnbot.workers.dev"           # 1.10.0: the new address (was fqpn-asoom-commands.aymanxxxcrd.workers.dev)
 
 FORMAT = 1              # the version of the data format; the website reads older formats too (room to add fields later)
 CHECK_EVERY = 5         # seconds between looks at the commands (a save in the app wakes it straight away)

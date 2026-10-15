@@ -66,7 +66,8 @@ DEFAULTS = {
         "commands_url": "",
         "disabled_builtins": [],   # built-in commands switched off in Commands > Built-in
         "separate_bot": False,     # the bot talks from its own Twitch account (Settings > Bot > Chat account)
-        "public_list": False,      # keep a public copy of the command list on the website (Commands > Public list)
+        "public_list": True,       # keep a public copy of the command list on the website (Commands > Public list). On for NEW
+                                   # installs since 1.10.0; existing settings files keep their value (missing = off)
         "public_hidden": [],       # command names left off the public list (kept here so the commands themselves don't change)
     },
     "prefs": {   # how the installed app behaves (Settings > App, Notifications, Logs and data)

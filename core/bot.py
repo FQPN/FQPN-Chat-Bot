@@ -1032,7 +1032,8 @@ class TwitchBot(commands.Bot):
                 recent = self._recent_words = deque(maxlen=40)       # no word comes back until 40 others were played
             self.round = r = minigames.new_scramble(cfg, recent)
             recent.append(r.word)
-            await self._send(self._game_ann(cfg) + f"🔀 رتب الحروف: {minigames.tiles_text(r.tiles)} — أول واحد يكتب الكلمة يفوز! ({int(r.ends - time.time() + 0.5)} ثانية)", why="game")
+            cat = f" — الفئة: {r.category}" if r.category and cfg.get("show_category", True) else ""      # 1.10.0: makes it easier
+            await self._send(self._game_ann(cfg) + f"🔀 رتب الحروف: {minigames.tiles_text(r.tiles)}{cat} — أول واحد يكتب الكلمة يفوز! ({int(r.ends - time.time() + 0.5)} ثانية)", why="game")
             self._log_activity("game", f"start:رتب:{''.join(r.tiles)}")
         else:
             self.round = r = minigames.new_round(cfg)
@@ -1096,6 +1097,7 @@ class TwitchBot(commands.Bot):
         if out["game"] == "scramble":
             out["tiles"] = list(r.tiles)
             out["hint"] = r.word[0] if r.hinted else ""
+            out["category"] = getattr(r, "category", "") if self._game_cfg("scramble").get("show_category", True) else ""
         else:
             out["cat"], out["letter"] = r.cat, r.letter
         return out
