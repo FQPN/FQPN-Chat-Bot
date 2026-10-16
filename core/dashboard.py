@@ -16,7 +16,7 @@ from pathlib import Path
 import aiohttp
 from aiohttp import web
 
-from . import auth, botauth, desktop, events, greetings, manage, minigames, moderation, notify, publiclist, updater
+from . import auth, botauth, desktop, events, greetings, manage, minigames, moderation, notify, publiclist, support, updater
 from .store import Store
 
 log = logging.getLogger("twitchbot.dashboard")
@@ -737,6 +737,21 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             tab = "activity"
         return web.json_response(store.activity.recent(200, tab))      # newest first, saved on disk
 
+    async def support_send(request):
+        """The Support page's Send (1.11.0): checked here, then sent through the website to the developers' Discord."""
+        try:
+            data = await request.json()
+        except (ValueError, UnicodeDecodeError):
+            data = None
+        try:
+            prep = support.prepare(data)
+            token = (auth.load_token() or {}).get("access_token")
+            if not token or not state.get("account"):
+                raise support.SupportError("login", "Connect Twitch first.")
+            return web.json_response(await support.send(prep, token))
+        except support.SupportError as e:
+            return web.json_response({"error": e.code, "detail": e.detail}, status=400 if e.code not in ("offline", "failed") else 502)
+
     async def connect(request):
         if state.get("account"):
             return web.json_response({"ok": True})
@@ -945,12 +960,13 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
         shown = notify.send(dict(store.get("prefs"), notify=True), "FQPN's Chat Bot", "This is a test notification.")
         return web.json_response({"ok": bool(shown)})
 
-    app = web.Application(middlewares=[guard])
+    app = web.Application(middlewares=[guard], client_max_size=16 * 1024 * 1024)    # (Support: up to 4 pictures)
     app.router.add_get("/", index)
     app.router.add_get("/icon.ico", icon)
     app.router.add_get("/api/status", status)
     app.router.add_get("/api/logs", logs)
     app.router.add_post("/api/connect", connect)
+    app.router.add_post("/api/support", support_send)
     app.router.add_post("/api/disconnect", disconnect)
     app.router.add_post("/api/reconnect", reconnect)
     app.router.add_post("/api/restart", restart)

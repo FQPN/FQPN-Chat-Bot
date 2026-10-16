@@ -90,4 +90,4 @@ In detail:
 
 To know who uses FQPN's Chat Bot, the app sends two things to its developer about once a day: your Twitch channel name and the version of the app. That is all: never your commands, chat messages, viewers, followers, donations, settings or passwords. Your Twitch login is only used to prove the channel name is really yours, and it is never kept. The developer can turn the app off for a channel that misuses it. (Settings > App explains this too.)
 
-Commands > Public list is on from the start (new installs since 1.10.0): the names of your public commands and who can use them are also sent, so the list can be shown on the web. Switch it off there and nothing is shared.
+Commands > Public list is on from the start (new installs since 1.10.0): the names of your public commands and who can use them are also sent, so the list can be shown on the web. Switch it off there and nothing is shared. The Support page (System > Support) sends your message, any pictures you add, your channel name and the app version (for problems, also the Windows version, and the end of bot.log only if you tick that box) to the developers, only when you press Send.

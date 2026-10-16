@@ -15,7 +15,7 @@ problems, notes = [], []
 
 REQUIRED = ["main.py", "launcher.py", "core/__init__.py", "core/auth.py", "core/bot.py", "core/dashboard.py",
             "core/dashboard.html", "core/store.py", "core/manage.py", "core/variables.py", "core/greetings.py",
-            "core/events.py", "core/version.py", "core/activity.py", "core/notify.py", "core/desktop.py", "core/updater.py", "core/botauth.py", "core/donations.py", "core/watchdog.py", "core/stream.py", "core/publiclist.py", "core/usage.py", "core/moderation.py", "core/logsafe.py", "core/jseval.py", "core/minigames.py", "core/gamewords.py", "core/winpos.py"]
+            "core/events.py", "core/version.py", "core/activity.py", "core/notify.py", "core/desktop.py", "core/updater.py", "core/botauth.py", "core/donations.py", "core/watchdog.py", "core/stream.py", "core/publiclist.py", "core/usage.py", "core/moderation.py", "core/logsafe.py", "core/jseval.py", "core/minigames.py", "core/gamewords.py", "core/winpos.py", "core/support.py"]
 
 # a phrase that only the NEW version of each file contains
 NEW_IN = {
@@ -39,10 +39,10 @@ NEW_IN = {
     "core/greetings.py": ["DEVELOPERS", "def developer_messages"],
     "core/updater.py": ["NUDGE_GAP", "If-None-Match", "def nudge"],
     "core/publiclist.py": ["class Syncer", "SITE =", "def build", "effective_permission"],
-    "core/dashboard.py": ['"prefs"', "updater", "/api/update/check", "/api/show", "disabled_builtins", "bind_first_free", "/api/botaccount/connect", "restart_bot", "/api/donations/", "tourDone", "gsDone", "/api/restart", "health_info", "The stream messages are invalid", "publist_info", "/api/publist/sync", "unknown reply type", "/api/update/nudge", "wnSeen", "section == \"moderation\"", "/api/dev/users", "/api/dev/ban", "bot.game_view()"],
+    "core/dashboard.py": ['"prefs"', "updater", "/api/update/check", "/api/show", "disabled_builtins", "bind_first_free", "/api/botaccount/connect", "restart_bot", "/api/donations/", "tourDone", "gsDone", "/api/restart", "health_info", "The stream messages are invalid", "publist_info", "/api/publist/sync", "unknown reply type", "/api/update/nudge", "wnSeen", "section == \"moderation\"", "/api/dev/users", "/api/dev/ban", "bot.game_view()", "support_send"],
     "core/updater.py": ["def announce"],
     "core/desktop.py": ["quit_app", "show_window"],
-    "core/dashboard.html": ["data-pref", "spane-app", "updbtn", "toggleBuiltin", "transform-origin:15px 7px", 'class="sep"', "BNAME", "upop_title", "bac-cards", "botBanner", "dcards", "navActive", "ngrp", "startTour", "tourBtn", "v-greetings", "v-botaccount", "v-donations", "renderAccountMenu", "healthBanner", "renderStream", "renderPublist", "plmodal", "st_msg_on", "applyType", "mtype", "nudgeUpdate", "tr20_t", "usenote", "stmaster", "renderModeration", "mfmodal", "renderUsers", "appoff", "logtabs", "modRow", "botRow", "devgrp", "uspill", "renderMinigames", "mgmodal", "hl_heal_login", "tr22_t", "wnmodal", "wnCheck", "cmdSort", "cpager", "mgtabs", "mgLive"],
+    "core/dashboard.html": ["data-pref", "spane-app", "updbtn", "toggleBuiltin", "transform-origin:15px 7px", 'class="sep"', "BNAME", "upop_title", "bac-cards", "botBanner", "dcards", "navActive", "ngrp", "startTour", "tourBtn", "v-greetings", "v-botaccount", "v-donations", "renderAccountMenu", "healthBanner", "renderStream", "renderPublist", "plmodal", "st_msg_on", "applyType", "mtype", "nudgeUpdate", "tr20_t", "usenote", "stmaster", "renderModeration", "mfmodal", "renderUsers", "appoff", "logtabs", "modRow", "botRow", "devgrp", "uspill", "renderMinigames", "mgmodal", "hl_heal_login", "tr22_t", "wnmodal", "wnCheck", "cmdSort", "cpager", "mgtabs", "mgLive", "v-support", "supSend"],
 }
 
 # a phrase that only the OLD version of a file contains (so it must NOT be there)
@@ -53,7 +53,7 @@ OLD_IN = {"core/dashboard.html": ["animation:tick", "transform-origin:0.75rem"],
 ROOT_FILES = ["launcher.py", "main.py", "check_install.py", "installer.iss", "requirements.txt", "README.md", "CHANGELOG.md",
               "RELEASING.md", "TwitchChatBot.spec", "icon.ico", "run.bat", "update.bat", "build.bat"]
 CORE_FILES = ["auth.py", "bot.py", "dashboard.py", "dashboard.html", "store.py", "manage.py", "variables.py", "greetings.py",
-              "events.py", "version.py", "activity.py", "notify.py", "desktop.py", "updater.py", "winpos.py"]
+              "events.py", "version.py", "activity.py", "notify.py", "desktop.py", "updater.py", "winpos.py", "support.py"]
 
 
 def ok(text):

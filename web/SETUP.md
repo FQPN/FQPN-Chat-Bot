@@ -28,6 +28,10 @@ different name, look for the closest match.
 ## 5. Tell it which app may save lists
 1. Same worker → **Settings → Variables and Secrets → Add**.
 2. Type **Text**, name `TWITCH_CLIENT_ID`, value `sk61bb5z9anwbymut5y6svq13q6q5c` → **Deploy**.
+3. For the app's Support page (1.11.0): in Discord, open the channel for reports → **Edit Channel → Integrations → Webhooks →
+   New Webhook → Copy Webhook URL**. Then add a variable of type **Secret**, name `DISCORD_WEBHOOK_URL`, value = that link →
+   **Deploy**. Keep the link secret (only here): anyone with it can post in that channel. Without it, the app says
+   "Support isn't set up on the website yet".
    (This is your app's public Twitch client ID, the same one in `core/auth.py`. With it, only logins made by
    FQPN's Chat Bot can save lists.)
 

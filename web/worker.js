@@ -6,6 +6,8 @@
 //   GET    /                    the app's home page: download, features, install steps, FAQ (and what the lists are)
 //   GET    /download/windows    the newest installer (asks GitHub's releases; two path parts, so never a channel name)
 //   GET    /api/latest          the newest release as JSON (version, date, size, installer link)
+//   POST   /api/support         a suggestion or problem from the app's Support page, forwarded to the developers' Discord
+//                                (the webhook link is the secret DISCORD_WEBHOOK_URL: it never leaves Cloudflare)
 //   GET    /<channel>           the channel's command list (English / Arabic)
 //   GET    /api/list/<channel>  the same list as JSON
 //   PUT    /api/list            save your list    (Authorization: OAuth <your Twitch login token from the app>)
@@ -77,6 +79,8 @@ async function setup(db) {
     db.prepare("CREATE INDEX IF NOT EXISTS lists_user ON lists(user_id)"),
     db.prepare("CREATE TABLE IF NOT EXISTS blocked (who TEXT PRIMARY KEY, note TEXT)"),
     db.prepare("CREATE TABLE IF NOT EXISTS bans (user_id TEXT PRIMARY KEY, login TEXT, at INTEGER NOT NULL, by TEXT)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS support (user_id TEXT NOT NULL, at INTEGER NOT NULL)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS support_at ON support(at)"),
     db.prepare("CREATE TABLE IF NOT EXISTS seen (user_id TEXT PRIMARY KEY, login TEXT NOT NULL, display TEXT, version TEXT, first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL)"),
   ]);
   tablesReady = true;
@@ -111,6 +115,10 @@ async function handle(req, env) {
   if (path === "/api/seen") {
     if (req.method === "PUT") return saveSeen(req, env);
     return json({ error: "Method not allowed." }, 405, { Allow: "PUT" });
+  }
+  if (path === "/api/support") {
+    if (req.method !== "POST") return json({ error: "Method not allowed." }, 405, { Allow: "POST" });
+    return support(req, env);
   }
   if (path === "/api/dev/users") {
     if (req.method !== "GET") return json({ error: "Method not allowed." }, 405, { Allow: "GET" });
@@ -290,6 +298,90 @@ async function saveSeen(req, env) {
   return json({ ok: true, counted: true, banned });
 }
 
+// ---- Support (1.11.0): the app's Support page -> here -> the developers' Discord channel
+const SUPPORT = { text: 2000, contact: 50, images: 4, imageBytes: 4 * 1024 * 1024, allBytes: 8 * 1024 * 1024, logBytes: 256 * 1024,
+                  perHour: 5, allPerHour: 120 };
+const IMAGE_TYPES = [["png", [0x89, 0x50, 0x4e, 0x47]], ["jpg", [0xff, 0xd8, 0xff]], ["gif", [0x47, 0x49, 0x46, 0x38]], ["webp", [0x52, 0x49, 0x46, 0x46]]];
+
+async function imageKind(file) {            // what the file really is (its first bytes), not what its name says
+  const head = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+  for (const [kind, magic] of IMAGE_TYPES) {
+    if (magic.every((b, i) => head[i] === b) && (kind !== "webp" || String.fromCharCode(...head.slice(8, 12)) === "WEBP")) return kind;
+  }
+  return "";
+}
+
+function oneLine(s, max) { return String(s || "").replace(/[\u0000-\u001f\u007f]+/g, " ").trim().slice(0, max); }
+
+async function support(req, env) {
+  if (!env.DISCORD_WEBHOOK_URL) return json({ error: "Support isn't set up on the website yet." }, 503);
+  if (Number(req.headers.get("Content-Length") || 0) > SUPPORT.allBytes + SUPPORT.logBytes + 64 * 1024) return json({ error: "The message is too big." }, 413);
+  let form;
+  try { form = await req.formData(); } catch { return json({ error: "The message couldn't be read." }, 400); }
+  const kind = form.get("kind") === "problem" ? "problem" : form.get("kind") === "suggestion" ? "suggestion" : "";
+  const text = String(form.get("text") || "").replace(/\r\n?/g, "\n").trim();
+  const contact = oneLine(form.get("contact"), SUPPORT.contact);
+  const version = oneLine(form.get("version"), 40), os = oneLine(form.get("os"), 80);
+  if (!kind) return json({ error: "Choose Suggestion or Problem." }, 400);
+  if (text.length < 5) return json({ error: "Write a few words first." }, 400);
+  if (text.length > SUPPORT.text) return json({ error: `A message can be at most ${SUPPORT.text} characters.` }, 400);
+  const images = form.getAll("image").filter((f) => typeof f === "object" && f && f.size > 0);
+  if (images.length > SUPPORT.images) return json({ error: `At most ${SUPPORT.images} images.` }, 400);
+  let total = 0;
+  const files = [];
+  for (const f of images) {
+    const k = await imageKind(f);
+    if (!k) return json({ error: "Only pictures can be sent (PNG, JPG, WebP or GIF)." }, 400);
+    if (f.size > SUPPORT.imageBytes) return json({ error: "A picture can be at most 4 MB." }, 400);
+    total += f.size;
+    files.push([f, "image" + (files.length + 1) + "." + k]);
+  }
+  if (total > SUPPORT.allBytes) return json({ error: "All pictures together can be at most 8 MB." }, 400);
+  const log = form.get("log");
+  if (log && typeof log === "object" && log.size > 0) {
+    if (kind !== "problem" || log.size > SUPPORT.logBytes) return json({ error: "The log couldn't be attached." }, 400);
+    files.push([log, "bot.log.txt"]);
+  }
+  const who = await whoIs(req, env);
+  if (who.error) return json({ error: who.error }, who.status);
+  await setup(env.DB);
+  if (await env.DB.prepare("SELECT 1 FROM bans WHERE user_id = ?").bind(who.userId).first()) return json({ error: "This channel can't send messages." }, 403);
+  const now = Math.floor(Date.now() / 1000);
+  const mine = await env.DB.prepare("SELECT COUNT(*) AS n FROM support WHERE user_id = ? AND at > ?").bind(who.userId, now - 3600).first();
+  if (!DEVELOPERS.has(who.userId) && mine && mine.n >= SUPPORT.perHour) {
+    return json({ error: `You can send ${SUPPORT.perHour} messages an hour. Try again later.` }, 429, { "Retry-After": "3600" });
+  }
+  const all = await env.DB.prepare("SELECT COUNT(*) AS n FROM support WHERE at > ?").bind(now - 3600).first();
+  if (all && all.n >= SUPPORT.allPerHour) return json({ error: "Too many messages right now. Try again later." }, 429, { "Retry-After": "600" });
+
+  const p = await profile(who);
+  const embed = {
+    title: (kind === "problem" ? "🐞 Problem" : "💡 Suggestion") + " · " + (p.display || who.login),
+    url: "https://www.twitch.tv/" + who.login,
+    description: text,
+    color: kind === "problem" ? 0xe5484d : 0xe5b74b,
+    fields: [{ name: "Channel", value: `[${who.login}](https://www.twitch.tv/${who.login})`, inline: true },
+             { name: "App", value: version || "?", inline: true }].concat(
+             contact ? [{ name: "Contact", value: contact.replace(/([*_~`|>\\])/g, "\\$1"), inline: true }] : [],
+             os ? [{ name: "Windows", value: os, inline: true }] : []),
+    timestamp: new Date(now * 1000).toISOString(),
+  };
+  if (files.length && files[0][1].startsWith("image")) embed.image = { url: "attachment://" + files[0][1] };
+  const out = new FormData();
+  // allowed_mentions: nobody is pinged, whatever the message says (no @everyone, no roles, no users)
+  out.append("payload_json", JSON.stringify({ username: "FQPN's Chat Bot · Support", embeds: [embed], allowed_mentions: { parse: [] } }));
+  files.forEach(([f, name], i) => out.append("files[" + i + "]", f, name));
+  let r;
+  try { r = await fetch(env.DISCORD_WEBHOOK_URL, { method: "POST", body: out }); } catch { r = null; }
+  if (!r || !r.ok) {
+    return json({ error: r && r.status === 429 ? "Too many messages right now. Try again later." : "The message couldn't be delivered. Try again later." },
+                r && r.status === 429 ? 429 : 502);
+  }
+  await env.DB.batch([env.DB.prepare("INSERT INTO support (user_id, at) VALUES (?, ?)").bind(who.userId, now),
+                      env.DB.prepare("DELETE FROM support WHERE at < ?").bind(now - 86400)]);
+  return json({ ok: true });
+}
+
 // ---- developers only: checked here by Twitch user ID, whatever the app shows
 async function devWho(req, env) {
   const who = await whoIs(req, env);
@@ -412,7 +504,7 @@ const TEXT = {
     q1: "Is it free?", a1: "Yes. It's free and open source (MIT license).",
     q2: "Does the bot work when my PC is off?", a2: "No. It runs on your PC, so it's in your chat while the app is open. It can start with Windows and wait in the tray.",
     q3: "Is my Twitch login safe?", a3: "Your login stays on your PC, in %APPDATA%\\TwitchChatBot. It is never uploaded.",
-    q4: "What does the app send?", a4: "Once a day, your Twitch channel name and the app version, so the developers know who uses it. Never your replies, chat, viewers, settings or passwords. For the public command list (on from the start, you can switch it off), the names of your commands and who can use them.",
+    q4: "What does the app send?", a4: "Once a day, your Twitch channel name and the app version, so the developers know who uses it. Never your replies, chat, viewers, settings or passwords. For the public command list (on from the start, you can switch it off), the names of your commands and who can use them. And whatever you send from the Support page, when you press Send.",
     q5: "Windows says “An Application Control policy has blocked this file”.", a5: "That's Smart App Control, which blocks programs that aren't signed yet. You can turn it off in Windows Security > App & browser control, or wait until the installer is signed.",
     q6: "How do I update?", a6: "The app finds new versions by itself and offers Restart and update. You can also run the newest installer from this page: it updates in place.",
     l_t: "Public command lists",
@@ -457,7 +549,7 @@ const TEXT = {
     q1: "هل هو مجاني؟", a1: "نعم. مجاني ومفتوح المصدر (رخصة MIT).",
     q2: "هل يعمل البوت وجهازي مطفأ؟", a2: "لا. يعمل على جهازك، فيكون في الشات ما دام التطبيق مفتوحًا. يمكن أن يبدأ مع ويندوز وينتظر في شريط المهام.",
     q3: "هل تسجيل دخولي في تويتش آمن؟", a3: "تسجيل دخولك يبقى على جهازك في \u2066%APPDATA%\\TwitchChatBot\u2069 ولا يُرفع أبدًا.",
-    q4: "ماذا يرسل التطبيق؟", a4: "مرة في اليوم: اسم قناتك في تويتش ورقم إصدار التطبيق، ليعرف المطوّرون من يستخدمه. أبدًا ليس ردود أوامرك أو الشات أو المشاهدين أو الإعدادات أو كلمات المرور. ولقائمة الأوامر العامة (مفعّلة من البداية ويمكنك إيقافها): أسماء أوامرك ومن يمكنه استخدامها.",
+    q4: "ماذا يرسل التطبيق؟", a4: "مرة في اليوم: اسم قناتك في تويتش ورقم إصدار التطبيق، ليعرف المطوّرون من يستخدمه. أبدًا ليس ردود أوامرك أو الشات أو المشاهدين أو الإعدادات أو كلمات المرور. ولقائمة الأوامر العامة (مفعّلة من البداية ويمكنك إيقافها): أسماء أوامرك ومن يمكنه استخدامها. وما ترسله من صفحة الدعم عندما تضغط إرسال.",
     q5: "ويندوز يقول «An Application Control policy has blocked this file».", a5: "هذا Smart App Control، ويمنع البرامج غير الموقّعة بعد. يمكنك إيقافه من Windows Security > App & browser control، أو الانتظار حتى يُوقَّع المثبّت.",
     q6: "كيف أحدّث التطبيق؟", a6: "التطبيق يجد الإصدارات الجديدة بنفسه ويعرض «إعادة التشغيل والتحديث». ويمكنك أيضًا تشغيل أحدث مثبّت من هذه الصفحة: يحدّث التطبيق في مكانه.",
     l_t: "قوائم الأوامر العامة",
