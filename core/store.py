@@ -3,13 +3,32 @@ so the future web dashboard can edit them while the bot is running."""
 
 import copy
 import json
+import logging
 import time
 from pathlib import Path
 
-from . import manage, minigames, moderation
+from . import manage, minigames, moderation, safefile
 from .activity import ActivityLog
 
+log = logging.getLogger("twitchbot.store")
+
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+# 1.12.0 (several channels): these stay in data/ and are shared by every channel; everything else is per channel, in
+# data/channels/<twitch user id>/. A Store without a channel uses data/ for everything (the layout before 1.12.0).
+SHARED = ("ui", "prefs")
+# Never replace a real list with an empty one in one save (a bug or a half-loaded page must not wipe your commands).
+# A list of at least this many entries can only become empty with allow_empty=True (a deliberate "remove everything").
+EMPTY_GUARD_MIN = 3
+GUARDED = {
+    "commands": lambda d: len(d) if isinstance(d, dict) else 0,
+    "timers": lambda d: len(d) if isinstance(d, list) else 0,
+    "greetings": lambda d: len((d or {}).get("users") or []) if isinstance(d, dict) else 0,
+    "blocklist": lambda d: len((d or {}).get("users") or []) if isinstance(d, dict) else 0,
+}
+
+
+class EmptySaveRefused(ValueError):
+    """A save would have replaced a real list (commands, timers, ...) with an empty one."""
 
 DEFAULTS = {
     "moderation": moderation.defaults(),    # the Moderation page: bad words, links, caps, emotes, symbols, repeats (all off at first)
@@ -124,7 +143,10 @@ DEFAULTS = {
 
 
 class Store:
-    def __init__(self):
+    def __init__(self, channel=None):
+        self.channel = str(channel) if channel else None     # None = everything in data/ (before 1.12.0)
+        self.problems: dict = {}                             # section -> what happened to a damaged file (shown in the app)
+        self.dir.mkdir(parents=True, exist_ok=True)
         DATA_DIR.mkdir(exist_ok=True)
         self._cache: dict[str, tuple[float, object]] = {}
         # 1.9.0: counts every save, so the dashboard reloads the settings only when something changed (it used to download
@@ -132,14 +154,43 @@ class Store:
         self.boot = int(time.time() * 1000)
         self.rev = 0
         for name in DEFAULTS:
-            if self._read(name) is None:  # missing, empty, or broken file
+            # A missing file gets its defaults. A damaged one is NEVER replaced by the defaults: it is copied aside and its
+            # last good backup is used; with no good backup the defaults are only used in memory, and the app warns.
+            status, _ = safefile.read(self._path(name))
+            if status == "missing":
                 self.save(name, copy.deepcopy(DEFAULTS[name]))
+            elif status == "corrupt":
+                self._recover(name)
         self._migrate()
         self._migrate_events()
         self._migrate_blocked_words()
         self._migrate_games()
         # the activity shown on the Logs page, saved so it survives a restart
-        self.activity = ActivityLog(DATA_DIR / "activity.jsonl", days_fn=lambda: self.get("prefs").get("log_days", 30))
+        self.activity = ActivityLog(self.dir / "activity.jsonl", days_fn=lambda: self.get("prefs").get("log_days", 30))
+
+    @property
+    def dir(self) -> Path:
+        """Where this channel's files are: data/channels/<id>/ (or data/ for the layout before 1.12.0)."""
+        return DATA_DIR / "channels" / self.channel if self.channel else DATA_DIR
+
+    def _recover(self, name: str):
+        """A damaged file: copy it aside, then use its last good backup if there is one. Returns the data or None."""
+        path = self._path(name)
+        kept = safefile.quarantine(path)
+        data = safefile.restore_backup(path)
+        if data is not None:
+            self.problems[name] = {"what": "restored", "kept": kept.name if kept else ""}
+            log.warning("%s was damaged: restored its last good backup (the damaged copy is kept as %s)", path.name, kept)
+        else:
+            self.problems[name] = {"what": "damaged", "kept": kept.name if kept else ""}
+            log.error("%s is damaged and has no good backup: it is kept as it is (copy: %s); the defaults are used in "
+                      "memory until something is saved", path.name, kept)
+        self._cache.pop(name, None)
+        return data
+
+    def use_channel(self, channel) -> None:
+        """Switches this store to a channel's folder (after the one-time move to one folder per channel)."""
+        self.__init__(channel)
 
     def apply_launch_defaults(self) -> None:
         """Run once when the app opens: 'Start the bot when the app opens' decides whether the bot starts active or paused."""
@@ -231,13 +282,15 @@ class Store:
         self.save("settings", settings)
 
     def _path(self, name: str) -> Path:
-        return DATA_DIR / f"{name}.json"
+        return (DATA_DIR if name in SHARED else self.dir) / f"{name}.json"
 
     def _read(self, name: str):
-        try:
-            return json.loads(self._path(name).read_text(encoding="utf-8"))
-        except (FileNotFoundError, json.JSONDecodeError):
-            return None
+        status, data = safefile.read(self._path(name))
+        if status == "ok":
+            return data
+        if status == "corrupt" and name in DEFAULTS and self.problems.get(name, {}).get("what") != "damaged":
+            return self._recover(name)        # damaged while the app runs (edited by hand?): same care as at start
+        return None
 
     def get(self, name: str):
         path = self._path(name)
@@ -254,9 +307,14 @@ class Store:
         self._cache[name] = (mtime, data)
         return data
 
-    def save(self, name: str, data) -> None:
-        self._path(name).write_text(
-            json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
+    def save(self, name: str, data, allow_empty: bool = False) -> None:
+        count = GUARDED.get(name)
+        if count is not None and not allow_empty and count(data) == 0:
+            status, old = safefile.read(self._path(name))
+            if status == "ok" and count(old) >= EMPTY_GUARD_MIN:
+                log.error("Refused to save an empty %s over %d entries", name, count(old))
+                raise EmptySaveRefused(f"Refused to replace {count(old)} saved {name} with an empty list.")
+        safefile.write(self._path(name), data)
+        self.problems.pop(name, None) if self.problems.get(name, {}).get("what") == "damaged" else None
         self._cache.pop(name, None)
         self.rev = getattr(self, "rev", 0) + 1

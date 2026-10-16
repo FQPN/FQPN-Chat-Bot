@@ -16,8 +16,8 @@ from pathlib import Path
 import aiohttp
 from aiohttp import web
 
-from . import auth, botauth, desktop, events, greetings, manage, minigames, moderation, notify, publiclist, support, updater
-from .store import Store
+from . import accounts, auth, botauth, desktop, events, greetings, manage, minigames, moderation, notify, publiclist, support, updater
+from .store import EmptySaveRefused, Store
 
 log = logging.getLogger("twitchbot.dashboard")
 
@@ -114,6 +114,35 @@ async def load_avatar(state: dict, account: dict) -> None:
     state["avatar"] = await fetch_avatar(account)
 
 
+async def _register_bot(state) -> None:
+    """After "Add bot account" signed in: the bot account joins the shared list and sends for this channel."""
+    while state.get("bot_login", {}).get("status") == "waiting" or not state.get("bot_login_task") or not state["bot_login_task"].done():
+        await asyncio.sleep(0.5)
+    acc = await botauth.get_account()
+    if not acc:
+        return
+    reg = accounts.load()
+    cid = str(accounts.current_channel())
+    if reg is None or str(acc["user_id"]) == cid:
+        if reg is not None:
+            state["bot_login"] = {"status": "error", "message": "That's your channel's own account: sign in with the bot account."}
+        return
+    bid = str(acc["user_id"])
+    accounts.bot_token_file(bid).parent.mkdir(parents=True, exist_ok=True)
+    accounts._copy_checked(botauth.token_file(), accounts.bot_token_file(bid))
+    if bid not in [b["id"] for b in reg["bots"]]:
+        reg["bots"].append({"id": bid, "login": acc["login"], "added": int(time.time())})
+    for c in reg["channels"]:
+        if c["id"] == cid:
+            c["sender"] = bid
+            c.pop("sender_note", None)
+    accounts.save(reg)
+    from . import botsender
+    botsender.forget(bid)              # (a fresh login: the next send loads it)
+    restart_bot(state)
+    log.info("Added the bot account %s; it sends for this channel now", acc["login"])
+
+
 def start_login(state: dict, role: str = "streamer") -> None:
     key, task_key = ("bot_login", "bot_login_task") if role == "bot" else ("login", "login_task")
     login = state.setdefault(key, {"status": "idle"})
@@ -132,6 +161,47 @@ def restart_bot(state: dict) -> None:
     bot = state.get("bot")
     if bot is not None:
         state["close_task"] = asyncio.create_task(bot.close())
+
+
+def channels_info(state):
+    """The channels for the page (None when the app runs a single channel the old way, or in tests): who each one is,
+    whether its bot runs, and WHO SENDS its replies (its own account, or which bot account)."""
+    runtimes = state.get("runtimes") if hasattr(state, "get") else None
+    if not runtimes or accounts.load() is None and "pending" not in runtimes:
+        return None
+    out = []
+    for cid, rt in runtimes.items():
+        st = rt.state
+        bot = st.get("bot")
+        reg = accounts.load()
+        entry = next((c for c in (reg or {}).get("channels", []) if c.get("id") == str(cid)), None)
+        if entry is not None:          # 1.12.0: who sends comes from the shared bot list
+            sid = entry.get("sender") or "own"
+            blogin = next((b.get("login", "") for b in reg.get("bots", []) if b.get("id") == sid), "") if sid != "own" else ""
+            sender, sender_ok = blogin, not (bot is not None and getattr(bot, "sender_problem", ""))
+        else:
+            separate = bool(rt.store.get("settings").get("separate_bot")) if cid != "pending" else False
+            sender, sender_ok = ((st.get("bot_account") or "") if separate else ""), (bool(st.get("bot_account")) if separate else True)
+        out.append({"id": str(cid), "login": st.get("account") or (entry or {}).get("login", ""), "avatar": st.get("avatar") or "",
+                    "pending": cid == "pending", "running": bool(bot is not None and getattr(bot, "connected", False)),
+                    "live": bool(bot is not None and getattr(bot, "is_live", False)),
+                    "sender": sender,                     # "" = the channel's own account
+                    "sender_ok": sender_ok, "note": (entry or {}).get("sender_note")})
+    return {"active": str(accounts.ACTIVE["id"]), "list": out}
+
+
+def bots_info(state):
+    """1.12.0, the Bot accounts page: every bot account and the channels it sends for; every channel and its sender."""
+    reg = accounts.load()
+    if reg is None:
+        return None
+    runtimes = state.get("runtimes") or {}
+    def login_of(c):
+        rt = runtimes.get(c.get("id"))
+        return (rt.state.get("account") if rt else "") or c.get("login", "")
+    chans = [{"id": c["id"], "login": login_of(c), "sender": c.get("sender") or "own", "note": c.get("sender_note")} for c in reg["channels"]]
+    bots = [{"id": b["id"], "login": b.get("login", ""), "channels": [c["id"] for c in chans if c["sender"] == b["id"]]} for b in reg.get("bots", [])]
+    return {"active": str(accounts.ACTIVE["id"]), "channels": chans, "bots": bots}
 
 
 def game_command_clash(games, commands):
@@ -228,7 +298,7 @@ def _is_num(v) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
-def _text(v, what: str, max_len: int = 450, required: bool = True) -> str:
+def _text(v, what: str, max_len: int = 500, required: bool = True) -> str:      # 500 = Twitch's limit for a chat message (1.12.0, was 450)
     if not isinstance(v, str):
         raise ValidationError(f"{what} must be text.")
     v = v.strip()
@@ -351,7 +421,7 @@ def validate(section: str, data, prefix: str = "!"):
                 if low in seen:
                     raise ValidationError(f"Two replies start from {low}. Each one needs a different number.")
                 seen.add(low)
-                tiers.append({"min": low, "response": _text(t.get("response"), "Reply", 450)})
+                tiers.append({"min": low, "response": _text(t.get("response"), "Reply", 500)})
             tiers.sort(key=lambda t: t["min"])
             out[key] = {"enabled": _bool(ev.get("enabled", True), f"{key.replace('_', ' ')} reply"), "tiers": tiers}
         return out
@@ -379,7 +449,7 @@ def validate(section: str, data, prefix: str = "!"):
                 raise ValidationError(f"Messages for '{user}' must be a list.")
             msgs = []
             for m in raw_msgs:
-                m = _text(m, f"Message for '{user}'", 450, required=False)
+                m = _text(m, f"Message for '{user}'", 500, required=False)
                 if m and m not in msgs:
                     msgs.append(m)
             if not msgs:
@@ -677,7 +747,15 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
                 raise web.HTTPForbidden(text="Forbidden")
             if request.content_type != "application/json":
                 raise web.HTTPUnsupportedMediaType(text="Expected JSON")
-        resp = await handler(request)
+        # 1.12.0: the page says which channel it was opened for. If the app switched channel since, refuse (the page
+        # reloads): a save can never land in the wrong channel.
+        want = request.headers.get("X-Channel")
+        if want and request.path.startswith("/api/") and channels_info(state) is not None and want != str(accounts.ACTIVE["id"]):
+            return web.json_response({"error": "switched"}, status=409, headers={"Cache-Control": "no-store"})
+        try:
+            resp = await handler(request)
+        except EmptySaveRefused as e:        # (never an empty list over real data: the page shows why)
+            return web.json_response({"error": str(e)}, status=409, headers={"Cache-Control": "no-store"})
         resp.headers["Cache-Control"] = "no-store"
         return resp
 
@@ -721,6 +799,7 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             "banned": bool(state.get("banned")),                                       # the developer turned the app off here
             "game": bot.game_view() if bot and hasattr(bot, "game_view") else None,
             "game_limits": bot.game_limits() if bot and hasattr(bot, "game_limits") else None,
+            "channels": channels_info(state),          # 1.12.0: every channel, which one is shown, who sends its replies
             # what changed since the page last looked: it reloads the settings / the logs only when these move (1.9.0)
             "rev": f"{getattr(store, 'boot', 0)}:{getattr(store, 'rev', 0)}",
             "logrev": f"{getattr(store, 'boot', 0)}:{getattr(store.activity, 'rev', 0)}",   # All games: rounds used, cooldown left      # the Mini games round in progress (the card's live box)
@@ -736,6 +815,92 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
         if tab not in ("activity", "moderation", "bot"):
             tab = "activity"
         return web.json_response(store.activity.recent(200, tab))      # newest first, saved on disk
+
+    async def bots_get(request):
+        info = bots_info(state)
+        if info is None:
+            return web.json_response({"error": "This app runs a single channel."}, status=400)
+        if request.query.get("status"):        # ask Twitch: can each bot send in each of its channels? (slower)
+            from . import botsender
+            for b in info["bots"]:
+                s = botsender.get(b["id"], b["login"])
+                b["status"] = {cid: await s.status(cid) for cid in b["channels"]}
+        return web.json_response(info)
+
+    async def bots_action(request):
+        """sender (who sends THIS channel's replies) | add (sign in a bot account) | remove | ack (dismiss a warning)."""
+        from . import botsender
+        try:
+            data = await request.json()
+        except (ValueError, UnicodeDecodeError):
+            data = {}
+        data = data if isinstance(data, dict) else {}
+        reg = accounts.load()
+        if reg is None:
+            return web.json_response({"error": "This app runs a single channel."}, status=400)
+        cid, action = str(accounts.ACTIVE["id"]), request.match_info["action"]
+        runtimes = state.get("runtimes") or {}
+        entry = next((c for c in reg["channels"] if c["id"] == cid), None)
+        if action == "sender":
+            sid = str(data.get("sender") or "own")
+            if sid != "own" and sid not in [b["id"] for b in reg["bots"]]:
+                return web.json_response({"error": "Unknown bot account."}, status=400)
+            entry["sender"] = sid
+            entry.pop("sender_note", None)
+            accounts.save(reg)
+            restart_bot(state)
+        elif action == "add":
+            start_login(state, role="bot")
+            state["bot_add_task"] = asyncio.create_task(_register_bot(state))
+        elif action == "remove":
+            bid = str(data.get("id") or "")
+            bot = next((b for b in reg["bots"] if b["id"] == bid), None)
+            if bot is None:
+                return web.json_response({"error": "Unknown bot account."}, status=400)
+            reg["bots"] = [b for b in reg["bots"] if b["id"] != bid]
+            moved = []
+            for c in reg["channels"]:
+                if c.get("sender") == bid:   # never silently stop: these channels reply with their own account, and are warned
+                    c["sender"] = "own"
+                    c["sender_note"] = {"what": "removed", "login": bot.get("login", ""), "at": int(time.time())}
+                    moved.append(c["id"])
+            accounts.save(reg)
+            botsender.forget(bid)
+            accounts.bot_token_file(bid).unlink(missing_ok=True)
+            for m in moved:
+                if m in runtimes:
+                    restart_bot(runtimes[m].state)
+            return web.json_response({"ok": True, "moved": moved, "bots": bots_info(state)})
+        elif action == "ack":
+            if entry is not None:
+                entry.pop("sender_note", None)
+                accounts.save(reg)
+        else:
+            raise web.HTTPNotFound()
+        return web.json_response({"ok": True, "bots": bots_info(state)})
+
+    async def channel_action(request):
+        """1.12.0: switch / add / remove a channel (main.py does the work; the page reloads afterwards)."""
+        app_fns = state.get("app") or {}
+        try:
+            data = await request.json()
+        except (ValueError, UnicodeDecodeError):
+            data = {}
+        action = request.match_info["action"]
+        try:
+            if action == "active":
+                app_fns["switch_channel"](str((data or {}).get("id", "")))
+            elif action == "add":
+                app_fns["add_channel"]()
+            elif action == "remove":
+                await app_fns["remove_channel"](str((data or {}).get("id", "")))
+            else:
+                raise web.HTTPNotFound()
+        except (KeyError, TypeError):
+            return web.json_response({"error": "This app runs a single channel."}, status=400)
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
+        return web.json_response({"ok": True, "channels": channels_info(state)})
 
     async def support_send(request):
         """The Support page's Send (1.11.0): checked here, then sent through the website to the developers' Discord."""
@@ -967,6 +1132,9 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
     app.router.add_get("/api/logs", logs)
     app.router.add_post("/api/connect", connect)
     app.router.add_post("/api/support", support_send)
+    app.router.add_post("/api/channels/{action}", channel_action)
+    app.router.add_get("/api/bots", bots_get)
+    app.router.add_post("/api/bots/{action}", bots_action)
     app.router.add_post("/api/disconnect", disconnect)
     app.router.add_post("/api/reconnect", reconnect)
     app.router.add_post("/api/restart", restart)

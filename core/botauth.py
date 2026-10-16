@@ -33,7 +33,8 @@ MODERATED_URL = "https://api.twitch.tv/helix/moderation/channels"
 
 
 def token_file() -> Path:
-    return Path(auth.AUTH_DIR) / "bot_token.json"      # next to token.json; AUTH_DIR is set by the launcher
+    from . import accounts
+    return accounts.auth_file("bot_token.json")     # 1.12.0: the channel's own (next to token.json before the move)
 
 
 def load_token() -> dict | None:
@@ -44,8 +45,8 @@ def load_token() -> dict | None:
 
 
 def save_token(data: dict) -> None:
-    Path(auth.AUTH_DIR).mkdir(parents=True, exist_ok=True)
-    token_file().write_text(json.dumps(data, indent=2), encoding="utf-8")
+    from . import safefile
+    safefile.write(token_file(), data)          # atomic, keeps the last good copy, creates the channel's folder
 
 
 def clear_token() -> None:

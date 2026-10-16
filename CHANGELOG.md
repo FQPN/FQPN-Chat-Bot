@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.12.0
+   - Several channels in one app: each with its own commands, timers, greetings, moderation, games and settings, all running at once.
+   - Bot accounts: one bot account can send for several channels; see which bot sends for which channel, and whether it can.
+   - Safer data: atomic saves, damaged files never overwritten, a backup before moving your data to its channel folder.
+   - New built-in command: «app?» / «برنامج؟» answers with the app's website.
+   - After an update, Got it shows the new things with a short tour.
+
 ## 1.10.1
 - The website is now fqpnbot.com. Your public command list link is fqpnbot.com/<your channel>, and it moves there by itself.
 - Fixed: after the website address changed, the app never sent the command list to the new address.

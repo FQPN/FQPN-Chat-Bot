@@ -13,7 +13,9 @@ import re
 # running both bots in one chat never makes them answer the same message.
 BUILTIN_NAMES = {"commands": "cmlist", "addcom": "cmadd", "editcom": "cmedit", "delcom": "cmdel",
                  "title": "settitle", "game": "setgame"}
-BUILTIN_KEYS = set(BUILTIN_NAMES)                         # internal names
+# 1.12.0: built-ins that answer a whole message instead of a "!" command. "app": «app?» or «برنامج؟» -> the app's website.
+PHRASE_BUILTINS = {"app"}
+BUILTIN_KEYS = set(BUILTIN_NAMES) | PHRASE_BUILTINS        # internal names (what Commands > Built-in can switch off)
 RESERVED = set(BUILTIN_NAMES.values())                    # typed names, always with "!"
 BY_TYPED = {typed: key for key, typed in BUILTIN_NAMES.items()}
 BUILTIN_PREFIX = "!"
@@ -30,7 +32,7 @@ USERLEVEL_HELP = "everyone, subscriber, vip, moderator, owner"
 # In !cmadd / !cmedit, -a=!setgame or -a=!settitle makes the command a shortcut; the text after the options is the game or title.
 ACTIONS = ("text", "game", "title")
 ACTION_BY_TARGET = {BUILTIN_PREFIX + BUILTIN_NAMES["game"]: "game", BUILTIN_PREFIX + BUILTIN_NAMES["title"]: "title"}
-ACTION_MAX = {"text": 450, "game": 100, "title": 140}
+ACTION_MAX = {"text": 500, "game": 100, "title": 140}       # 500 = Twitch's chat message limit (like Nightbot; 1.12.0, was 450)
 ACTION_LEVEL = 3          # a shortcut changes the channel: only moderators and the broadcaster, whatever its user level says
 
 

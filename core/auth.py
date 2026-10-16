@@ -6,6 +6,8 @@ import time
 import webbrowser
 from pathlib import Path
 
+from . import safefile
+
 import aiohttp
 
 CLIENT_ID = "sk61bb5z9anwbymut5y6svq13q6q5c"  # Public client ID for the bot. No secret is needed for device flow."
@@ -18,24 +20,12 @@ SCOPES = [
     "channel:read:hype_train",
     "moderator:manage:chat_messages",    # Moderation: delete messages that break a filter (1.5.0)
     "moderator:manage:banned_users",     # Moderation: time people out (1.5.0)
-    
     "moderator:read:blocked_terms",    # Logs: your mods' actions (1.6.0)
     "moderator:read:chat_settings",    # Logs: chat mode changes
     "moderator:read:unban_requests",   # Logs: unban requests
     "moderator:read:warnings",         # Logs: warnings
     "moderator:read:moderators",       # Logs: mod changes
     "moderator:read:vips",             # Logs: VIP changes
-
-    "user:read:emotes",                # OBS dock: emote picker (1.9.0)
-    "moderator:read:chatters",         # OBS dock: viewers list
-    "moderator:manage:chat_settings",  # OBS dock: slow / followers / emote-only modes
-    "bits:read",                       # OBS dock: Bits leaderboard
-    "channel:read:goals",              # OBS dock: goals
-    "channel:read:subscriptions",      # OBS dock: subs / gift subs
-    "channel:read:redemptions",        # OBS dock: channel point redemptions
-    "channel:manage:redemptions",      # OBS dock: switch rewards on/off, mark done / refund
-    "moderation:read",                 # OBS dock: list every moderator in Viewers
-    "channel:read:vips",               # OBS dock: list every VIP in Viewers
 ]
 last_problem: str | None = None  # set to "permissions" when a reconnect is needed for new scopes
 
@@ -53,20 +43,27 @@ class AuthError(Exception):
 
 # ---------- local storage ----------
 
+def token_file():
+    """1.12.0: each channel has its own login file (authentication/channels/<id>/token.json) once the data is in one
+    folder per channel; before that (and in tests), the single token.json."""
+    from . import accounts
+    cid = accounts.current_channel()
+    return accounts.channel_token_file(cid) if cid else TOKEN_FILE
+
+
 def load_token() -> dict | None:
-    try:
-        return json.loads(TOKEN_FILE.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError):
-        return None
+    status, data = safefile.read(token_file())
+    if status == "corrupt":
+        safefile.quarantine(token_file())       # kept aside: a damaged login is never just thrown away
+    return data if status == "ok" and isinstance(data, dict) else None
 
 
 def save_token(data: dict) -> None:
-    AUTH_DIR.mkdir(exist_ok=True)
-    TOKEN_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    safefile.write(token_file(), data)
 
 
 def clear_token() -> None:
-    TOKEN_FILE.unlink(missing_ok=True)
+    token_file().unlink(missing_ok=True)
 
 
 def _store_response(resp: dict) -> dict:

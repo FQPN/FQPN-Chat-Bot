@@ -11,6 +11,16 @@ The dashboard is in English and Arabic.
 - **Twitch events:** follows, subscriptions, gift subs, raids, hype trains, bits and watch streaks, each with its own reply
 - **Blocklist, Logs and a Pause switch**
 
+## Several channels (1.12.0)
+- **Add another channel** from the "Managing" button at the top. Each channel has its own commands, timers, greetings,
+  moderation, mini games, logs and settings, and its own bot running at the same time. Language and theme are shared.
+- **Bot accounts** (Connections > Bot accounts): a bot account only sends messages, and one can send for several channels.
+  Choose who sends each channel's replies; the page shows whether the bot can (moderator, login) and how to fix it.
+  Removing a bot account makes its channels reply with their own account (with a warning): replies never just stop.
+- **Your data is safe during the move**: the first start of 1.12.0 makes `data/backups/backup-before-1.12.0-<time>.zip`,
+  then COPIES your files into `data/channels/<your Twitch id>/` and checks every copy. The old files stay where they were.
+  If anything goes wrong, the app keeps using the old files and tries again at the next start.
+
 ## Install (Windows, no Python needed)
 1. Open the website, **https://fqpnbot.com**, and click **Download for Windows** (or open the **Releases** page of this project and download **FQPN-Chat-Bot-Setup-x.y.z.exe**).
 2. Run it and follow the steps. It installs for your user only; no administrator rights are needed.

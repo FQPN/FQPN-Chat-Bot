@@ -35,7 +35,8 @@ MAX_BACKOFF = 60
 # ---------------------------------------------------------------- tokens kept encrypted on this PC
 
 def store_path() -> Path:
-    return Path(auth.AUTH_DIR) / "donations.json"
+    from . import accounts
+    return accounts.auth_file("donations.json")          # 1.12.0: each channel's own (the old single file before the move)
 
 
 def can_encrypt() -> bool:
@@ -78,8 +79,8 @@ def _read_file() -> dict:
 
 
 def _write_file(data: dict) -> None:
-    Path(auth.AUTH_DIR).mkdir(parents=True, exist_ok=True)
     path = store_path()
+    path.parent.mkdir(parents=True, exist_ok=True)      # (the channel's own folder since 1.12.0)
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
     try:
         os.chmod(path, 0o600)

@@ -8,6 +8,7 @@ import logging
 import re
 import sys
 import time
+import types
 from collections import deque
 from datetime import datetime, timezone
 
@@ -16,10 +17,13 @@ import twitchio
 from twitchio import eventsub
 from twitchio.ext import commands
 
-from . import auth, botauth, events, greetings, logsafe, manage, minigames, moderation, notify
+from . import auth, botauth, events, greetings, logsafe, manage, minigames, moderation, notify, publiclist
 from .manage import CommandError
 from .store import Store
 from .stream import StreamSession
+
+# 1.12.0: someone asks which app the bot is (the whole message): «app?» / «برنامج؟» (either question mark, any capitals)
+APP_ASK = re.compile(r"^\s*(app|برنامج)\s*[?؟]\s*$", re.IGNORECASE)
 from .variables import Context, expand, uses_variable
 
 log = logging.getLogger("twitchbot")
@@ -75,12 +79,19 @@ def format_duration(seconds: float) -> str:
 
 
 class TwitchBot(commands.Bot):
-    def __init__(self, account: dict, store: Store | None = None, bot_account: dict | None = None):
+    def __init__(self, account: dict, store: Store | None = None, bot_account: dict | None = None, sender=None):
         # account = your channel account. bot_account = a separate account that writes the replies ("Use a separate bot
         # account" in Settings > Bot); without it the bot talks as your own account, exactly as before.
         self.account = account
         self.bot_account = bot_account or account
         self.separate = bot_account is not None and str(bot_account["user_id"]) != str(account["user_id"])
+        # 1.12.0: a shared bot account sends this channel's replies (core/botsender.py). This bot then reads its own chat
+        # with the channel's login, and hands every reply / announcement / moderation action to that sender.
+        self.sender = sender
+        self.sender_problem = ""          # why the bot account couldn't send (then the channel's own account did): shown in the app
+        self._sender_warned = 0.0
+        # the account whose messages and moderation are the bot's OWN (never answered as commands, never logged twice)
+        self.writer_id = str(sender.bot_id) if sender is not None else str(self.bot_account["user_id"])
         self.store = store or Store()
         self.connected = False
         self.live_fail = 0          # live checks that failed in a row (the watchdog warns when timers may be waiting because of it)
@@ -240,6 +251,11 @@ class TwitchBot(commands.Bot):
         owner = self.create_partialuser(self.owner_id)
 
         m = ANNOUNCE.match(text)
+        if self.sender is not None and await self._send_as_bot(text, m, payload, why, user):
+            return
+        if self.sender is not None:
+            text = (m.group(2).strip() if m else text)[:500]      # the bot account couldn't: the channel's own account sends it
+            m = None
         if m:
             color = (m.group(1) or "primary").lower()
             body = m.group(2).strip()[:500]
@@ -263,9 +279,44 @@ class TwitchBot(commands.Bot):
         self._remember(text, sent)
         self._log_bot(text, payload, why, user)
 
+    async def _send_as_bot(self, text: str, m, payload, why, user) -> bool:
+        """Sends through the shared bot account. False = it couldn't (the caller then sends with the channel's own account:
+        replies never just stop). Twitch refusing one message (a chat mode, ...) is not retried."""
+        from . import botsender
+        try:
+            if m:
+                body = m.group(2).strip()[:500]
+                try:
+                    await self.sender.announce(self.owner_id, body, (m.group(1) or "primary").lower())
+                    self.sender_problem = ""
+                    self._log_bot(body, payload, why, user)
+                    return True
+                except botsender.SendError as e:
+                    if e.code not in ("notmod", "scopes"):
+                        raise
+                    log.warning("The bot account can't post announcements here (%s): sending a normal message", e.code)
+                    text = body
+            text = text[:500]
+            mid = await self.sender.send(self.owner_id, text, reply_to=getattr(payload, "id", None) if payload is not None else None)
+            self.sender_problem = ""
+            self._remember(text, types.SimpleNamespace(id=mid))
+            self._log_bot(text, payload, why, user)
+            return True
+        except botsender.SendError as e:
+            if e.code == "dropped":
+                log.info("Twitch did not post the bot account's message: %s", e.detail)
+                return True
+            self.sender_problem = e.code
+            if time.time() - self._sender_warned > 600:
+                self._sender_warned = time.time()
+                log.warning("The bot account %s couldn't send (%s): the channel's own account sends instead", self.sender.login, e.code)
+                notify.error(self.store.get("prefs"), f"The bot account {self.sender.login} can't send in your chat ({e.code}). "
+                                                       "Your own account sends the replies until it is fixed (Bot accounts page).")
+            return False
+
     async def send_test(self) -> str:
         """The dashboard's "Send test message": says hello from the account the replies come from."""
-        name = self.bot_account["login"]
+        name = self.sender.login if self.sender is not None else self.bot_account["login"]
         await self._send(f"Hello from {name}!")
         self._log_activity("manage", "test message", name)
         return name
@@ -305,7 +356,7 @@ class TwitchBot(commands.Bot):
             return False
         chatter = payload.chatter
         uid = str(getattr(chatter, "id", "") or "")
-        if not uid or uid in (str(self.owner_id), str(self.bot_account["user_id"])):
+        if not uid or uid in (str(self.owner_id), self.writer_id):
             return False
         roles = {k: bool(getattr(chatter, k, False)) for k in ("broadcaster", "moderator", "vip", "subscriber")}
         frags = getattr(payload, "fragments", None) or []
@@ -333,6 +384,10 @@ class TwitchBot(commands.Bot):
 
     async def _mod_api(self, method: str, path: str, params: dict, body=None) -> bool:
         """A Twitch moderation call made by whoever moderates: the separate bot account, or the channel account."""
+        if self.sender is not None:       # 1.12.0: the shared bot account moderates (it must be a moderator here)
+            ok = await self.sender.moderate(method, path, self.owner_id, params, body)
+            self.mod_problem = None if ok else "scopes"
+            return ok
         if self.separate:
             data = botauth.load_token() or {}
             token = data.get("access_token") or self.bot_account.get("access_token")
@@ -571,12 +626,12 @@ class TwitchBot(commands.Bot):
         The bot's own filter actions are already there with more detail, so its own account's actions are skipped."""
         try:
             mid = str(getattr(getattr(payload, "moderator", None), "id", "") or "")
-            if mid and mid == str(self.bot_account["user_id"]) and self.separate:
+            if mid and mid == self.writer_id and (self.separate or self.sender is not None):
                 return
             e = moderation.describe_action(payload)
             if e is None:
                 return
-            if mid == str(self.bot_account["user_id"]) and e["name"].split(":")[0] in ("delete", "timeout") and self._recently_filtered(e["user"]):
+            if mid == self.writer_id and e["name"].split(":")[0] in ("delete", "timeout") and self._recently_filtered(e["user"]):
                 return      # a filter just did this (as the moderating account): already logged with the filter's details
             self.store.activity.add("modaction", e["name"], e["user"], by=e["by"], text=e["text"], shared=e["shared"])
         except Exception:
@@ -725,7 +780,7 @@ class TwitchBot(commands.Bot):
                 except Exception:
                     log.exception("Moderation failed")
             return
-        if self.separate and str(getattr(payload.chatter, "id", "")) == str(self.bot_id):
+        if (self.separate or self.sender is not None) and str(getattr(payload.chatter, "id", "")) == self.writer_id:
             return      # whatever the bot account writes is never treated as a command
         try:
             if await self._moderate(payload):
@@ -771,6 +826,13 @@ class TwitchBot(commands.Bot):
         found = manage.match_command(self.store.get("commands"), text)
         if found:
             await self._custom(payload, found[0], found[1], user, level)
+            return
+        # 1.12.0: «app?» / «برنامج؟» -> the app's website (a built-in; your own command with that name wins)
+        ask = APP_ASK.match(text)
+        if ask and "app" not in (self.store.get("settings").get("disabled_builtins") or []) and not self._on_cooldown("builtin:app", 60):
+            arabic = not ask.group(1).isascii()
+            await self._send(f"🤖 البوت هو FQPN's Chat Bot، حمّله مجانًا من {publiclist.SITE}" if arabic else
+                             f"🤖 This bot is FQPN's Chat Bot. Get it free at {publiclist.SITE}", payload, why="cmd:" + text.strip())
 
     async def _custom(self, payload, owner, rest, user, level) -> None:
         cmd = self.store.get("commands").get(owner)

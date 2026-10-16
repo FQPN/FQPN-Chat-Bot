@@ -34,6 +34,10 @@ def page_url(login: str) -> str:
     return f"{SITE}/{login}" if SITE and login else ""
 
 
+BUILTIN_PUBLIC = (("commands", "everyone"), ("title", "everyone"), ("game", "everyone"), ("app", "everyone"),
+                  ("addcom", "moderator"), ("editcom", "moderator"), ("delcom", "moderator"))
+
+
 def build(commands, settings) -> dict:
     """The data the website gets: switched-on commands that are not hidden, by name, with who can use them."""
     hidden = set((settings or {}).get("public_hidden") or [])
@@ -43,6 +47,15 @@ def build(commands, settings) -> dict:
         if not isinstance(c, dict) or c.get("enabled") is False or name in hidden:
             continue
         out.append({"name": name, "perm": manage.effective_permission(c)})
+    # 1.12.0: the built-in commands that are switched on, marked as built-in (the website shows them in their own group).
+    # Who can use them: everyone can ask (!settitle / !setgame with nothing after it show the title / game), only moderators
+    # change things (!cmadd, !cmedit, !cmdel, and !settitle / !setgame with text).
+    off = set((settings or {}).get("disabled_builtins") or [])
+    for key, perm in BUILTIN_PUBLIC:
+        if key in off:
+            continue
+        names = ["app?", "برنامج؟"] if key == "app" else [manage.BUILTIN_PREFIX + manage.BUILTIN_NAMES[key]]
+        out.extend({"name": n, "perm": perm, "builtin": True} for n in names)
     return {"v": FORMAT, "commands": out[:MAX_COMMANDS]}
 
 
