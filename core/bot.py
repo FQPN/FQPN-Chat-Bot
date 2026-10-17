@@ -23,7 +23,15 @@ from .store import Store
 from .stream import StreamSession
 
 # 1.12.0: someone asks which app the bot is (the whole message): «app?» / «برنامج؟» (either question mark, any capitals)
-APP_ASK = re.compile(r"^\s*(app|برنامج)\s*[?؟]\s*$", re.IGNORECASE)
+APP_ASK = re.compile(r"^\s*(app|برنامج)\s*[?؟？]\s*$", re.IGNORECASE)
+
+
+def clean_chat(text: str) -> str:
+    """The message without invisible characters (1.12.0). Chat tools add some: 7TV / Chatterino put U+E0000 after a message
+    you send twice in a row (so Twitch accepts the duplicate: an unassigned character), and many keyboards put a right-to-left mark (U+200F) before
+    Arabic. Left in, «برنامج؟» or a command typed twice didn't match. Moderation still sees the original message."""
+    import unicodedata
+    return "".join(ch for ch in str(text or "") if unicodedata.category(ch) not in ("Cf", "Cn") and ch not in "\u034f\u2800").strip()
 from .variables import Context, expand, uses_variable
 
 log = logging.getLogger("twitchbot")
@@ -806,7 +814,7 @@ class TwitchBot(commands.Bot):
         except Exception:
             log.exception("Mini game failed")
 
-        text = payload.text.strip()
+        text = clean_chat(payload.text)
         chatter = payload.chatter
         user = chatter.display_name or chatter.name
         level = user_level(chatter)
@@ -830,9 +838,7 @@ class TwitchBot(commands.Bot):
         # 1.12.0: «app?» / «برنامج؟» -> the app's website (a built-in; your own command with that name wins)
         ask = APP_ASK.match(text)
         if ask and "app" not in (self.store.get("settings").get("disabled_builtins") or []) and not self._on_cooldown("builtin:app", 60):
-            arabic = not ask.group(1).isascii()
-            await self._send(f"🤖 البوت هو FQPN's Chat Bot، حمّله مجانًا من {publiclist.SITE}" if arabic else
-                             f"🤖 This bot is FQPN's Chat Bot. Get it free at {publiclist.SITE}", payload, why="cmd:" + text.strip())
+            await self._send(f"Chatbot app: {publiclist.SITE}", payload, why="cmd:" + text)
 
     async def _custom(self, payload, owner, rest, user, level) -> None:
         cmd = self.store.get("commands").get(owner)

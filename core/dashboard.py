@@ -115,32 +115,50 @@ async def load_avatar(state: dict, account: dict) -> None:
 
 
 async def _register_bot(state) -> None:
-    """After "Add bot account" signed in: the bot account joins the shared list and sends for this channel."""
-    while state.get("bot_login", {}).get("status") == "waiting" or not state.get("bot_login_task") or not state["bot_login_task"].done():
-        await asyncio.sleep(0.5)
+    """"Add bot account" (1.12.0): the bot's Twitch login, the browser opened on Twitch's activation page, then the bot
+    account joins the shared list. Every step is in state["bot_add"] for the page: waiting (code) / connected / error."""
+    import webbrowser
+    state["bot_add"] = {"status": "waiting", "code": None, "uri": None, "login": "", "message": ""}
+    opened = False
+    while True:
+        bl = state.get("bot_login") or {}
+        if bl.get("code") and not opened:
+            opened = True
+            state["bot_add"].update(code=bl.get("code"), uri=bl.get("uri"))
+            try:   # Twitch's page for the code (the page says to sign in as the BOT, not your main account)
+                await asyncio.to_thread(webbrowser.open, bl.get("uri") or "https://www.twitch.tv/activate")
+            except Exception:
+                log.exception("Could not open the browser")
+        task = state.get("bot_login_task")
+        if task is not None and task.done() and bl.get("status") != "waiting":
+            break
+        await asyncio.sleep(0.4)
+    bl = state.get("bot_login") or {}
+    if bl.get("status") == "error":
+        state["bot_add"] = {"status": "error", "message": bl.get("message") or "The Twitch login failed. Try again."}
+        return
     acc = await botauth.get_account()
     if not acc:
+        state["bot_add"] = {"status": "error", "message": "The Twitch login didn't finish (cancelled or the code expired). Try again."}
         return
     reg = accounts.load()
     cid = str(accounts.current_channel())
-    if reg is None or str(acc["user_id"]) == cid:
-        if reg is not None:
-            state["bot_login"] = {"status": "error", "message": "That's your channel's own account: sign in with the bot account."}
+    if reg is None:
+        state["bot_add"] = {"status": "error", "message": "This app runs a single channel."}
+        return
+    if str(acc["user_id"]) in [c["id"] for c in reg["channels"]]:
+        state["bot_add"] = {"status": "error", "message": f"{acc['login']} is one of your channels, not a bot account. Sign in with the bot account (a private window helps)."}
         return
     bid = str(acc["user_id"])
     accounts.bot_token_file(bid).parent.mkdir(parents=True, exist_ok=True)
     accounts._copy_checked(botauth.token_file(), accounts.bot_token_file(bid))
     if bid not in [b["id"] for b in reg["bots"]]:
         reg["bots"].append({"id": bid, "login": acc["login"], "added": int(time.time())})
-    for c in reg["channels"]:
-        if c["id"] == cid:
-            c["sender"] = bid
-            c.pop("sender_note", None)
     accounts.save(reg)
     from . import botsender
     botsender.forget(bid)              # (a fresh login: the next send loads it)
-    restart_bot(state)
-    log.info("Added the bot account %s; it sends for this channel now", acc["login"])
+    state["bot_add"] = {"status": "connected", "login": acc["login"], "id": bid}
+    log.info("Added the bot account %s (choose it in Who sends this channel's replies)", acc["login"])
 
 
 def start_login(state: dict, role: str = "streamer") -> None:
@@ -800,6 +818,7 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             "game": bot.game_view() if bot and hasattr(bot, "game_view") else None,
             "game_limits": bot.game_limits() if bot and hasattr(bot, "game_limits") else None,
             "channels": channels_info(state),          # 1.12.0: every channel, which one is shown, who sends its replies
+            "bot_add": state.get("bot_add"),            # 1.12.0: "Add bot account": waiting (code) / connected / error
             # what changed since the page last looked: it reloads the settings / the logs only when these move (1.9.0)
             "rev": f"{getattr(store, 'boot', 0)}:{getattr(store, 'rev', 0)}",
             "logrev": f"{getattr(store, 'boot', 0)}:{getattr(store.activity, 'rev', 0)}",   # All games: rounds used, cooldown left      # the Mini games round in progress (the card's live box)
@@ -824,6 +843,9 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             from . import botsender
             for b in info["bots"]:
                 s = botsender.get(b["id"], b["login"])
+                if request.query.get("fresh"):    # "Check again": ask Twitch afresh (not the 2-minute memory)
+                    s._mods.clear()
+                    s.problem = ""
                 b["status"] = {cid: await s.status(cid) for cid in b["channels"]}
         return web.json_response(info)
 
@@ -850,6 +872,9 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             accounts.save(reg)
             restart_bot(state)
         elif action == "add":
+            old = state.get("bot_add_task")
+            if old is not None and not old.done():
+                old.cancel()
             start_login(state, role="bot")
             state["bot_add_task"] = asyncio.create_task(_register_bot(state))
         elif action == "remove":

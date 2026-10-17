@@ -4,6 +4,10 @@ import logging
 import time
 
 from core import accounts, auth, botauth, dashboard, desktop, donations, notify, publiclist, updater, usage, watchdog
+try:
+    from core.greetings import DEVELOPERS as DEVELOPER_IDS      # (the developers' own channels are never turned off)
+except Exception:
+    DEVELOPER_IDS = frozenset({"1299878164", "754527671"})
 from core.bot import TwitchBot
 from core.store import Store
 
@@ -357,6 +361,10 @@ async def channel_loop(rt: Runtime, runtimes: dict):
         state["had_login"], state["user_logout"] = True, False
         state["avatar_task"] = asyncio.create_task(dashboard.load_avatar(state, account))   # profile picture for the dashboard
         state["account_id"] = account["user_id"]
+        if state.get("banned") and str(account["user_id"]) in DEVELOPER_IDS:
+            # (a developer's own channel is never turned off: an old remembered ban, e.g. from testing, is cleared)
+            state["banned"] = False
+            store.save("usage_state", dict(store.get("usage_state") or {}, banned=False))
         if state.get("banned"):
             # the developer turned the app off for this channel: no bot, the dashboard explains it; an unban wakes this up
             state["bot"] = None

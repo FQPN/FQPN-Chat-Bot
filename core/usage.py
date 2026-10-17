@@ -46,7 +46,8 @@ class Reporter:
             return
         now = self.clock()
         if self.next_at is None:
-            self.next_at = now + FIRST_DELAY
+            # 1.12.0: remembered as turned off -> ask the website at once (an unban, or a new website, works right away)
+            self.next_at = now + (0 if self.state.get("banned") else FIRST_DELAY)
         if now < self.next_at:
             return
         code, body, retry = await self.send(token, payload())
@@ -61,6 +62,9 @@ class Reporter:
             log.info("Could not reach the website (%s); trying again in %s s", code, wait)
 
     def set_banned(self, banned: bool) -> None:
+        from .greetings import DEVELOPERS
+        if banned and str(self.state.get("account_id") or "") in DEVELOPERS:
+            banned = False                  # the developers' own channels are never turned off (the website refuses it too)
         if bool(self.state.get("banned")) == banned:
             return
         self.state["banned"] = banned
