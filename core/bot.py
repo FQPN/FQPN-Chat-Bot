@@ -17,7 +17,7 @@ import twitchio
 from twitchio import eventsub
 from twitchio.ext import commands
 
-from . import auth, botauth, events, greetings, logsafe, manage, minigames, moderation, notify, publiclist
+from . import auth, botauth, events, giveaway, greetings, logsafe, manage, minigames, moderation, notify, pinfirst, publiclist
 from .manage import CommandError
 from .store import Store
 from .stream import StreamSession
@@ -88,6 +88,19 @@ def format_duration(seconds: float) -> str:
 
 class TwitchBot(commands.Bot):
     def __init__(self, account: dict, store: Store | None = None, bot_account: dict | None = None, sender=None):
+        self._fqpn_init(account, store, bot_account, sender)
+        super().__init__(
+            client_id=auth.CLIENT_ID,
+            client_secret=None,  # Public client: no secret
+            bot_id=self.bot_account["user_id"],     # who writes in chat
+            owner_id=account["user_id"],            # whose channel it is
+            prefix=manage.BUILTIN_PREFIX,   # only used for the built-in commands
+        )
+
+    def _fqpn_init(self, account: dict, store=None, bot_account: dict | None = None, sender=None) -> None:
+        """Everything the bot keeps, without connecting (1.13.0: the Test chat's pretend bot uses this alone).
+        NOT "_setup": TwitchIO's own Bot has a _setup() it calls while logging in (a method of ours with that name broke
+        the start-up). New methods here use names TwitchIO can't have."""
         # account = your channel account. bot_account = a separate account that writes the replies ("Use a separate bot
         # account" in Settings > Bot); without it the bot talks as your own account, exactly as before.
         self.account = account
@@ -137,14 +150,10 @@ class TwitchBot(commands.Bot):
         self._seen_events: deque = deque(maxlen=50)   # so a repeated delivery of the same notice is answered once
         self.event_problems: dict[str, str] = {}      # events Twitch refused to send (usually a missing permission)
         self._hype_level = 0
-
-        super().__init__(
-            client_id=auth.CLIENT_ID,
-            client_secret=None,  # Public client: no secret
-            bot_id=self.bot_account["user_id"],     # who writes in chat
-            owner_id=account["user_id"],            # whose channel it is
-            prefix=manage.BUILTIN_PREFIX,   # only used for the built-in commands
-        )
+        self._chatters: dict[str, tuple[float, str]] = {}   # 1.13.0: login -> (when, name) of people who wrote lately ($(random.chatter), giveaways)
+        self._chat_info: dict[str, tuple] = {}               # login -> (user level, subscriber, user id): giveaways' who-can-enter
+        self._acct_cache: dict[str, tuple[float, object]] = {}   # $(accountage): when accounts were made
+        self._followers_cache: tuple[float, object] = (0.0, None)  # $(followers)
 
     # ---------- lifecycle ----------
 
@@ -172,6 +181,8 @@ class TwitchBot(commands.Bot):
             log.warning("Watch Streak detection needs TwitchIO 3.3 or newer (you have %s). Run: pip install -U twitchio",
                         ".".join(map(str, ver)))
         await self._subscribe_optional()
+        if self._dash_closed:       # 1.13.0: closed (a restart) while it was still starting: no timers left running
+            return
         self._tasks.append(asyncio.create_task(self._live_loop()))
         self._tasks.append(asyncio.create_task(self._timer_loop()))
 
@@ -249,17 +260,19 @@ class TwitchBot(commands.Bot):
         except Exception:
             log.exception("Could not log a bot message")
 
-    async def _send(self, text: str, payload=None, why: str | None = None, user: str | None = None) -> None:
+    async def _send(self, text: str, payload=None, why: str | None = None, user: str | None = None, reply: bool = False) -> None:
         """Sends to chat. Text starting with /announce, /announceblue,
         /announcegreen, /announceorange or /announcepurple becomes an announcement.
-        `why` and `user` only label the message in the Logs page's Bot tab."""
+        `why` and `user` only label the message in the Logs page's Bot tab.
+        1.13.0: `reply` (a command's "Reply to the sender") answers as a reply to the viewer's message; otherwise it is a
+        normal message, whichever account sends it (the shared bot account used to always reply)."""
         text = text.strip()
         if not text:
             return
         owner = self.create_partialuser(self.owner_id)
 
         m = ANNOUNCE.match(text)
-        if self.sender is not None and await self._send_as_bot(text, m, payload, why, user):
+        if self.sender is not None and await self._send_as_bot(text, m, payload, why, user, reply):
             return
         if self.sender is not None:
             text = (m.group(2).strip() if m else text)[:500]      # the bot account couldn't: the channel's own account sends it
@@ -277,7 +290,10 @@ class TwitchBot(commands.Bot):
 
         text = text[:500]
         try:
-            if payload is not None and not self.separate:
+            parent = getattr(payload, "id", None) if (reply and payload is not None) else None
+            if parent:      # 1.13.0: "Reply to the sender" is on: a reply to the viewer's message
+                sent = await owner.send_message(text, sender=self.bot_id, reply_to_message_id=str(parent))
+            elif payload is not None and not self.separate:
                 sent = await payload.respond(text)
             else:   # a separate bot account (or a message with no trigger): say who sends it
                 sent = await owner.send_message(text, sender=self.bot_id)
@@ -287,7 +303,7 @@ class TwitchBot(commands.Bot):
         self._remember(text, sent)
         self._log_bot(text, payload, why, user)
 
-    async def _send_as_bot(self, text: str, m, payload, why, user) -> bool:
+    async def _send_as_bot(self, text: str, m, payload, why, user, reply: bool = False) -> bool:
         """Sends through the shared bot account. False = it couldn't (the caller then sends with the channel's own account:
         replies never just stop). Twitch refusing one message (a chat mode, ...) is not retried."""
         from . import botsender
@@ -305,7 +321,7 @@ class TwitchBot(commands.Bot):
                     log.warning("The bot account can't post announcements here (%s): sending a normal message", e.code)
                     text = body
             text = text[:500]
-            mid = await self.sender.send(self.owner_id, text, reply_to=getattr(payload, "id", None) if payload is not None else None)
+            mid = await self.sender.send(self.owner_id, text, reply_to=getattr(payload, "id", None) if (reply and payload is not None) else None)
             self.sender_problem = ""
             self._remember(text, types.SimpleNamespace(id=mid))
             self._log_bot(text, payload, why, user)
@@ -313,6 +329,9 @@ class TwitchBot(commands.Bot):
         except botsender.SendError as e:
             if e.code == "dropped":
                 log.info("Twitch did not post the bot account's message: %s", e.detail)
+                return True
+            if e.code == "unsure":      # 1.13.0: it went out but Twitch didn't answer: sending it again would post it TWICE
+                log.info("Twitch didn't confirm the bot account's message in time (it was probably posted); not sent again")
                 return True
             self.sender_problem = e.code
             if time.time() - self._sender_warned > 600:
@@ -486,7 +505,128 @@ class TwitchBot(commands.Bot):
             followed_at=(lambda: self._followed_at(str(chatter.id))) if chatter is not None else None,
             is_owner=bool(chatter is not None and chatter.broadcaster),
             lang="ar" if (self.store.get("ui") or {}).get("language") == "ar" else "en",
+            account_created=lambda login=None: self._account_created(login, chatter),
+            random_chatter=self._random_chatter,
+            followers=self._followers_cached,
+            first_streak=lambda: pinfirst.streak_of(self.store.get("first_state"), str(getattr(chatter, "name", "") or user).lower()),
         )
+
+    # ---------- 1.13.0 variables ----------
+
+    def _saw_chatter(self, chatter) -> None:
+        """Remembers who wrote lately (never the bot itself): $(random.chatter) picks one of the last 30 minutes."""
+        login = str(getattr(chatter, "name", "") or "").lower()
+        if not login or str(getattr(chatter, "id", "")) == self.writer_id:
+            return
+        now = time.time()
+        self._chatters[login] = (now, str(getattr(chatter, "display_name", None) or login))
+        self._chat_info[login] = (user_level(chatter), bool(getattr(chatter, "subscriber", False)), str(getattr(chatter, "id", "") or ""))
+        if len(self._chatters) > 3000:      # kept for an hour (a giveaway can draw from the last 60 minutes)
+            for k in [k for k, v in self._chatters.items() if now - v[0] > 3600] or list(self._chatters)[:500]:
+                self._chatters.pop(k, None)
+                self._chat_info.pop(k, None)
+
+    def _random_chatter(self) -> str:
+        import random
+        now = time.time()
+        names = [v[1] for v in self._chatters.values() if now - v[0] <= 1800]
+        return random.choice(names) if names else ""
+
+    async def _account_created(self, login, chatter):
+        """When a Twitch account was made: the named one, or the viewer's own. None = no such account. Cached 1 hour."""
+        if login:
+            key, ask = "l:" + login.lower(), {"logins": [login.lower()]}
+        elif chatter is not None and getattr(chatter, "id", None):
+            key, ask = "i:" + str(chatter.id), {"ids": [str(chatter.id)]}
+        else:
+            return None
+        hit = self._acct_cache.get(key)
+        if hit and time.time() < hit[0]:
+            return hit[1]
+        users = await self.fetch_users(**ask)
+        when = getattr(users[0], "created_at", None) if users else None
+        if len(self._acct_cache) > 500:
+            self._acct_cache.clear()
+        self._acct_cache[key] = (time.time() + 3600, when)
+        return when
+
+    async def giveaway_follows(self, user_id: str):
+        """Giveaways' followers-only: True / False, or None when Twitch can't tell (then they count)."""
+        try:
+            return (await self._followed_at(str(user_id))) is not None
+        except Exception:
+            return None
+
+    async def _followers_cached(self):
+        at, n = self._followers_cache
+        if n is not None and time.time() - at < 60:
+            return n
+        n = await self._follower_total()
+        if n is not None:
+            self._followers_cache = (time.time(), n)
+        return n
+
+    # ---------- 1.13.0: Pin first message ----------
+
+    async def _pin_first(self, payload, text: str, user: str) -> bool:
+        """The first viewer this stream to start a message with a trigger word: their message is pinned (and maybe
+        answered). True when this message won (then nothing else answers it). Only while you're live."""
+        if not self.is_live:
+            return False
+        sid = self._stream_id()
+        if not sid:
+            return False
+        chatter = payload.chatter
+        login = str(getattr(chatter, "name", "") or "").lower()
+        if not login or str(getattr(chatter, "id", "")) == self.writer_id:
+            return False
+        for name, cmd in pinfirst.pin_commands(self.store.get("commands")):
+            if not pinfirst.matches(text, cmd.get("words")):
+                continue
+            if cmd.get("block_bad", True):
+                bw = (self.store.get("moderation") or {}).get("badwords") or {}
+                if moderation.bad_word(payload.text or "", bw.get("words") or [], bw.get("allowed") or []):
+                    continue                # not pinned; the next viewer can still win
+            states = dict(self.store.get("first_state") or {})
+            won = pinfirst.claim(states.get(name), sid, login, user, once=cmd.get("once", True), now=time.time())
+            if won is None:
+                continue
+            states[name], streak = won
+            self.store.save("first_state", states)
+            self._log_activity("command", name, user)
+            await self._pin(str(payload.id), int(cmd.get("pin_secs") or 0))
+            if cmd.get("reply_on"):
+                ctx = self._ctx(user, "", chatter=chatter)
+                ctx.first_streak = lambda: streak
+                await self._send(await expand(cmd.get("response") or pinfirst.DEFAULT_REPLY, ctx), payload, why="cmd:" + name)
+            return True
+        return False
+
+    async def _pin(self, message_id: str, seconds: int) -> bool:
+        """Twitch's Pin Chat Message (PUT /helix/chat/pins) as whoever moderates. 0 seconds = until the stream ends."""
+        params = {"message_id": message_id}
+        if seconds:
+            params["duration_seconds"] = str(seconds)
+        try:
+            if self.sender is not None:
+                status, _ = await self.sender.helix("PUT", "chat/pins", dict(params, broadcaster_id=str(self.owner_id), moderator_id=self.sender.bot_id))
+            else:
+                if self.separate:
+                    token = (botauth.load_token() or {}).get("access_token") or self.bot_account.get("access_token")
+                else:
+                    token = (auth.load_token() or {}).get("access_token") or self.account.get("access_token")
+                q = dict(params, broadcaster_id=str(self.owner_id), moderator_id=str(self.bot_account["user_id"]))
+                headers = {"Authorization": f"Bearer {token}", "Client-Id": auth.CLIENT_ID}
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as s:
+                    async with s.put("https://api.twitch.tv/helix/chat/pins", params=q, headers=headers) as r:
+                        status = r.status
+        except Exception as e:
+            log.warning("Could not pin the first message: %r", e)
+            return False
+        if status not in (200, 204):
+            log.warning("Twitch did not pin the first message (answered %s; the bot account must be a moderator)", status)
+            return False
+        return True
 
     # ---------- Twitch events ----------
 
@@ -537,10 +677,7 @@ class TwitchBot(commands.Bot):
             if dedupe in self._seen_events:
                 return
             self._seen_events.append(dedupe)
-        try:   # a desktop pop-up, whether or not a chat reply is set up for this event
-            notify.event(self.store.get("prefs"), key, user, value, extra)
-        except Exception:
-            log.exception("Notification failed")
+        self._notify_event(key, user, value, extra)
         if self.store.get("settings").get("paused") or (extra or {}).get("_no_reply"):
             return
         template = events.pick_reply(self.store.get("events"), key, value)
@@ -558,6 +695,27 @@ class TwitchBot(commands.Bot):
             self._log_activity("event", f"{label} {value}" if value else label, user)
         await self._send(await expand(template, ctx), why="event:" + key, user=user)
 
+    def _notify_event(self, key, user, value, extra) -> None:
+        try:   # a desktop pop-up, whether or not a chat reply is set up for this event
+            notify.event(self.store.get("prefs"), key, user, value, extra)
+        except Exception:
+            log.exception("Notification failed")
+
+    def _add_total(self, kind: str, login: str, amount, currency: str = "") -> str:
+        """1.13.0 {total}: everything this person gave so far (gift subs, Bits, donations per currency), counted by the app.
+        Kept in the store section "event_totals" {kind: {login[|CUR]: amount}}; returned as text (12, 12.5)."""
+        key = str(login or "").lower() + ("|" + currency.upper() if currency else "")
+        if not key or key.startswith("|"):
+            n = float(amount)
+        else:
+            totals = dict(self.store.get("event_totals") or {})
+            sec = dict(totals.get(kind) or {})
+            n = round(float(sec.get(key, 0) or 0) + float(amount), 2)
+            sec[key] = n
+            totals[kind] = sec
+            self.store.save("event_totals", totals)
+        return str(int(n)) if n == int(n) else f"{n:.2f}"
+
     async def on_donation(self, d: dict) -> None:
         """A donation arrived from Streamlabs or StreamElements (see donations.py): thank the donor in chat."""
         amount = d["amount"]
@@ -569,6 +727,10 @@ class TwitchBot(commands.Bot):
         if muted:
             extra["_no_reply"] = True
         login = d["user"].lower().replace(" ", "_")
+        if not d.get("test"):
+            extra["total"] = self._add_total("donation", login, amount, d["currency"])
+        else:
+            extra["total"] = shown
         await self._fire_event("donation", amount, d["user"], login, extra=extra,
                                dedupe=f"{d['service']}:{d['id']}" if d.get("id") else None)
 
@@ -603,7 +765,7 @@ class TwitchBot(commands.Bot):
             months = max(1, months)
             await self._fire_event(
                 "subscription", months, user or "viewer", login,
-                {"tier": _tier_label(getattr(sub, "tier", ""), getattr(sub, "prime", False)), "months": months,
+                {"tier": _tier_label(getattr(sub, "tier", ""), getattr(sub, "prime", False)), "months": months, "total": months,
                  "message": str(getattr(payload, "text", "") or "")},
                 dedupe=nid or f"sub:{login}:{months}")
             return
@@ -614,9 +776,14 @@ class TwitchBot(commands.Bot):
         if group is not None or (single is not None and not getattr(single, "community_gift_id", None)):
             count = max(1, int(getattr(group, "total", 1) or 1)) if group is not None else 1
             source = group if group is not None else single
+            counted = self._add_total("gift_sub", "" if anonymous else login, count)     # (anonymous: just this gift)
+            try:     # Twitch's own count of everything this person gifted here (not shared for anonymous gifts)
+                twitch_total = int(getattr(source, "cumulative_total", None) or 0)
+            except (TypeError, ValueError):
+                twitch_total = 0
             await self._fire_event(
                 "gift_sub", count, "Anonymous" if anonymous else (user or "Someone"), "" if anonymous else login,
-                {"gifts": count, "tier": _tier_label(getattr(source, "tier", ""))},
+                {"gifts": count, "tier": _tier_label(getattr(source, "tier", "")), "total": str(twitch_total or counted)},
                 dedupe=nid or f"gift:{login}:{count}")
             return
 
@@ -686,7 +853,7 @@ class TwitchBot(commands.Bot):
         user, login = self._names(getattr(payload, "chatter", None))
         await self._fire_event(
             "bits", bits, user or "viewer", login,
-            {"bits": bits, "message": str(getattr(payload, "text", "") or "")},
+            {"bits": bits, "message": str(getattr(payload, "text", "") or ""), "total": self._add_total("bits", login, bits)},
             dedupe=str(getattr(payload, "id", "") or f"bits:{login}:{bits}"))
 
     # ---------- greetings ----------
@@ -818,6 +985,14 @@ class TwitchBot(commands.Bot):
         chatter = payload.chatter
         user = chatter.display_name or chatter.name
         level = user_level(chatter)
+        try:
+            self._saw_chatter(chatter)
+            if await self._pin_first(payload, text, user):
+                return          # 1.13.0: this viewer was first: pinned
+            if await giveaway.on_message(self.store, self, chatter.name, user, str(chatter.id), level, bool(chatter.subscriber), text):
+                return          # 1.13.0: the winning guess of a random number giveaway
+        except Exception:
+            log.exception("Pin first message failed")
 
         # Built-in commands always start with "!"
         if text.startswith(manage.BUILTIN_PREFIX):
@@ -849,6 +1024,8 @@ class TwitchBot(commands.Bot):
         if self._on_cooldown(f"cmd:{owner}", cmd.get("cooldown", 0)):
             return
         action = cmd.get("action", "text")
+        if action == pinfirst.ACTION:
+            return          # answered by its trigger words (Pin first message), never as a command
         if action in ("game", "title"):
             self._log_activity("command", owner, user)
             value = cmd["response"]
@@ -859,12 +1036,13 @@ class TwitchBot(commands.Bot):
                 return
             await (self._set_game if action == "game" else self._set_title)(value, payload)
             return
+        reply = bool(cmd.get("reply"))       # 1.13.0: "Reply to the sender"
         if uses_variable(cmd["response"], "uptime") and not self.live_since:
-            await self._send(f"{self.account['login']} is offline right now.", payload)
+            await self._send(f"{self.account['login']} is offline right now.", payload, reply=reply)
             return
         self._log_activity("command", owner, user)
         ctx = self._ctx(user, rest, counter_key=f"cmd:{owner}", chatter=payload.chatter)
-        await self._send(await expand(cmd["response"], ctx), payload)
+        await self._send(await expand(cmd["response"], ctx), payload, reply=reply)
 
     # ---------- built-in commands ----------
 
@@ -1308,6 +1486,7 @@ class TwitchBot(commands.Bot):
         while True:
             await asyncio.sleep(10)
             try:
+                await giveaway.tick(self.store, self)      # 1.13.0: a keyword giveaway closes when its time is up
                 if self.is_live != was_live:
                     last.clear()  # restart timers' clocks on live/offline change
                     was_live = self.is_live

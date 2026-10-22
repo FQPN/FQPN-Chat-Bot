@@ -45,6 +45,11 @@ DEFAULTS = {
         "resume_within_minutes": 15,   # back within this long after a drop = the same stream continues
     },
     "usage_state": {"banned": False},       # kept by the app, not a setting: did the developer turn the app off for this channel
+    "giveaway": {},                         # 1.13.0: the current giveaway and its settings (core/giveaway.py)
+    "giveaway_winners": [],                 # 1.13.0: the last 20 giveaway winners
+    "event_totals": {},                     # 1.13.0: {total} in event replies: {"gift_sub"|"bits"|"donation": {login[|CUR]: amount}}
+    "first_state": {},                      # 1.13.0: Pin first message: who was first this stream, and their streak (per command)
+    "editor_state": {"active": False},      # 1.13.0: the editor link (url, when it ends, how many edits applied); never the password
     "publist_state": {                # kept by the app, not a setting: what was last sent to the public list website
         "uploaded": False, "digest": "", "login": "", "at": None,
     },
@@ -85,6 +90,8 @@ DEFAULTS = {
         "commands_url": "",
         "disabled_builtins": [],   # built-in commands switched off in Commands > Built-in
         "separate_bot": False,     # the bot talks from its own Twitch account (Settings > Bot > Chat account)
+        "public_examples": True,      # 1.13.0: the public page shows a short example of each command's reply
+        "public_leaderboard": True,   # 1.13.0: the games leaderboard on the public page too (viewers' names + wins)
         "public_list": True,       # keep a public copy of the command list on the website (Commands > Public list). On for NEW
                                    # installs since 1.10.0; existing settings files keep their value (missing = off)
         "public_hidden": [],       # command names left off the public list (kept here so the commands themselves don't change)
@@ -109,37 +116,45 @@ DEFAULTS = {
         "reduceMotion": False,
         "tourDone": False,         # the guided tour has been seen (finished or skipped), so it does not start by itself again
         "gsDone": False,           # the "Getting started" checklist reached 5 of 5: it stays hidden from then on
+        "newSeen": [],             # 1.13.0: the "New" tags already looked at (they don't show again)
     },
     "events": {   # automatic replies to Twitch events; each has tiers picked by the event's number
         "watch_streak": {"enabled": True, "tiers": [
             {"min": 1, "response": "HUGEEEEEE STREAKKKKKKK! {streak}-STREAM!"}]},
         "follow": {"enabled": False, "tiers": [
             {"min": 0, "response": "Welcome {user}! \u2764\ufe0f"}]},
-        "subscription": {"enabled": False, "tiers": [
-            {"min": 1, "response": "THANK YOU FOR THE SUB, {user}! \U0001f525"}]},
-        "gift_sub": {"enabled": False, "tiers": [
-            {"min": 1, "response": "{user} gifted a sub! THANK YOU! \u2764\ufe0f"},
-            {"min": 5, "response": "{gifts} SUBS?! THANK YOU {user}! \U0001f525"},
-            {"min": 10, "response": "{gifts} GIFTED SUBS FROM {user}!!! \U0001f525\U0001f525"},
-            {"min": 25, "response": "{user} JUST GIFTED {gifts} SUBS!!! ABSOLUTE LEGEND! \U0001f6a8\U0001f525"}]},
+        "subscription": {"enabled": False, "tiers": [      # 1.13.0: {total} = months subscribed
+            {"min": 1, "response": "THANK YOU FOR THE SUB, {user}! \U0001f525"},
+            {"min": 2, "response": "{user} IS BACK! THANK YOU FOR THE RESUB! \U0001f525 (( {total} months subbed ))"},
+            {"min": 12, "response": "{total} MONTHS?! {user}, OVER A YEAR OF SUPPORT. THANK YOU! \U0001f6a8\U0001f525"}]},
+        "gift_sub": {"enabled": False, "tiers": [          # {gifts} = this time, {total} = everything they gifted here
+            {"min": 1, "response": "{user} gifted a sub! THANK YOU! \u2764\ufe0f (( {total} gifted in total ))"},
+            {"min": 5, "response": "{gifts} SUBS?! THANK YOU {user}! \U0001f525 (( has gifted {total} subs ))"},
+            {"min": 10, "response": "{gifts} GIFTED SUBS FROM {user}!!! \U0001f525\U0001f525 (( {total} subs gifted so far ))"},
+            {"min": 25, "response": "{user} JUST GIFTED {gifts} SUBS!!! ABSOLUTE LEGEND! \U0001f6a8\U0001f525 (( {total} gifted in total ))"}]},
         "raid": {"enabled": False, "tiers": [
             {"min": 1, "response": "HUGE RAID! Welcome {raider} and {viewers} raiders! \U0001f525"}]},
         "hype_train": {"enabled": False, "tiers": [
             {"min": 1, "response": "HYPE TRAIN LEVEL {level}! \U0001f682"},
             {"min": 5, "response": "LEVEL {level}?! CHAT IS INSANE \U0001f525"}]},
-        "bits": {"enabled": False, "tiers": [
-            {"min": 1, "response": "Thanks for the Bits, {user}! \u2764\ufe0f"},
-            {"min": 100, "response": "{user} JUST DROPPED {bits} BITS! \U0001f525"},
-            {"min": 500, "response": "{user} WITH {bits} BITS!!! \U0001f6a8"},
-            {"min": 1000, "response": "{user} JUST DROPPED {bits} BITS!!! ABSOLUTE MADNESS! \U0001f525\U0001f525\U0001f525"}]},
-        "donation": {"enabled": False, "tiers": [      # replies by amount (in the donation's own currency)
-            {"min": 0, "response": "Thank you {user} for the {amount} {currency} donation! \u2764\ufe0f"},
-            {"min": 50, "response": "WOW! {user} donated {amount} {currency}! You are amazing! \U0001f525"}]},
+        "bits": {"enabled": False, "tiers": [              # {total} = all the Bits this person cheered (counted by the app)
+            {"min": 1, "response": "Thanks for the {bits} Bits, {user}! \u2764\ufe0f (( {total} Bits in total ))"},
+            {"min": 100, "response": "{user} JUST DROPPED {bits} BITS! \U0001f525 (( {total} Bits so far ))"},
+            {"min": 500, "response": "{user} WITH {bits} BITS!!! \U0001f6a8 (( {total} Bits in total ))"},
+            {"min": 1000, "response": "{bits} BITS?! {user}, THAT'S ABSOLUTE MADNESS! \U0001f525\U0001f525\U0001f525 (( {total} Bits so far ))"}]},
+        "donation": {"enabled": False, "tiers": [      # replies by amount (in the donation's own currency); {total} = all they gave in it
+            {"min": 0, "response": "Thank you {user} for the {amount} {currency} donation! \u2764\ufe0f (( {total} {currency} in total ))"},
+            {"min": 50, "response": "WOW! {user} donated {amount} {currency}! You are amazing! \U0001f525 (( {total} {currency} in total ))"}]},
     },
     "greetings": {"enabled": True, "users": []},   # people to greet, each with one or more messages
     "greeted": {"session": "", "users": [], "last": {}},   # who was already greeted during the current stream
     "counters": {},
 }
+
+
+# 1.13.0: the event replies as they came before {total} existed. A reply list still EXACTLY like this was never touched by
+# the user, so it gets the new texts; anything the user changed stays as they wrote it.
+OLD_EVENT_TEXTS = {"subscription": [{"min": 1, "response": "THANK YOU FOR THE SUB, {user}! 🔥"}], "gift_sub": [{"min": 1, "response": "{user} gifted a sub! THANK YOU! ❤️"}, {"min": 5, "response": "{gifts} SUBS?! THANK YOU {user}! 🔥"}, {"min": 10, "response": "{gifts} GIFTED SUBS FROM {user}!!! 🔥🔥"}, {"min": 25, "response": "{user} JUST GIFTED {gifts} SUBS!!! ABSOLUTE LEGEND! 🚨🔥"}], "bits": [{"min": 1, "response": "Thanks for the Bits, {user}! ❤️"}, {"min": 100, "response": "{user} JUST DROPPED {bits} BITS! 🔥"}, {"min": 500, "response": "{user} WITH {bits} BITS!!! 🚨"}, {"min": 1000, "response": "{user} JUST DROPPED {bits} BITS!!! ABSOLUTE MADNESS! 🔥🔥🔥"}], "donation": [{"min": 0, "response": "Thank you {user} for the {amount} {currency} donation! ❤️"}, {"min": 50, "response": "WOW! {user} donated {amount} {currency}! You are amazing! 🔥"}]}
 
 
 class Store:
@@ -254,6 +269,9 @@ class Store:
         for key, default in DEFAULTS["events"].items():
             if key not in ev:
                 ev[key] = copy.deepcopy(default)
+                changed = True
+            elif isinstance(ev[key], dict) and ev[key].get("tiers") == OLD_EVENT_TEXTS.get(key):
+                ev[key]["tiers"] = copy.deepcopy(default["tiers"])     # 1.13.0: never changed by the user -> the new texts with {total}
                 changed = True
         if changed:
             self.save("events", ev)

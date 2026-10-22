@@ -1,4 +1,4 @@
-"""Keeps the app window on a screen (1.9.0).
+"""Keeps the app window on a screen (1.9.0; stricter and instant since 1.9.1, restored in 1.13.0).
 
 Windows parks a minimized window at -32000,-32000. If the window is then hidden to the tray, or a monitor is unplugged /
 the resolution changes, it can come back somewhere nobody can see or grab it. This checks the window's title bar and,
@@ -18,7 +18,8 @@ log = logging.getLogger("twitchbot.window")
 
 TITLE_BAR = 40          # height of the strip that must stay reachable (the title bar), in pixels
 MIN_GRAB = 120          # at least this much of that strip must be on a screen, so the window can still be dragged
-WATCH_EVERY = 3.0       # seconds between checks while the app runs
+SLACK = 4               # a frame border of a few pixels above the top is fine (Windows draws one)
+WATCH_EVERY = 1.0       # seconds between backup checks while the app runs (moves and restores are checked at once anyway)
 
 
 # ---------- the maths (plain rectangles: (left, top, right, bottom)) ----------
@@ -29,11 +30,13 @@ def _overlap(a, b) -> tuple:
 
 
 def reachable(rect, work_areas) -> bool:
-    """Can the user still see and grab this window? True when enough of its title bar is on one screen's work area."""
+    """Can the user still see and grab this window? Like Windows' own drag rule (1.9.1): the top of the title bar is not
+    above a screen's work area (a few px of frame aside), the WHOLE title bar is above its bottom (the taskbar), and
+    enough of it is on that screen sideways."""
     bar = (rect[0], rect[1], rect[2], rect[1] + TITLE_BAR)
     for area in work_areas:
-        w, h = _overlap(bar, area)
-        if w >= min(MIN_GRAB, rect[2] - rect[0]) and h >= min(20, TITLE_BAR):
+        w, _ = _overlap(bar, area)
+        if w >= min(MIN_GRAB, rect[2] - rect[0]) and bar[1] >= area[1] - SLACK and bar[3] <= area[3]:
             return True
     return False
 
@@ -55,7 +58,7 @@ def rescued(rect, work_areas) -> tuple:
         x, y = area[0] + (aw - w) // 2, area[1] + (ah - h) // 2
     else:
         x = min(max(rect[0], area[0]), area[2] - w)
-        y = min(max(rect[1], area[1]), area[3] - h)
+        y = min(max(rect[1], area[1]), area[3] - h, area[3] - TITLE_BAR)
     return (x, y, x + w, y + h)
 
 
@@ -144,6 +147,10 @@ class _Win32:
         u.GetWindowRect(hwnd, ctypes.byref(r))
         return (r.left, r.top, r.right, r.bottom), movable
 
+    def dragging(self) -> bool:
+        """The left mouse button is held (the user may be dragging the window right now)."""
+        return bool(self.user32.GetAsyncKeyState(0x01) & 0x8000)
+
     def move(self, hwnd, rect) -> None:
         SWP_NOZORDER, SWP_NOACTIVATE = 0x0004, 0x0010
         self.user32.SetWindowPos(hwnd, None, rect[0], rect[1], rect[2] - rect[0], rect[3] - rect[1], SWP_NOZORDER | SWP_NOACTIVATE)
@@ -192,8 +199,24 @@ def keep_on_screen(title: str, api=None) -> bool:
         return False
 
 
+def check_after_move(title: str, api=None, sleep=time.sleep, step: float = 0.05, limit: float = 30.0) -> bool:
+    """Right after the window was moved (1.9.1): wait while the mouse button is held (never fight a drag), then put it
+    back on the screen if it was left where it can't be grabbed. True when it was moved."""
+    api = api or _win32()
+    if api is None:
+        return False
+    waited = 0.0
+    try:
+        while hasattr(api, "dragging") and api.dragging() and waited < limit:
+            sleep(step)
+            waited += step
+    except Exception:
+        log.exception("Could not read the mouse button")
+    return keep_on_screen(title, api)
+
+
 def watch(title: str, stop=None, api=None, every: float = WATCH_EVERY, sleep=time.sleep) -> None:
-    """Checks every few seconds while the app runs (also catches a monitor being unplugged or the resolution changing).
+    """Checks every second while the app runs (also catches a monitor being unplugged or the resolution changing).
     Runs on its own background thread; stop() returning True ends it."""
     api = api or _win32()
     if api is None:

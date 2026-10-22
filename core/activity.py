@@ -10,7 +10,7 @@ from pathlib import Path
 log = logging.getLogger("activity")
 
 MAX_SHOWN = 3000         # entries held in memory (the Logs page shows up to 300 per tab)
-EXTRA = ("text", "by", "why", "shared")    # optional details some entries carry (the message, who did it, why the bot spoke)
+EXTRA = ("text", "by", "why", "shared", "op")    # optional details some entries carry (the message, who did it, why the bot spoke)
 # Which Logs tab each kind of entry belongs to (anything else is Activity)
 TABS = {"moderation": {"moderation", "modaction"}, "bot": {"bot", "timer"}}
 

@@ -21,7 +21,10 @@
 const FORMAT = 1;              // the newest data format the app sends; older formats keep working
 const MAX_COMMANDS = 500;
 const MAX_NAME = 60;
-const MAX_BODY = 64 * 1024;    // bytes
+const MAX_BODY = 256 * 1024;   // bytes (1.13.0: 64 -> 256 KB, each command can carry a short example)
+const MAX_EX = 100;             // 1.13.0: an example reply, at most this many characters
+const BI_KEYS = ["commands", "title", "game", "app", "addcom", "editcom", "delcom"];
+const GAME_ROWS = { letters: ["start", "approve"], scramble: ["start"], shared: ["wins", "top"] };
 const MIN_GAP = 5;             // seconds between two saves of the same channel
 const PERMS = ["everyone", "subscriber", "vip", "moderator", "broadcaster"];
 const LOGIN_RE = /^[a-z0-9_]{1,25}$/;
@@ -128,6 +131,9 @@ async function handle(req, env) {
     if (req.method !== "PUT") return json({ error: "Method not allowed." }, 405, { Allow: "PUT" });
     return devBan(req, env);
   }
+  if (path.startsWith("/api/editor/")) {          // 1.13.0: the editor link
+    return ["/api/editor/link", "/api/editor/page", "/api/editor/data", "/api/editor/changes", "/api/editor/ack"].includes(path) ? editorOwner(req, env, url) : editorGuest(req, env, url);
+  }
   if (req.method !== "GET" && req.method !== "HEAD") return json({ error: "Method not allowed." }, 405, { Allow: "GET" });
   if (path === "/") return page(homeBody(url.origin, await latest()), "FQPN's Chat Bot · Twitch moderation chat bot", 200, 600);
   if (path === "/download/windows" || path === "/download") {
@@ -153,18 +159,46 @@ async function handle(req, env) {
     if (!row) return json({ error: "Not found." }, 404, CORS);
     return json(publicView(row), 200, { ...CORS, "Cache-Control": "public, max-age=30" });
   }
-  m = path.match(/^\/@?([^/]+)\/?$/);
+  m = path.match(/^\/@?([^/]+)\/edit\/([^/]+)\/app\/?$/);
+  if (m) {                                         // 1.13.0: the app's own page, working on this channel through the link
+    let raw; try { raw = decodeURIComponent(m[1]); } catch { raw = ""; }
+    const login = cleanLogin(raw) || "", token = m[2];
+    const link = login ? await editorLink(env, login, token) : null;
+    const pg = link ? await env.DB.prepare("SELECT html FROM editor_page WHERE login = ?").bind(login).first() : null;
+    if (!pg) return Response.redirect(new URL("/" + login + "/edit/" + token, url).toString(), 302);
+    const boot = `<script>window.REMOTE=${JSON.stringify({ login, token, expires: link.expires }).replace(/</g, "\\u003c")};</script>`;
+    const html = pg.html.replace(/<head>/i, "<head>" + boot);
+    return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
+      "X-Robots-Tag": "noindex, nofollow", "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY",
+      // the app's page uses inline scripts and styles (it is the app's own file, uploaded by the channel's app)
+      "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com data:; img-src 'self' data: https://static-cdn.jtvnw.net; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" } });
+  }
+  m = path.match(/^\/@?([^/]+)\/edit\/([^/]+)\/?$/);
+  if (m) {                                         // 1.13.0: the editor page (a secret link; three path parts, never a channel)
+    let raw; try { raw = decodeURIComponent(m[1]); } catch { raw = ""; }
+    const login = cleanLogin(raw) || "", token = m[2];
+    const link = login ? await editorLink(env, login, token) : null;
+    const row = link ? await env.DB.prepare("SELECT display FROM lists WHERE login = ?").bind(login).first() : null;
+    // the editor's script runs INSIDE the page script, so it can use its helpers ($, t, toast) and its language switch
+    const script = CLIENT.replace(/\napply\(\);\n\}\)\(\);$/, "\napply();\n" + EDITOR_JS + "\n})();");
+    const resp = page(editorBody(login, row && row.display, token, !!link), "FQPN's Chat Bot · " + TEXT.en.ed_t, link ? 200 : 410, 0, null, script, "connect-src 'self'; ");
+    resp.headers.set("Referrer-Policy", "no-referrer");       // the secret link never goes to another site
+    resp.headers.set("X-Robots-Tag", "noindex, nofollow");
+    return resp;
+  }
+  m = path.match(/^\/@?([^/]+?)(\/leaderboard)?\/?$/);
   if (m) {
     let raw;
     try { raw = decodeURIComponent(m[1]); } catch { raw = ""; }
     const login = cleanLogin(raw);
     if (!login) return page(missingBody(""), "Not found", 404, 60);
-    if (path !== "/" + login) return Response.redirect(url.origin + "/" + login, 301);
+    const tab = m[2] ? "lb" : "cmds", canon = "/" + login + (m[2] ? "/leaderboard" : "");
+    if (path !== canon) return Response.redirect(url.origin + canon, 301);
     await setup(env.DB);
     const row = await env.DB.prepare("SELECT * FROM lists WHERE login = ?").bind(login).first();
     if (!row) return page(missingBody(login), "Not found", 404, 30);
     const view = publicView(row);
-    return page(listBody(view), (view.display || login) + " · commands", 200, 30, view);
+    return page(listBody(view), (view.display || login) + (tab === "lb" ? " · leaderboard" : " · commands"), 200, 30, { ...view, tab });
   }
   return page(missingBody(""), "Not found", 404, 60);
 }
@@ -180,7 +214,9 @@ function publicView(row) {
   let data = {};
   try { data = JSON.parse(row.data); } catch { data = {}; }
   return { v: FORMAT, login: row.login, display: row.display || row.login, avatar: row.avatar || "",
-           updated: row.updated, commands: Array.isArray(data.commands) ? data.commands : [] };
+           updated: row.updated, commands: Array.isArray(data.commands) ? data.commands : [],
+           accent: (typeof data.accent === "string" && HEX_RE.test(data.accent)) ? data.accent : "",
+           leaderboard: data.leaderboard && typeof data.leaderboard === "object" ? data.leaderboard : null };
 }
 
 // ----------------------------------------------------------------------------------------------- saving and removing
@@ -219,6 +255,16 @@ async function profile(who) {
   }
 }
 
+function cleanLeaderboard(lb) {
+  if (!lb || typeof lb !== "object" || Array.isArray(lb)) return null;
+  const n = (x) => Math.max(0, Math.min(1e9, Math.floor(Number(x) || 0)));
+  const rows = (a, parts) => (Array.isArray(a) ? a : []).slice(0, 10).map((r) => {
+    const name = String((r && r.n) || "").replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, "").trim().slice(0, 40);
+    return name ? (parts ? { n: name, w: n(r.w), l: n(r.l), u: n(r.u) } : { n: name, w: n(r.w) }) : null;
+  }).filter((r) => r && r.w > 0);
+  return { all: rows(lb.all, true), l: rows(lb.l, false), u: rows(lb.u, false) };
+}
+
 function cleanList(body) {
   if (!body || typeof body !== "object" || Array.isArray(body)) return { error: "The list couldn't be read." };
   const v = Number(body.v);
@@ -234,10 +280,20 @@ function cleanList(body) {
     if (!name || [...name].length > MAX_NAME || seen.has(name)) continue;
     seen.add(name);
     const row = { name, perm: PERMS.includes(c.perm) ? c.perm : "everyone" };
-    if (c.builtin === true) row.builtin = true;          // 1.12.0: the app's built-in commands (shown in their own group)
+    if (c.builtin === true) {                          // 1.12.0: the app's built-in commands (shown in their own group)
+      row.builtin = true;
+      if (BI_KEYS.includes(c.key)) row.key = c.key;      // 1.13.0: the page words what it does
+    } else if (GAME_ROWS[c.game] && GAME_ROWS[c.game].includes(c.what)) {
+      row.game = c.game; row.what = c.what;            // 1.13.0: a mini game's command (its own group)
+    } else if (typeof c.ex === "string") {
+      const ex = [...c.ex.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, "").trim()].slice(0, MAX_EX).join("");
+      if (ex) row.ex = ex;                               // 1.13.0: a short example of the reply
+    }
     commands.push(row);
   }
-  return { list: { v: FORMAT, commands } };
+  const accent = typeof body.accent === "string" && HEX_RE.test(body.accent.trim().toLowerCase()) ? body.accent.trim().toLowerCase() : "";
+  const lb = cleanLeaderboard(body.leaderboard);        // 1.13.0: the games' top 10 (only when the app sends it)
+  return { list: { v: FORMAT, commands, ...(accent ? { accent } : {}), ...(lb ? { leaderboard: lb } : {}) } };
 }
 
 async function saveList(req, env, url) {
@@ -266,7 +322,9 @@ async function saveList(req, env, url) {
                    "avatar = excluded.avatar, data = excluded.data, updated = excluded.updated")
       .bind(who.login, who.userId, p.display || who.login, p.avatar || "", JSON.stringify(clean.list), now),
   ]);
-  return json({ ok: true, login: who.login, count: clean.list.commands.length, url: url.origin + "/" + who.login });
+  // 1.13.0: what this website understands, so a newer app knows it can send them (an older website says nothing -> the app
+  // keeps the mini games' commands back instead of seeing them land among the streamer's own commands)
+  return json({ ok: true, login: who.login, count: clean.list.commands.length, url: url.origin + "/" + who.login, features: ["examples", "games", "builtin_keys"] });
 }
 
 async function deleteList(req, env) {
@@ -384,6 +442,270 @@ async function support(req, env) {
   return json({ ok: true });
 }
 
+// ---- Editor link (1.13.0): someone the streamer trusts edits the commands from a secret link + password
+// The app makes the link (a 256-bit secret in the URL) and a new password each time; the website only keeps their SHA-256
+// hashes (never the link or the password). One link per channel, it ends after 24 h, when the app cancels it, or after 5
+// wrong passwords. The edits wait here; the streamer's app takes them, checks them with its own rules, saves them and says
+// which were applied or refused. The commands the editor sees are a private copy the app uploads (not the public page).
+const ED = { maxHours: 24, attempts: 5, pending: 100, perHour: 120, name: 40, response: 500, aliases: 10, cooldown: 86400,
+             pageMax: 1800000, dataMax: 1500000, putMax: 600000 };
+// 1.13.0: the editor works on the APP'S OWN page (uploaded by the app with the link), on these tools; the rest isn't there
+const ED_SECTIONS = ["commands", "timers", "greetings", "events", "blocklist", "moderation", "games", "settings"];
+async function sha256hex(s) {
+  const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(s)));
+  return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
+}
+function randHex(n) { return [...crypto.getRandomValues(new Uint8Array(n))].map((x) => x.toString(16).padStart(2, "0")).join(""); }
+const HEX_RE = /^#[0-9a-f]{6}$/;
+const EDTOKEN_RE = /^[A-Za-z0-9_-]{30,100}$/;
+function cleanText(s, max) { return String(s ?? "").replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "").trim().slice(0, max); }
+function cleanCmdName(s) { return String(s ?? "").replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, "").trim(); }
+
+async function edTables(db) {
+  await db.batch([
+    db.prepare("CREATE TABLE IF NOT EXISTS editor_links (login TEXT PRIMARY KEY, user_id TEXT NOT NULL, token_hash TEXT NOT NULL, pw_salt TEXT NOT NULL, pw_hash TEXT NOT NULL, expires INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS editor_data (login TEXT PRIMARY KEY, data TEXT NOT NULL, updated INTEGER NOT NULL)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS editor_sessions (id_hash TEXT PRIMARY KEY, login TEXT NOT NULL, token_hash TEXT NOT NULL, name TEXT, expires INTEGER NOT NULL)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS editor_changes (id INTEGER PRIMARY KEY AUTOINCREMENT, login TEXT NOT NULL, token_hash TEXT NOT NULL, at INTEGER NOT NULL, editor TEXT, op TEXT NOT NULL, name TEXT NOT NULL, old_name TEXT, cmd TEXT, status TEXT NOT NULL, note TEXT)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS editor_changes_login ON editor_changes(login, status)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS editor_page (login TEXT PRIMARY KEY, html TEXT NOT NULL, updated INTEGER NOT NULL)"),
+  ]);
+}
+
+function edSnapshot(body) {        // the app's private copy of the commands, for the editor page
+  if (!body || !Array.isArray(body.commands)) return null;
+  const out = [];
+  for (const c of body.commands.slice(0, MAX_COMMANDS)) {
+    if (!c || typeof c !== "object") continue;
+    const name = cleanCmdName(c.name);
+    if (!name || [...name].length > MAX_NAME) continue;
+    out.push({ name, response: cleanText(c.response, ED.response), perm: PERMS.includes(c.perm) ? c.perm : "everyone",
+               cooldown: Math.max(0, Math.min(ED.cooldown, Math.floor(Number(c.cooldown) || 0))), enabled: c.enabled !== false,
+               aliases: (Array.isArray(c.aliases) ? c.aliases : []).map(cleanCmdName).filter((a) => a && [...a].length <= MAX_NAME).slice(0, ED.aliases),
+               locked: c.locked === true });          // (a shortcut or a game command: shown, but changed in the app only)
+  }
+  return out;
+}
+
+async function editorOwner(req, env, url) {        // the streamer's app: PUT/DELETE the link, the copy, the edits
+  const who = await whoIs(req, env);
+  if (who.error) return json({ error: who.error }, who.status);
+  await setup(env.DB); await edTables(env.DB);
+  const now = Math.floor(Date.now() / 1000), db = env.DB, path = url.pathname;
+  if (path === "/api/editor/link" && req.method === "PUT") {
+    let body; try { body = await req.json(); } catch { body = null; }
+    const th = String(body?.token_hash || ""), salt = String(body?.pw_salt || ""), ph = String(body?.pw_hash || "");
+    if (!/^[0-9a-f]{64}$/.test(th) || !/^[0-9a-f]{32}$/.test(salt) || !/^[0-9a-f]{64}$/.test(ph)) return json({ error: "The link couldn't be read." }, 400);
+    const snap = edSnapshot(body);
+    if (!snap) return json({ error: "The commands couldn't be read." }, 400);
+    const expires = now + ED.maxHours * 3600;
+    await db.batch([       // a new link replaces the old one at once (its sessions and waiting edits end with it)
+      db.prepare("INSERT OR REPLACE INTO editor_links (login, user_id, token_hash, pw_salt, pw_hash, expires, attempts, created) VALUES (?, ?, ?, ?, ?, ?, 0, ?)").bind(who.login, who.userId, th, salt, ph, expires, now),
+      db.prepare("INSERT OR REPLACE INTO editor_data (login, data, updated) VALUES (?, ?, ?)").bind(who.login, JSON.stringify(snap), now),
+      db.prepare("DELETE FROM editor_sessions WHERE login = ?").bind(who.login),
+      db.prepare("DELETE FROM editor_changes WHERE login = ? AND token_hash != ?").bind(who.login, th),
+    ]);
+    return json({ ok: true, login: who.login, expires });
+  }
+  if (path === "/api/editor/page" && req.method === "PUT") {
+    const raw = await req.text();
+    if (raw.length > ED.pageMax + 100) return json({ error: "The app's page is too big." }, 413);
+    let body; try { body = JSON.parse(raw); } catch { body = null; }
+    const html = typeof body?.html === "string" ? body.html : "";
+    if (!html.startsWith("<!doctype html>") && !html.startsWith("<!DOCTYPE html>")) return json({ error: "The app's page couldn't be read." }, 400);
+    await db.prepare("INSERT OR REPLACE INTO editor_page (login, html, updated) VALUES (?, ?, ?)").bind(who.login, html, now).run();
+    return json({ ok: true });
+  }
+  if (path === "/api/editor/link" && req.method === "DELETE") {
+    await db.batch([db.prepare("DELETE FROM editor_page WHERE login = ?").bind(who.login),
+                    db.prepare("DELETE FROM editor_links WHERE login = ?").bind(who.login), db.prepare("DELETE FROM editor_sessions WHERE login = ?").bind(who.login),
+                    db.prepare("DELETE FROM editor_data WHERE login = ?").bind(who.login), db.prepare("DELETE FROM editor_changes WHERE login = ?").bind(who.login)]);
+    return json({ ok: true });
+  }
+  const link = await db.prepare("SELECT * FROM editor_links WHERE login = ?").bind(who.login).first();
+  if (!link || link.expires <= now) return json({ ok: true, active: false, changes: [] });
+  if (path === "/api/editor/data" && req.method === "PUT") {
+    const raw = await req.text();
+    if (raw.length > ED.dataMax) return json({ error: "Too much data." }, 413);
+    let body; try { body = JSON.parse(raw); } catch { body = null; }
+    const snap = edSnapshot(body);
+    if (!snap) return json({ error: "The commands couldn't be read." }, 400);
+    const full = body && typeof body.sections === "object" && body.sections ? { commands: snap, sections: body.sections, digests: body.digests || {}, logs: body.logs || {}, status: body.status || {} } : snap;
+    await db.prepare("INSERT OR REPLACE INTO editor_data (login, data, updated) VALUES (?, ?, ?)").bind(who.login, JSON.stringify(full), now).run();
+    return json({ ok: true });
+  }
+  if (path === "/api/editor/changes" && req.method === "GET") {
+    const rows = (await db.prepare("SELECT id, at, editor, op, name, old_name, cmd FROM editor_changes WHERE login = ? AND token_hash = ? AND status = 'pending' ORDER BY id LIMIT 50").bind(who.login, link.token_hash).all()).results || [];
+    return json({ ok: true, active: true, expires: link.expires, changes: rows.map((r) => r.op === "put"
+      ? { id: r.id, at: r.at, editor: r.editor, op: "put", section: r.name, base: r.old_name || "", data: r.cmd ? JSON.parse(r.cmd) : null }
+      : { ...r, cmd: r.cmd ? JSON.parse(r.cmd) : null }) });
+  }
+  if (path === "/api/editor/ack" && req.method === "POST") {
+    let body; try { body = await req.json(); } catch { body = null; }
+    const res = Array.isArray(body?.results) ? body.results.slice(0, 100) : [];
+    const stmts = res.filter((r) => Number.isInteger(r?.id)).map((r) => db.prepare("UPDATE editor_changes SET status = ?, note = ? WHERE id = ? AND login = ?")
+      .bind(r.ok ? "applied" : "refused", cleanText(r.error, 200), r.id, who.login));
+    if (stmts.length) await db.batch(stmts);
+    return json({ ok: true });
+  }
+  return json({ error: "Not found." }, 404);
+}
+
+async function editorLink(env, login, token) {
+  await setup(env.DB); await edTables(env.DB);
+  if (!LOGIN_RE.test(login) || !EDTOKEN_RE.test(token)) return null;
+  const link = await env.DB.prepare("SELECT * FROM editor_links WHERE login = ?").bind(login).first();
+  if (!link || link.expires <= Math.floor(Date.now() / 1000) || link.attempts >= ED.attempts) return null;
+  return link.token_hash === await sha256hex(token) ? link : null;
+}
+
+async function editorGuest(req, env, url) {        // the editor's page: password, then read / change
+  const path = url.pathname, db = env.DB, now = Math.floor(Date.now() / 1000);
+  let body = null;
+  if (req.method === "POST") { try { body = await req.json(); } catch { body = null; } }
+  const login = cleanLogin(String((body?.login ?? req.headers.get("X-Editor-Login")) || "")), token = String((body?.token ?? req.headers.get("X-Editor-Token")) || "");
+  const link = await editorLink(env, login, token);
+  if (!link) return json({ error: "expired" }, 410);
+  if (path === "/api/editor/session" && req.method === "POST") {
+    const name = cleanText(body?.name, ED.name);
+    if (!name) return json({ error: "name" }, 400);
+    if (await sha256hex(link.pw_salt + String(body?.password || "").trim().toUpperCase()) !== link.pw_hash) {
+      await db.prepare("UPDATE editor_links SET attempts = attempts + 1 WHERE login = ?").bind(login).run();
+      const left = ED.attempts - link.attempts - 1;
+      return json({ error: left > 0 ? "password" : "locked", left }, 403);
+    }
+    const sid = randHex(32);
+    await db.prepare("INSERT INTO editor_sessions (id_hash, login, token_hash, name, expires) VALUES (?, ?, ?, ?, ?)").bind(await sha256hex(sid), login, link.token_hash, name, link.expires).run();
+    return json({ ok: true, session: sid, expires: link.expires });
+  }
+  const sid = String(req.headers.get("X-Editor-Session") || "");
+  const ses = /^[0-9a-f]{64}$/.test(sid) ? await db.prepare("SELECT * FROM editor_sessions WHERE id_hash = ?").bind(await sha256hex(sid)).first() : null;
+  if (!ses || ses.login !== login || ses.token_hash !== link.token_hash || ses.expires <= now) return json({ error: "session" }, 401);
+  if (path === "/api/editor/state" && req.method === "GET") {
+    const data = await db.prepare("SELECT data, updated FROM editor_data WHERE login = ?").bind(login).first();
+    const recent = (await db.prepare("SELECT id, at, editor, op, name, status, note FROM editor_changes WHERE login = ? AND token_hash = ? ORDER BY id DESC LIMIT 30").bind(login, link.token_hash).all()).results || [];
+    const d = data ? JSON.parse(data.data) : [];
+    const full = Array.isArray(d) ? { commands: d } : d;
+    return json({ ok: true, commands: full.commands || [], sections: full.sections || null, digests: full.digests || {}, logs: full.logs || {}, status: full.status || {},
+                  updated: data ? data.updated : 0, expires: link.expires, changes: recent, me: ses.name, login });
+  }
+  if (path === "/api/editor/change" && req.method === "POST") {
+    if (body?.op === "put") {               // a whole tool, saved on the app's own page
+      const section = String(body.section || "");
+      if (!ED_SECTIONS.includes(section)) return json({ error: "This can't be changed through the editor link." }, 400);
+      const data = JSON.stringify(body.data ?? null);
+      if (data.length > ED.putMax) return json({ error: "Too much data in one change." }, 413);
+      const base = /^[0-9a-f]{64}$/.test(String(body.base || "")) ? String(body.base) : "";
+      const pending = await db.prepare("SELECT COUNT(*) AS n FROM editor_changes WHERE login = ? AND status = 'pending'").bind(login).first();
+      if (pending && pending.n >= ED.pending) return json({ error: "Too many changes are waiting for the app. Try again when it has taken them." }, 429);
+      const hour = await db.prepare("SELECT COUNT(*) AS n FROM editor_changes WHERE login = ? AND at > ?").bind(login, now - 3600).first();
+      if (hour && hour.n >= ED.perHour) return json({ error: "Too many changes this hour. Try again later." }, 429);
+      const r = await db.prepare("INSERT INTO editor_changes (login, token_hash, at, editor, op, name, old_name, cmd, status) VALUES (?, ?, ?, ?, 'put', ?, ?, ?, 'pending')")
+        .bind(login, link.token_hash, now, ses.name, section, base || null, data).run();
+      return json({ ok: true, id: r.meta?.last_row_id ?? null });
+    }
+    const op = body?.op === "delete" ? "delete" : body?.op === "set" ? "set" : "";
+    const name = cleanCmdName(body?.name), old = body?.old_name ? cleanCmdName(body.old_name) : "";
+    if (!op || !name || [...name].length > MAX_NAME || /\s{2,}/.test(name)) return json({ error: "A command name is 1 to 60 characters." }, 400);
+    let cmd = null;
+    if (op === "set") {
+      const c = body?.cmd || {};
+      const response = cleanText(c.response, ED.response + 1);
+      if (!response) return json({ error: "Write the reply." }, 400);
+      if ([...response].length > ED.response) return json({ error: `A reply can be at most ${ED.response} characters.` }, 400);
+      cmd = { response, permission: PERMS.includes(c.permission) ? c.permission : "everyone",
+              cooldown: Math.max(0, Math.min(ED.cooldown, Math.floor(Number(c.cooldown) || 0))), enabled: c.enabled !== false,
+              aliases: (Array.isArray(c.aliases) ? c.aliases : []).map(cleanCmdName).filter(Boolean).slice(0, ED.aliases) };
+      if (cmd.aliases.some((a) => [...a].length > MAX_NAME)) return json({ error: "An extra name is at most 60 characters." }, 400);
+    }
+    const pending = await db.prepare("SELECT COUNT(*) AS n FROM editor_changes WHERE login = ? AND status = 'pending'").bind(login).first();
+    if (pending && pending.n >= ED.pending) return json({ error: "Too many changes are waiting for the app. Try again when it has taken them." }, 429);
+    const hour = await db.prepare("SELECT COUNT(*) AS n FROM editor_changes WHERE login = ? AND at > ?").bind(login, now - 3600).first();
+    if (hour && hour.n >= ED.perHour) return json({ error: "Too many changes this hour. Try again later." }, 429);
+    const r = await db.prepare("INSERT INTO editor_changes (login, token_hash, at, editor, op, name, old_name, cmd, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')")
+      .bind(login, link.token_hash, now, ses.name, op, name, old || null, cmd ? JSON.stringify(cmd) : null).run();
+    return json({ ok: true, id: r.meta?.last_row_id ?? null });
+  }
+  return json({ error: "Not found." }, 404);
+}
+
+function editorBody(login, display, token, ok) {
+  if (!ok) return `<header class="top"><div class="who"><div class="av mark" aria-hidden="true"></div><div><h1 data-t="ed_t">${T("ed_t")}</h1></div></div>${langBtn()}</header>
+<div class="miss"><h2 data-t="ed_gone_t">${T("ed_gone_t")}</h2><p data-t="ed_gone_d">${T("ed_gone_d")}</p></div>`;
+  return `<header class="top"><div class="who"><div class="av mark" aria-hidden="true"></div><div><h1><bdi>${esc(display || login)}</bdi> <span class="sub2" data-t="ed_t">${T("ed_t")}</span></h1><p class="count" id="edexp"></p></div></div>${langBtn()}</header>
+<div id="ed" data-login="${esc(login)}" data-token="${esc(token)}">
+<form class="edlogin" id="edlogin" autocomplete="off"><h2 data-t="ed_in_t">${T("ed_in_t")}</h2><p class="lead small" data-t="ed_in_d">${T("ed_in_d")}</p>
+<label for="edname" data-t="ed_name">${T("ed_name")}</label><input id="edname" maxlength="40" required>
+<label for="edpw" data-t="ed_pw">${T("ed_pw")}</label><input id="edpw" maxlength="20" required spellcheck="false" autocapitalize="characters" dir="ltr">
+<p class="ederr" id="ederr" role="alert" hidden></p><button class="edbtn" type="submit" data-t="ed_go">${T("ed_go")}</button></form>
+<section id="edmain" hidden>
+<p class="ednote" data-t="ed_how">${T("ed_how")}</p>
+<div class="edbar"><input id="q" type="search" autocomplete="off"><button class="edbtn" type="button" id="edadd" data-t="ed_add">${T("ed_add")}</button></div>
+<form class="edform" id="edform" hidden autocomplete="off">
+<h2 id="edftitle"></h2>
+<label for="efname" data-t="ed_cmd">${T("ed_cmd")}</label><input id="efname" maxlength="60" required dir="auto">
+<label for="efresp" data-t="ed_resp">${T("ed_resp")}</label><textarea id="efresp" maxlength="500" rows="4" required dir="auto"></textarea><span class="edcount" id="efcnt"></span>
+<div class="edrow"><div><label for="efperm" data-t="ed_who">${T("ed_who")}</label><select id="efperm">${PERMS.map((p) => `<option value="${p}" data-t="g_${p}">${T("g_" + p)}</option>`).join("")}</select></div>
+<div><label for="efcd" data-t="ed_cd">${T("ed_cd")}</label><input id="efcd" type="number" min="0" max="86400" value="5"></div></div>
+<label for="efal" data-t="ed_al">${T("ed_al")}</label><input id="efal" dir="auto">
+<label class="edcheck"><input type="checkbox" id="efon" checked><span data-t="ed_on">${T("ed_on")}</span></label>
+<p class="ederr" id="eferr" role="alert" hidden></p>
+<div class="edrow end"><button class="edbtn ghost" type="button" id="efcancel" data-t="ed_cancel">${T("ed_cancel")}</button><button class="edbtn" type="submit" data-t="ed_save">${T("ed_save")}</button></div></form>
+<div id="edlist" class="edlist"></div>
+<h2 class="edh" data-t="ed_recent">${T("ed_recent")}</h2><div id="edrecent" class="edrecent"></div>
+</section></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>`;
+}
+
+const EDITOR_JS = `
+;(function(){var box=$("ed");if(!box)return;var L=box.dataset.login,TK=box.dataset.token,SID=null,ST=null,EDIT=null,poll=null;
+try{SID=sessionStorage.getItem("ed:"+TK)}catch(e){}
+function esc2(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
+async function api(path,body){var h={"X-Editor-Login":L,"X-Editor-Token":TK,"X-Editor-Session":SID||""};if(body)h["Content-Type"]="application/json";
+  var r,d={};try{r=await fetch(path,{method:body?"POST":"GET",headers:h,body:body?JSON.stringify(Object.assign({login:L,token:TK},body)):undefined});d=await r.json()}catch(e){return {ok:false,status:0,d:{error:"net"}}}
+  if(r.status==410){gone();return {ok:false,status:410,d:d}}
+  if(r.status==401){SID=null;try{sessionStorage.removeItem("ed:"+TK)}catch(e){}$("edmain").hidden=true;$("edlogin").hidden=false}
+  return {ok:r.ok,status:r.status,d:d}}
+function gone(){box.innerHTML='<div class="miss"><h2>'+esc2(t("ed_gone_t"))+'</h2><p>'+esc2(t("ed_gone_d"))+'</p></div>';clearInterval(poll)}
+function err(id,msg){var e=$(id);e.textContent=msg||"";e.hidden=!msg}
+function left(){if(!ST)return;var s=ST.expires-Date.now()/1000,h=Math.floor(s/3600),m=Math.max(0,Math.floor(s%3600/60));$("edexp").textContent=s<=0?t("ed_gone_t"):h>0?t("ed_left_h",{h:h,m:m}):t("ed_left_m",{m:m})}
+$("edlogin").addEventListener("submit",async function(e){e.preventDefault();err("ederr","");
+  var r=await api("/api/editor/session",{name:$("edname").value,password:$("edpw").value});
+  if(r.ok){SID=r.d.session;try{sessionStorage.setItem("ed:"+TK,SID)}catch(e){}location.replace(location.pathname.replace(/\\/$/,"")+"/app");return}
+  var c=r.d.error;err("ederr",c=="password"?t("ed_wrong",{n:r.d.left}):c=="locked"?t("ed_locked"):c=="name"?t("ed_need_name"):c=="net"?t("ed_net"):t("ed_gone_t"));if(c=="locked")setTimeout(gone,2500)});
+async function load(){var r=await api("/api/editor/state");if(!r.ok)return;ST=r.d;draw2();left()}
+function permName(p){return t("g_"+p)}
+function draw2(){if(!ST)return;var q=($("q").value||"").trim().toLowerCase();
+  var rows=ST.commands.filter(function(c){return !q||c.name.toLowerCase().indexOf(q)>=0||c.response.toLowerCase().indexOf(q)>=0});
+  $("edlist").innerHTML=rows.length?rows.map(function(c,i){return '<div class="edcmd'+(c.enabled?"":" off")+'"><div class="edtop"><bdi class="edname">'+esc2(c.name)+'</bdi>'
+     +'<span class="edmeta">'+esc2(permName(c.perm))+' · '+esc2(t("ed_cd_s",{n:c.cooldown}))+(c.enabled?"":' · '+esc2(t("ed_offl")))+(c.aliases.length?' · '+esc2(c.aliases.join(", ")):"")+'</span>'
+     +(c.locked?'<span class="edlock">'+esc2(t("ed_locked_cmd"))+'</span>':'<span class="edbtns"><button type="button" class="edbtn ghost sm" data-edit="'+esc2(c.name)+'">'+esc2(t("ed_edit"))+'</button><button type="button" class="edbtn ghost sm danger" data-del="'+esc2(c.name)+'">'+esc2(t("ed_del"))+'</button></span>')
+     +'</div><p class="edresp" dir="auto">'+esc2(c.response)+'</p></div>'}).join(""):'<p class="ednote">'+esc2(t(ST.commands.length?"none":"ed_empty"))+'</p>';
+  var waiting=ST.changes.filter(function(x){return x.status=="pending"}).length;
+  $("edrecent").innerHTML=ST.changes.length?ST.changes.map(function(x){var st=x.status=="pending"?["wait",t("ed_st_wait")]:x.status=="applied"?["ok",t("ed_st_ok")]:["bad",t("ed_st_bad")+(x.note?": "+x.note:"")];
+     return '<div class="edch"><i class="edot '+st[0]+'"></i><span><bdi>'+esc2(x.name)+'</bdi> · '+esc2(t(x.op=="delete"?"ed_op_del":"ed_op_set"))+' · '+esc2(x.editor||"")+'</span><span class="edst '+st[0]+'">'+esc2(st[1])+'</span></div>'}).join(""):'<p class="ednote">'+esc2(t("ed_no_recent"))+'</p>';
+  clearInterval(poll);poll=setInterval(function(){load()},waiting?3000:15000)}
+function openForm(c){EDIT=c?c.name:null;$("edform").hidden=false;$("edftitle").textContent=c?t("ed_edit_t",{n:c.name}):t("ed_add_t");
+  $("efname").value=c?c.name:"";$("efresp").value=c?c.response:"";$("efperm").value=c?c.perm:"everyone";$("efcd").value=c?c.cooldown:5;$("efal").value=c?c.aliases.join(", "):"";$("efon").checked=c?c.enabled:true;err("eferr","");cnt();$("efname").focus();window.scrollTo(0,0)}
+function cnt(){var n=[...$("efresp").value].length;$("efcnt").textContent=n+"/500";$("efcnt").classList.toggle("over",n>500)}
+$("efresp").addEventListener("input",cnt);
+$("edadd").onclick=function(){openForm(null)};$("efcancel").onclick=function(){$("edform").hidden=true;EDIT=null};
+$("q").addEventListener("input",draw2);
+$("edlist").addEventListener("click",async function(e){var b=e.target.closest("[data-edit]"),d=e.target.closest("[data-del]");
+  if(b){openForm(ST.commands.filter(function(c){return c.name==b.dataset.edit})[0]);return}
+  if(d&&confirm(t("ed_del_q",{n:d.dataset.del}))){var r=await api("/api/editor/change",{op:"delete",name:d.dataset.del});toast(r.ok?t("ed_sent"):(r.d.error||t("ed_net")));load()}});
+$("edform").addEventListener("submit",async function(e){e.preventDefault();err("eferr","");
+  var cmd={response:$("efresp").value,permission:$("efperm").value,cooldown:+$("efcd").value||0,enabled:$("efon").checked,aliases:$("efal").value.split(",").map(function(s){return s.trim()}).filter(Boolean)};
+  var r=await api("/api/editor/change",{op:"set",name:$("efname").value,old_name:EDIT&&EDIT!=$("efname").value.trim()?EDIT:"",cmd:cmd});
+  if(!r.ok){err("eferr",r.d.error||t("ed_net"));return}$("edform").hidden=true;EDIT=null;toast(t("ed_sent"));load()});
+function start(){$("edlogin").hidden=true;$("edmain").hidden=false;load();setInterval(left,30000)}
+var q=$("q");q.placeholder=t("search");
+$("lang").addEventListener("click",function(){setTimeout(function(){draw2();left();q.placeholder=t("search")},0)});   // the lists follow the language
+if(SID)location.replace(location.pathname.replace(/\\/$/,"")+"/app");
+})();
+`;
+
+
 // ---- developers only: checked here by Twitch user ID, whatever the app shows
 async function devWho(req, env) {
   const who = await whoIs(req, env);
@@ -454,7 +776,7 @@ function page(body, title, status, maxAge, data, script = CLIENT, cspExtra = "")
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&family=Tajawal:wght@400;500;700&display=swap">
-<style nonce="${nonce}">${CSS}</style>
+<style nonce="${nonce}">${CSS}${data && HEX_RE.test(String(data.accent || "")) ? ":root{--red2:" + data.accent + "}" : ""}</style>
 </head>
 <body>
 <main class="wrap">${body}</main>
@@ -480,10 +802,23 @@ const TEXT = {
   en: {
     commands: "Commands", count: "{n} commands", count1: "1 command", count2: "2 commands", count_few: "{n} commands", search: "Search commands", none: "No commands match your search.",
     empty: "This channel has no public commands yet.", copy: "Click a command to copy it.", copied: "Copied {c}",
-    g_builtin: "Built-in commands", bi_who: "Built in to FQPN's Chat Bot · {w} can use it", g_everyone: "Everyone", g_subscriber: "Subscribers", g_vip: "VIPs", g_moderator: "Moderators", g_broadcaster: "Broadcaster",
+    g_builtin: "Built-in commands", g_games: "Mini games", bd_commands: "Links to this page with every command.", bd_title: "Shows the stream title. Moderators change it by writing a new title after it.", bd_game: "Shows the game. Moderators change it by writing a game name after it.", bd_app: "Says which app runs this chat bot.", bd_addcom: "Moderators add a new command from chat.", bd_editcom: "Moderators change a command's reply from chat.", bd_delcom: "Moderators delete a command from chat.", gd_letters_start: "Starts a Letters round: be the first to write a word from the category that starts with the given letter.", gd_letters_approve: "Moderators accept a word the bot didn't know, and that viewer wins the round.", gd_scramble_start: "Starts a word scramble: the first to write the word in the right order wins.", gd_shared_wins: "Shows how many rounds you've won.", gd_shared_top: "Shows the top 5 players. Add a game's name to see just that game.", bi_who: "Built in to FQPN's Chat Bot · {w} can use it", g_everyone: "Everyone", g_subscriber: "Subscribers", g_vip: "VIPs", g_moderator: "Moderators", g_broadcaster: "Broadcaster",
     updated: "Updated {t}", made: "Made with FQPN's Chat Bot", lang: "العربية",
     home_t: "Public command lists", home_d: "Streamers who use FQPN's Chat Bot can share their chat commands here. Open a link like {u} to see a channel's list.",
     miss_t: "No list here", miss_d: "There is no public command list for {c}. The streamer can switch it on in FQPN's Chat Bot, on the Commands page.",
+    lb_tab: "Games leaderboard", lb_all: "All games", wins: "{n} wins", win1: "1 win", lb_empty: "No wins yet.",
+    players1: "1 player", players2: "2 players", players_few: "{n} players", players: "{n} players",
+    ed_t: "Edit commands", ed_gone_t: "This editor link has ended", ed_gone_d: "It expired, was cancelled, or a new one replaced it. Ask the streamer for a new link and password.",
+    ed_in_t: "Sign in to edit", ed_in_d: "The streamer gave you this link and a password. Your name is shown to the streamer next to each change.",
+    ed_name: "Your name", ed_pw: "Password", ed_go: "Open the editor", ed_wrong: "Wrong password. {n} tries left.", ed_locked: "Too many wrong passwords: this link is locked. Ask the streamer for a new one.",
+    ed_need_name: "Write your name.", ed_net: "The website can't be reached. Try again.",
+    ed_left_h: "Link ends in {h} h {m} min", ed_left_m: "Link ends in {m} min",
+    ed_how: "Your changes go to the streamer's app, which checks them and applies them within seconds while it runs (or as soon as it opens).",
+    ed_add: "Add command", ed_add_t: "New command", ed_edit_t: "Edit {n}", ed_cmd: "Command", ed_resp: "Reply", ed_who: "Who can use it", ed_cd: "Wait between uses (seconds)",
+    ed_al: "Extra names (separate with commas)", ed_on: "Switched on", ed_save: "Send the change", ed_cancel: "Cancel", ed_edit: "Edit", ed_del: "Delete",
+    ed_del_q: "Delete {n}?", ed_sent: "Sent: the app applies it in a few seconds", ed_cd_s: "{n} s", ed_offl: "off", ed_locked_cmd: "change it in the app",
+    ed_empty: "No commands yet. Add the first one.", ed_recent: "Your changes", ed_no_recent: "Nothing changed yet.",
+    ed_st_wait: "waiting for the app", ed_st_ok: "applied", ed_st_bad: "refused", ed_op_set: "saved", ed_op_del: "deleted",
     miss_d0: "This page doesn't exist.",
     // the home page (download)
     h_title: "Twitch moderation chat bot", h_lead: "Commands, timers, greetings, replies to Twitch events, chat moderation and mini games, all set up in an app in English and Arabic. Free.",
@@ -526,10 +861,23 @@ const TEXT = {
   ar: {
     commands: "الأوامر", count: "{n} أمر", count1: "أمر واحد", count2: "أمران", count_few: "{n} أوامر", search: "ابحث في الأوامر", none: "لا توجد أوامر تطابق بحثك.",
     empty: "لا توجد أوامر عامة لهذه القناة بعد.", copy: "اضغط على أمر لنسخه.", copied: "تم نسخ {c}",
-    g_builtin: "الأوامر المدمجة", bi_who: "مدمج في FQPN's Chat Bot · يستخدمه: {w}", g_everyone: "الجميع", g_subscriber: "المشتركون", g_vip: "VIP", g_moderator: "المشرفون", g_broadcaster: "صاحب القناة",
+    g_builtin: "الأوامر المدمجة", g_games: "الألعاب", bd_commands: "رابط لهذه الصفحة بكل الأوامر.", bd_title: "يعرض عنوان البث. يغيّره المشرفون بكتابة عنوان جديد بعده.", bd_game: "يعرض اللعبة. يغيّرها المشرفون بكتابة اسم لعبة بعده.", bd_app: "يقول أي برنامج يشغّل هذا البوت.", bd_addcom: "يضيف المشرفون أمرًا جديدًا من الدردشة.", bd_editcom: "يغيّر المشرفون رد أمر من الدردشة.", bd_delcom: "يحذف المشرفون أمرًا من الدردشة.", gd_letters_start: "يبدأ جولة «حروف»: أول من يكتب كلمة من الفئة تبدأ بالحرف المعروض يفوز.", gd_letters_approve: "يقبل المشرفون كلمة لم يعرفها البوت، ويفوز ذلك المشاهد بالجولة.", gd_scramble_start: "يبدأ لعبة «رتّب»: أول من يكتب الكلمة بالترتيب الصحيح يفوز.", gd_shared_wins: "يعرض كم جولة فزت بها.", gd_shared_top: "يعرض أفضل 5 لاعبين. أضف اسم لعبة لترى تلك اللعبة فقط.", bi_who: "مدمج في FQPN's Chat Bot · يستخدمه: {w}", g_everyone: "الجميع", g_subscriber: "المشتركون", g_vip: "VIP", g_moderator: "المشرفون", g_broadcaster: "صاحب القناة",
     updated: "آخر تحديث {t}", made: "صُنعت باستخدام FQPN's Chat Bot", lang: "English",
     home_t: "قوائم الأوامر العامة", home_d: "يمكن لصنّاع المحتوى الذين يستخدمون FQPN's Chat Bot مشاركة أوامر الشات هنا. افتح رابطًا مثل {u} لرؤية قائمة القناة.",
     miss_t: "لا توجد قائمة هنا", miss_d: "لا توجد قائمة أوامر عامة لـ {c}. يمكن لصاحب القناة تفعيلها في FQPN's Chat Bot من صفحة الأوامر.",
+    lb_tab: "لوحة صدارة الألعاب", lb_all: "كل الألعاب", wins: "{n} فوز", win1: "فوز واحد", lb_empty: "لا توجد انتصارات بعد.",
+    players1: "لاعب واحد", players2: "لاعبان", players_few: "{n} لاعبين", players: "{n} لاعبًا",
+    ed_t: "تعديل الأوامر", ed_gone_t: "انتهى رابط التعديل هذا", ed_gone_d: "انتهت مدته، أو أُلغي، أو استُبدل برابط جديد. اطلب من صاحب القناة رابطًا وكلمة مرور جديدين.",
+    ed_in_t: "سجّل الدخول للتعديل", ed_in_d: "أعطاك صاحب القناة هذا الرابط وكلمة مرور. يظهر اسمك لصاحب القناة بجانب كل تعديل.",
+    ed_name: "اسمك", ed_pw: "كلمة المرور", ed_go: "افتح المحرّر", ed_wrong: "كلمة مرور خاطئة. بقيت {n} محاولات.", ed_locked: "كلمات مرور خاطئة كثيرة: هذا الرابط مقفل. اطلب رابطًا جديدًا من صاحب القناة.",
+    ed_need_name: "اكتب اسمك.", ed_net: "لا يمكن الوصول إلى الموقع. حاول مرة أخرى.",
+    ed_left_h: "ينتهي الرابط بعد {h} س {m} د", ed_left_m: "ينتهي الرابط بعد {m} د",
+    ed_how: "تعديلاتك تذهب إلى تطبيق صاحب القناة، الذي يتحقق منها ويطبّقها خلال ثوانٍ ما دام يعمل (أو حالما يُفتح).",
+    ed_add: "إضافة أمر", ed_add_t: "أمر جديد", ed_edit_t: "تعديل {n}", ed_cmd: "الأمر", ed_resp: "الرد", ed_who: "من يستطيع استخدامه", ed_cd: "الانتظار بين الاستخدامات (ثوانٍ)",
+    ed_al: "أسماء إضافية (افصل بينها بفواصل)", ed_on: "مفعّل", ed_save: "أرسل التعديل", ed_cancel: "إلغاء", ed_edit: "تعديل", ed_del: "حذف",
+    ed_del_q: "حذف {n}؟", ed_sent: "أُرسل: يطبّقه التطبيق خلال ثوانٍ", ed_cd_s: "{n} ث", ed_offl: "متوقف", ed_locked_cmd: "يُعدَّل من التطبيق",
+    ed_empty: "لا توجد أوامر بعد. أضف أول أمر.", ed_recent: "تعديلاتك", ed_no_recent: "لم يتغير شيء بعد.",
+    ed_st_wait: "بانتظار التطبيق", ed_st_ok: "طُبّق", ed_st_bad: "رُفض", ed_op_set: "حُفظ", ed_op_del: "حُذف",
     miss_d0: "هذه الصفحة غير موجودة.",
     h_title: "بوت شات وإشراف لتويتش", h_lead: "أوامر ومؤقتات وترحيب وردود على أحداث تويتش وإشراف على الشات وألعاب، كلها تُضبط من تطبيق بالعربي والإنجليزي. مجاني.",
     dl: "تحميل لويندوز", dl_meta: "الإصدار {v} · {d} · {s} ميغابايت", dl_down: "احصل على أحدث إصدار من GitHub", dl_req: "ويندوز 10 أو 11 · يُثبَّت لحسابك فقط، بدون صلاحيات المسؤول",
@@ -622,11 +970,13 @@ function missingBody(login) {
 function listBody(view) {
   const avatar = view.avatar ? `<img class="av" src="${esc(view.avatar)}" alt="" width="56" height="56">` : `<div class="av mark" aria-hidden="true"></div>`;
   const tw = "https://www.twitch.tv/" + esc(view.login);       // 1.12.0: the name and the picture open the channel on Twitch
-  return `<header class="top"><div class="who"><a class="avlink" href="${tw}" target="_blank" rel="noopener" tabindex="-1" aria-hidden="true">${avatar}</a><div><h1><a class="chname" href="${tw}" target="_blank" rel="noopener"><bdi>${esc(view.display)}</bdi></a> <span class="sub" data-t="commands">${esc(TEXT.en.commands)}</span></h1><p class="meta" id="count"></p></div></div>${langBtn()}</header>
-<div class="searchbox"><input id="q" type="search" autocomplete="off" spellcheck="false" dir="auto" data-ph="search" aria-label="${esc(TEXT.en.search)}" placeholder="${esc(TEXT.en.search)}"></div>
+  return `<header class="top"><div class="who">${avatar}<div><h1><a class="chname" href="${tw}" target="_blank" rel="noopener"><bdi>${esc(view.display)}</bdi></a></h1><p class="meta" id="count"></p></div></div>${langBtn()}</header>
+${view.leaderboard ? `<nav class="tabs" id="tabs"><button type="button" class="tab on" data-tab="cmds" data-t="commands">${esc(TEXT.en.commands)}</button><button type="button" class="tab" data-tab="lb" data-t="lb_tab">${esc(TEXT.en.lb_tab)}</button></nav>` : ""}
+<div id="pane-cmds"><div class="searchbox"><input id="q" type="search" autocomplete="off" spellcheck="false" dir="auto" data-ph="search" aria-label="${esc(TEXT.en.search)}" placeholder="${esc(TEXT.en.search)}"></div>
 <p class="hint" data-t="copy">${esc(TEXT.en.copy)}</p>
 <div id="groups"></div>
-<p class="empty" id="none" hidden></p>
+<p class="empty" id="none" hidden></p></div>
+${view.leaderboard ? `<div id="pane-lb" hidden><div class="subtabs"><button type="button" class="sub-tab on" data-sub="all" data-t="lb_all">${esc(TEXT.en.lb_all)}</button><button type="button" class="sub-tab" data-sub="l">حروف</button><button type="button" class="sub-tab" data-sub="u">رتب</button></div><div class="lb" id="lbrows"></div></div>` : ""}
 <footer class="foot"><span id="updated"></span><span data-t="made">${esc(TEXT.en.made)}</span></footer>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>`;
 }
@@ -655,7 +1005,7 @@ h1 .sub{color:var(--mute);font-weight:500}
 .lang{background:none;border:1px solid var(--line);color:var(--soft);padding:8px 14px;border-radius:8px;font:500 15px 'Tajawal','Outfit',sans-serif;cursor:pointer}
 .lang:hover,.lang:focus-visible{border-color:var(--red2);color:var(--text)}
 .searchbox input{width:100%;border:1px solid var(--line);background:var(--panel);color:var(--text);padding:12px 16px;border-radius:10px;font:16px 'Outfit','Tajawal',sans-serif}
-.searchbox input:focus{outline:none;border-color:var(--red2);box-shadow:0 0 0 3px rgba(163,18,26,.25)}
+.searchbox input:focus{outline:none;border-color:var(--red2);box-shadow:0 0 0 3px color-mix(in srgb,var(--red2) 25%,transparent)}
 .hint{color:var(--mute);font-size:14px;margin:10px 2px 18px}
 .group{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:14px}
 .group h2{margin:0 0 12px;font-size:15px;font-weight:600;color:var(--soft);display:flex;align-items:center;gap:8px}
@@ -677,8 +1027,47 @@ h1 .sub{color:var(--mute);font-weight:500}
 table.adm{width:100%;border-collapse:collapse;font-size:15px}.adm th,.adm td{text-align:start;padding:10px 14px;border-bottom:1px solid var(--line);white-space:nowrap}
 .adm th{color:var(--mute);font-weight:500;font-size:13px}.adm tr:last-child td{border-bottom:0}.adm a{color:var(--text);text-decoration:none;font-weight:600}.adm a:hover{color:var(--red2);text-decoration:underline}
 #err{color:#e5484d}
+/* the editor page (1.13.0) */
+.sub2{font-weight:500;color:var(--mute)}
+.edlogin,.edform{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:8px;margin:18px 0;max-width:620px}
+.edlogin h2,.edform h2,.edh{margin:0 0 4px;font-size:19px}
+.edh{margin-top:26px}
+.edlogin label,.edform label{font-size:14px;font-weight:600;color:var(--soft);margin-top:6px}
+.edlogin input,.edform input,.edform textarea,.edform select,#q{background:var(--bg);border:1px solid var(--line);border-radius:10px;color:var(--text);font:inherit;font-size:15px;padding:10px 12px}
+.edform textarea{resize:vertical;line-height:1.5}
+.edlogin input:focus,.edform input:focus,.edform textarea:focus,.edform select:focus{outline:none;border-color:var(--red2)}
+.edbtn{background:var(--red2);color:#fff;border:0;border-radius:10px;padding:10px 16px;font:inherit;font-weight:600;cursor:pointer;align-self:flex-start}
+.edbtn.ghost{background:var(--panel2,var(--panel));color:var(--text);border:1px solid var(--line)}
+.edbtn.sm{padding:6px 10px;font-size:13px}
+.edbtn.danger{color:#e5484d}
+.edbtn:focus-visible{outline:2px solid var(--text);outline-offset:2px}
+.ederr{color:#e5484d;margin:4px 0 0;font-size:14px}
+.ednote{color:var(--mute);font-size:14px}
+.edbar{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}
+.edbar #q{flex:1;min-width:200px}
+.edrow{display:flex;gap:12px;flex-wrap:wrap}.edrow>div{display:flex;flex-direction:column;gap:6px;flex:1;min-width:160px}.edrow.end{justify-content:flex-end;margin-top:8px}
+.edcount{align-self:flex-end;color:var(--mute);font-size:12px}.edcount.over{color:#e5484d}
+.edcheck{display:flex!important;align-items:center;gap:8px;font-weight:500!important}
+.edlist{display:flex;flex-direction:column;gap:10px}
+.edcmd{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.edcmd.off{opacity:.65}
+.edtop{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.edname{font-weight:600;font-size:16px}
+.edmeta{color:var(--mute);font-size:13px;flex:1;min-width:0}
+.edbtns{display:flex;gap:6px}
+.edlock{font-size:12px;color:var(--mute);border:1px dashed var(--line);border-radius:999px;padding:2px 8px}
+.edresp{margin:6px 0 0;color:var(--soft);font-size:14px;white-space:pre-wrap;overflow-wrap:anywhere}
+.edrecent{display:flex;flex-direction:column;gap:6px}
+.edch{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--soft)}
+.edch>span:nth-child(2){flex:1;min-width:0}
+.edot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--mute)}.edot.ok{background:#2fbf71}.edot.wait{background:#f5b850}.edot.bad{background:#e5484d}
+.edst.ok{color:#2fbf71}.edst.wait{color:#f5b850}.edst.bad{color:#e5484d}
 .group.builtin h2{color:var(--soft)}
 .chip small{font-size:11px;color:var(--mute);margin-inline-start:6px}
+.chip.has-ex{display:inline-flex;flex-direction:column;align-items:flex-start;gap:3px;max-width:min(100%,420px)}
+.chip .ct{display:inline-flex;align-items:baseline;gap:0}
+.chip .ex{font:400 13px 'Outfit','Tajawal',system-ui,sans-serif;color:var(--mute);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-align:start;unicode-bidi:plaintext}
+.group.games h2{color:var(--soft)}
 .avlink{display:block;flex:none;border-radius:50%;transition:box-shadow .15s}
 .avlink:hover{box-shadow:0 0 0 3px var(--red2)}
 a.chname{color:inherit;text-decoration:none;border-bottom:2px solid transparent;transition:border-color .15s}
@@ -691,8 +1080,8 @@ a.chname:hover,a.chname:focus-visible{border-bottom-color:var(--red2);outline:no
 .lead.small{font-size:15px}
 .dlbox{display:flex;flex-direction:column;align-items:flex-start;gap:6px}
 .dl{display:inline-flex;align-items:center;gap:10px;background:var(--red2);color:#fff;text-decoration:none;font-weight:600;font-size:18px;padding:14px 26px;border-radius:12px;box-shadow:0 10px 30px -12px var(--red2)}
-.dl:hover,.dl:focus-visible{background:#bd1621;outline:none}
-.dl:focus-visible{box-shadow:0 0 0 3px rgba(163,18,26,.45)}
+.dl:hover,.dl:focus-visible{filter:brightness(1.15);outline:none}
+.dl:focus-visible{box-shadow:0 0 0 3px color-mix(in srgb,var(--red2) 45%,transparent)}
 .dl svg,.feat svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
 .dlmeta{margin:6px 0 0;color:var(--soft);font-size:15px}
 .req{margin:0;color:var(--mute);font-size:14px}
@@ -723,11 +1112,32 @@ table.cmp{width:100%;border-collapse:collapse;font-size:15px;min-width:680px}
 .cmp thead th.us{color:var(--red2)}
 .cmp tbody th{font-weight:600;width:28%}
 .cmp td{color:var(--soft)}
-.cmp td.us{color:var(--text);background:rgba(163,18,26,.07)}
+.cmp td.us{color:var(--text);background:color-mix(in srgb,var(--red2) 7%,transparent)}
 .cmp tr.con td.us{color:var(--soft)}
 .cmpnote{color:var(--mute);font-size:14px;margin:10px 2px 0}
 @media (max-width:520px){.hero h1{font-size:30px}.dl{width:100%;justify-content:center}.dlbox{align-items:stretch}}
 @media (max-width:520px){h1{font-size:23px}.wrap{padding-left:14px;padding-right:14px}}
+[hidden]{display:none!important}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:18px;overflow-x:auto;overflow-y:hidden;padding-bottom:1px}
+.tab{background:none;border:0;border-bottom:2px solid transparent;color:var(--mute);padding:10px 16px;font:600 16px 'Outfit','Tajawal',sans-serif;cursor:pointer;margin-bottom:-1px;white-space:nowrap}
+.tab:hover,.tab:focus-visible{color:var(--text);outline:none}
+.tab.on{color:var(--text);border-bottom-color:var(--red2)}
+.subtabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.sub-tab{border:1px solid var(--line);background:var(--chip);color:var(--soft);padding:7px 14px;border-radius:8px;font:500 15px 'Outfit','Tajawal',sans-serif;cursor:pointer}
+.sub-tab:hover,.sub-tab:focus-visible{border-color:var(--red2);outline:none}
+.sub-tab.on{border-color:var(--red2);color:var(--text);background:color-mix(in srgb,var(--red2) 15%,transparent)}
+.lb{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.lbrow{display:flex;align-items:center;gap:14px;padding:12px 18px;border-bottom:1px solid var(--line);border-inline-start:3px solid transparent}
+.lbrow:last-child{border-bottom:0}
+.rk{width:28px;flex:none;text-align:center;font-weight:600;color:var(--mute)}
+.nm{flex:1;min-width:0;overflow-wrap:anywhere;font-weight:500;color:var(--soft)}
+.nm small{display:block;color:var(--mute);font-size:13px;font-weight:400}
+.wn{font-weight:600;white-space:nowrap;color:var(--soft)}
+:root{--gold:#e5b74b;--silver:#c5cad3;--bronze:#d18a4a}
+@media (prefers-color-scheme:light){:root{--gold:#b8860b;--silver:#7f8792;--bronze:#a35a1f}}
+.lbrow:nth-child(1){--c:var(--gold)}.lbrow:nth-child(2){--c:var(--silver)}.lbrow:nth-child(3){--c:var(--bronze)}
+.lbrow:nth-child(-n+3){border-inline-start-color:var(--c)}
+.lbrow:nth-child(-n+3) .rk,.lbrow:nth-child(-n+3) .nm,.lbrow:nth-child(-n+3) .wn{color:var(--c);font-weight:700}
 `;
 
 // The page script: picks the language, draws the groups, search and copy. All text goes in with textContent (never as HTML).
@@ -744,32 +1154,66 @@ function toast(msg){var b=$("toast");if(!b)return;b.textContent=msg;b.classList.
 function copy(txt){function done(){toast(t("copied",{c:txt}))}
   try{navigator.clipboard.writeText(txt).then(done,function(){fallback()})}catch(e){fallback()}
   function fallback(){var a=document.createElement("textarea");a.value=txt;a.setAttribute("readonly","");a.style.position="fixed";a.style.opacity="0";document.body.appendChild(a);a.select();try{document.execCommand("copy");done()}catch(e){}a.remove()}}
+var cur="cmds",shownPlayers=0,sub="all";
+function ownCount(){return D.commands.filter(function(c){return !c.builtin&&!c.game}).length}
+function setCount(){
+  if(!$("count")||!D)return;
+  var lb=cur==="lb",k=lb?shownPlayers:ownCount(),p=lb?"players":"count",m=k%100;
+  $("count").textContent=k===1?t(p+"1"):k===2?t(p+"2"):(m>=3&&m<=10)?t(p+"_few",{n:k}):t(p,{n:k})}
+function drawLb(){
+  var box=$("lbrows");if(!box||!D||!D.leaderboard)return;box.textContent="";
+  var rows=(D.leaderboard[sub]||[]).filter(function(r){return r&&r.w>0}).slice(0,10);
+  shownPlayers=rows.length;setCount();
+  if(!rows.length){var e=document.createElement("p");e.className="empty";e.textContent=t("lb_empty");box.appendChild(e);return}
+  rows.forEach(function(r,i){
+    var row=document.createElement("div");row.className="lbrow";
+    var rk=document.createElement("span");rk.className="rk";rk.textContent=String(i+1);
+    var nm=document.createElement("div");nm.className="nm";var b=document.createElement("bdi");b.textContent=r.n;nm.appendChild(b);
+    if(sub==="all"){var s=document.createElement("small");s.textContent="حروف "+(r.l||0)+" · رتب "+(r.u||0);nm.appendChild(s)}
+    var w=document.createElement("span");w.className="wn";w.textContent=r.w===1?t("win1"):t("wins",{n:r.w});
+    row.appendChild(rk);row.appendChild(nm);row.appendChild(w);box.appendChild(row)})}
+function showTab(tab){
+  if(!$("tabs"))return;cur=tab;
+  document.querySelectorAll(".tab").forEach(function(x){x.classList.toggle("on",x.getAttribute("data-tab")===tab)});
+  $("pane-cmds").hidden=tab==="lb";$("pane-lb").hidden=tab!=="lb";setCount();
+  try{var base=location.pathname.replace(/\\/leaderboard\\/?$/,"");history.replaceState(null,"",tab==="lb"?base+"/leaderboard":base)}catch(e){}}
+function chip(c,sub,small){   // 1.13.0: a command with a short example (or what it does) under its name
+  var b=document.createElement("button"),i=document.createElement("bdi");b.type="button";b.className="chip"+(sub?" has-ex":"");i.textContent=c.name;
+  var top=document.createElement("span");top.className="ct";top.appendChild(i);
+  if(small){var s=document.createElement("small");s.textContent=small;top.appendChild(s)}
+  b.appendChild(top);
+  if(sub){var e=document.createElement("span");e.className="ex";e.dir="auto";e.textContent=sub;b.appendChild(e);b.title=c.name+"  →  "+sub}
+  b.addEventListener("click",function(){copy(c.name)});return b}
+function group(title,list,cls,make){var g=document.createElement("section");g.className="group"+(cls?" "+cls:"");var h=document.createElement("h2");h.textContent=title+" ";
+  var n=document.createElement("span");n.className="n";n.textContent="("+list.length+")";h.appendChild(n);g.appendChild(h);
+  var w=document.createElement("div");w.className="chips";list.forEach(function(c){w.appendChild(make(c))});g.appendChild(w);return g}
+function biText(c){return c.key?t("bd_"+c.key):""}
+function gmText(c){return t("gd_"+c.game+"_"+c.what)}
+function hit(c,q,extra){return !q||c.name.toLowerCase().indexOf(q)>=0||(extra||"").toLowerCase().indexOf(q)>=0}
 function draw(){
   if(!D)return;var q=($("q").value||"").trim().toLowerCase(),box=$("groups"),shown=0;box.textContent="";
   ORDER.forEach(function(p){
-    var cs=D.commands.filter(function(c){return !c.builtin&&c.perm===p&&(!q||c.name.toLowerCase().indexOf(q)>=0)});if(!cs.length)return;shown+=cs.length;
-    var g=document.createElement("section");g.className="group";var h=document.createElement("h2");h.textContent=t("g_"+p)+" ";
-    var n=document.createElement("span");n.className="n";n.textContent="("+cs.length+")";h.appendChild(n);g.appendChild(h);
-    var w=document.createElement("div");w.className="chips";
-    cs.forEach(function(c){var b=document.createElement("button"),i=document.createElement("bdi");b.type="button";b.className="chip";i.textContent=c.name;b.appendChild(i);b.addEventListener("click",function(){copy(c.name)});w.appendChild(b)});
-    g.appendChild(w);box.appendChild(g)});
-  var bi=D.commands.filter(function(c){return c.builtin&&(!q||c.name.toLowerCase().indexOf(q)>=0)});    // the app's built-in commands
-  if(bi.length){shown+=bi.length;var g=document.createElement("section");g.className="group builtin";var h=document.createElement("h2");h.textContent=t("g_builtin")+" ";
-    var n=document.createElement("span");n.className="n";n.textContent="("+bi.length+")";h.appendChild(n);g.appendChild(h);
-    var w=document.createElement("div");w.className="chips";
-    bi.forEach(function(c){var b=document.createElement("button"),i=document.createElement("bdi"),s=document.createElement("small");b.type="button";b.className="chip";i.textContent=c.name;b.appendChild(i);
-      s.textContent=t("g_"+c.perm);b.appendChild(s);b.title=t("bi_who",{w:t("g_"+c.perm)});b.addEventListener("click",function(){copy(c.name)});w.appendChild(b)});
-    g.appendChild(w);box.appendChild(g)}
-  var none=$("none");none.hidden=shown>0;var own=D.commands.filter(function(c){return !c.builtin});none.textContent=own.length||bi.length?t("none"):t("empty");
-  var k=own.length,m=k%100;$("count").textContent=k===1?t("count1"):k===2?t("count2"):(m>=3&&m<=10)?t("count_few",{n:k}):t("count",{n:k});   // Arabic: 2 = dual, 3-10 = plural
+    var cs=D.commands.filter(function(c){return !c.builtin&&!c.game&&c.perm===p&&hit(c,q,c.ex)});if(!cs.length)return;shown+=cs.length;
+    box.appendChild(group(t("g_"+p),cs,"",function(c){return chip(c,c.ex||"","")}))});
+  var gm=D.commands.filter(function(c){return c.game&&hit(c,q,gmText(c))});      // 1.13.0: the mini games' commands
+  if(gm.length){shown+=gm.length;box.appendChild(group(t("g_games"),gm,"games",function(c){var b=chip(c,gmText(c),t("g_"+c.perm));return b}))}
+  var bi=D.commands.filter(function(c){return c.builtin&&hit(c,q,biText(c))});    // the app's built-in commands
+  if(bi.length){shown+=bi.length;box.appendChild(group(t("g_builtin"),bi,"builtin",function(c){var b=chip(c,biText(c),t("g_"+c.perm));if(!biText(c))b.title=t("bi_who",{w:t("g_"+c.perm)});return b}))}
+  var none=$("none");none.hidden=shown>0;var own=D.commands.filter(function(c){return !c.builtin&&!c.game});none.textContent=own.length||bi.length||gm.length?t("none"):t("empty");
+  setCount();   // Arabic: 2 = dual, 3-10 = plural
   $("updated").textContent=t("updated",{t:when(D.updated)})}
 function apply(){
   document.documentElement.lang=lang;document.documentElement.dir=lang==="ar"?"rtl":"ltr";
   document.querySelectorAll("[data-t]").forEach(function(x){var p={};for(var k in x.dataset)p[k]=x.dataset[k];if(p.d)p.d=when(+p.d,true);x.textContent=t(x.getAttribute("data-t"),p)});
   var q=$("q");if(q){q.placeholder=t("search");q.setAttribute("aria-label",t("search"))}
-  var b=$("lang");b.textContent=t("lang");b.lang=lang==="ar"?"en":"ar";draw()}
+  var b=$("lang");b.textContent=t("lang");b.lang=lang==="ar"?"en":"ar";draw();drawLb()}
 $("lang").addEventListener("click",function(){lang=lang==="ar"?"en":"ar";try{localStorage.setItem("lang",lang)}catch(e){}apply()});
 if($("q"))$("q").addEventListener("input",draw);
 document.querySelectorAll("img.av").forEach(function(im){function swap(){var m=document.createElement("div");m.className="av mark";im.replaceWith(m)}if(im.complete&&!im.naturalWidth)swap();else im.addEventListener("error",swap)});   // no picture: the red mark instead
+if($("tabs")){
+  document.querySelectorAll(".tab").forEach(function(x){x.addEventListener("click",function(){showTab(x.getAttribute("data-tab"))})});
+  document.querySelectorAll(".sub-tab").forEach(function(x){x.addEventListener("click",function(){sub=x.getAttribute("data-sub");document.querySelectorAll(".sub-tab").forEach(function(y){y.classList.toggle("on",y===x)});drawLb()})});
+  if(D&&D.tab==="lb")showTab("lb");
+}
 apply();
 })();`;

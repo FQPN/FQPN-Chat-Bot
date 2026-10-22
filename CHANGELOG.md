@@ -1,5 +1,20 @@
 # Changelog
 
+  ## 1.13.0
+   - Editor link (Commands > Editor link): give someone you trust a link and a password; they can change your Commands, Timers, Events, Greetings, Blocklist, Moderation and Mini games from the website, on the app's own pages, and read the Logs.
+   - A new password every time, the link ends after 24 hours, and you can cancel it at any moment. Every change is checked by your app and written in the Logs.
+   - Your public command page has a Games leaderboard tab (the top 10 of each game) and uses your accent color. Hide the leaderboard in Commands > Public list.
+   - Reply to the sender: a new switch on every command (off at first). Off, the bot writes a normal message, also from a bot account (it used to reply to every message); on, it replies to the viewer's message.
+   - New variables, grouped by type in the command editor: $(accountage), $(random.chatter), $(followers), $(firststreak), $(weather city) and $(time city). Their "New" tag goes away once you've looked at one (hover it, use it, or try it in the Test chat).
+   - New command type, Pin first message: the first viewer of the stream to write a word like first or اول gets their message pinned in chat (until the stream ends or 30 s to 30 min), with an optional reply and a streak.
+   - Fixed: the app window could stay partly above the top of the screen (the 1.9.1 fix was missing). It now moves back as soon as you let go of it or open it again.
+   - Fixed: a bot account's login could show "expired or missing" every few hours (two copies of its login were renewed in turn, and Twitch refused one), and timers were sometimes posted twice when Twitch answered the bot account too slowly. In most cases an affected login repairs itself.
+   - New Test chat page (Chat tools > Test chat): write as any viewer (viewer, sub, VIP, mod, you) and see what the bot answers, with commands, games, filters, greetings and Pin first message; pretend any event or donation. Nothing is sent to Twitch and nothing real changes. With ready-made command recipes, every variable to try, a "try a response" box and a short how-to. The command editor has a Test button for unsaved commands.
+   - Event replies can show totals with {total} (all the subs someone gifted, all their Bits, all their donations in that currency, or the months subscribed). The default sub, gift, Bits and donation replies use it; replies you changed stay as you wrote them.
+   - New Giveaways page (Chat tools > Giveaways), like Nightbot's: draw a random active chatter (last 5 to 60 minutes), let viewers join by typing a keyword (open, close by hand or after N minutes, draw), or have them guess a secret number (the first right guess wins). Who can enter (user level), followers only, subscriber luck 1x-5x; never the bot, you or people on the Blocklist. Reroll, the winner's messages after the draw, the last 20 winners, saved across a restart. Practice it in the Test chat.
+   - Your public command page shows a short example of what each command says (example names in place of the variables; links inside $(urlfetch) are never shown) and your mini games' commands in their own group, with what each one and each built-in command does. Commands > Public list can switch the examples off. (Publish web/worker.js.)
+   - The window's top bar takes the app's colors (Windows 11: the exact dark or light color; Windows 10: dark or light). The Advanced variables are always shown.
+
 ## 1.12.0
    - Several channels in one app: each with its own commands, timers, greetings, moderation, games and settings, all running at once.
    - Bot accounts: one bot account can send for several channels; see which bot sends for which channel, and whether it can.

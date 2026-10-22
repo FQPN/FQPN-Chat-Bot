@@ -6,6 +6,7 @@ automatically, so changes apply without restarting anything."""
 import asyncio
 import copy
 import os
+import json
 import logging
 import re
 import threading
@@ -16,7 +17,7 @@ from pathlib import Path
 import aiohttp
 from aiohttp import web
 
-from . import accounts, auth, botauth, desktop, events, greetings, manage, minigames, moderation, notify, publiclist, support, updater
+from . import accounts, auth, botauth, desktop, editor, events, greetings, manage, minigames, moderation, notify, pinfirst, publiclist, support, updater
 from .store import EmptySaveRefused, Store
 
 log = logging.getLogger("twitchbot.dashboard")
@@ -152,6 +153,7 @@ async def _register_bot(state) -> None:
     bid = str(acc["user_id"])
     accounts.bot_token_file(bid).parent.mkdir(parents=True, exist_ok=True)
     accounts._copy_checked(botauth.token_file(), accounts.bot_token_file(bid))
+    botauth.clear_token()              # 1.13.0: ONE copy of a login only (two copies renewing each other made Twitch refuse one)
     if bid not in [b["id"] for b in reg["bots"]]:
         reg["bots"].append({"id": bid, "login": acc["login"], "added": int(time.time())})
     accounts.save(reg)
@@ -179,6 +181,9 @@ def restart_bot(state: dict) -> None:
     bot = state.get("bot")
     if bot is not None:
         state["close_task"] = asyncio.create_task(bot.close())
+
+
+STATUS_FN = None        # (set by start(): the page's status, for the editor link's copy of the app)
 
 
 def channels_info(state):
@@ -242,6 +247,8 @@ def keep_tour_flag(section: str, raw, store: Store):
                 raw[key] = bool(stored.get(key, False))
         if "wnSeen" not in raw:
             raw["wnSeen"] = str(stored.get("wnSeen", ""))          # the last version whose "What's new" was seen (1.8.0)
+        if "newSeen" not in raw:
+            raw["newSeen"] = list(stored.get("newSeen") or [])     # the "New" tags already looked at (1.13.0)
     return raw
 
 
@@ -300,6 +307,11 @@ async def refresh_bot_mod(state: dict) -> None:
     if not owner or not state.get("bot_account"):
         state["bot_mod"] = None
         return
+    if accounts.load() is not None:
+        # 1.13.0: several channels / shared bot accounts: the bot list's own sender checks this (Bot accounts page). Asking
+        # with the channel's OLD copy of the bot login renewed that copy too, which made Twitch refuse the bot list's
+        # renewal later ("login expired or is missing" every few hours).
+        return
     state["mod_busy"] = True
     try:
         state["bot_mod"] = {"is_mod": await botauth.is_moderator(owner), "at": time.time()}
@@ -339,6 +351,29 @@ def _bool(v, what: str) -> bool:
     return v
 
 
+def _pin_command(name: str, c: dict) -> dict:
+    """A Pin first message command (1.13.0), checked: trigger words, how long the pin stays, the three switches, the reply."""
+    raw = c.get("words")
+    if not isinstance(raw, list):
+        raise ValidationError(f"The trigger words of '{name}' must be a list.")
+    for w in raw:
+        if not isinstance(w, str) or len(w.strip()) > pinfirst.WORD_MAX:
+            raise ValidationError(f"A trigger word can be at most {pinfirst.WORD_MAX} characters.")
+    words = pinfirst.clean_words(raw)
+    if not words:
+        raise ValidationError(f"'{name}' needs at least one trigger word.")
+    if len([w for w in raw if str(w).strip()]) > pinfirst.MAX_WORDS:
+        raise ValidationError(f"'{name}' can have at most {pinfirst.MAX_WORDS} trigger words.")
+    secs = c.get("pin_secs", 0)
+    if isinstance(secs, bool) or secs not in pinfirst.PIN_CHOICES:
+        raise ValidationError(f"How long '{name}' pins the message isn't one of the choices.")
+    reply = _text(c.get("response") or pinfirst.DEFAULT_REPLY, f"Reply for '{name}'", manage.ACTION_MAX["pinfirst"])
+    return {"response": reply, "permission": "everyone", "cooldown": 0, "enabled": _bool(c.get("enabled", True), f"Enabled for '{name}'"),
+            "aliases": [], "action": pinfirst.ACTION, "words": words, "pin_secs": int(secs),
+            "block_bad": _bool(c.get("block_bad", True), "Block bad words"), "once": _bool(c.get("once", True), "Only once per stream"),
+            "reply_on": _bool(c.get("reply_on", False), "Reply when pinned")}
+
+
 def validate(section: str, data, prefix: str = "!"):
     if section == "commands":
         if not isinstance(data, dict):
@@ -371,8 +406,11 @@ def validate(section: str, data, prefix: str = "!"):
             action = c.get("action", "text")
             if action not in manage.ACTIONS:
                 raise ValidationError(f"Command '{name}' has an unknown reply type.")
-            if action != "text" and len(str(c.get("response") or "").strip()) > manage.ACTION_MAX[action]:
+            if action in ("game", "title") and len(str(c.get("response") or "").strip()) > manage.ACTION_MAX[action]:
                 raise ValidationError(f"The {'game name' if action == 'game' else 'title'} of '{name}' can be at most {manage.ACTION_MAX[action]} characters.")
+            if action == pinfirst.ACTION:      # 1.13.0: Pin first message
+                out[name] = _pin_command(name, c)
+                continue
             out[name] = {
                 "response": _text(c.get("response"), f"Response for '{name}'"),
                 "permission": c["permission"],
@@ -382,6 +420,8 @@ def validate(section: str, data, prefix: str = "!"):
             }
             if action != "text":
                 out[name]["action"] = action      # only shortcuts carry it, so plain commands stay exactly as before
+            elif _bool(c.get("reply", False), f"Reply to the sender for '{name}'"):
+                out[name]["reply"] = True         # 1.13.0: answer as a reply to the viewer's message (off = a normal message)
         used = {}
         for n, c in out.items():
             for key in [n, *c["aliases"]]:
@@ -519,6 +559,8 @@ def validate(section: str, data, prefix: str = "!"):
             "disabled_builtins": sorted(set(off)),
             "separate_bot": _bool(data.get("separate_bot", False), "Use a separate bot account"),
             "public_list": _bool(data.get("public_list", False), "Public command list"),
+            "public_leaderboard": _bool(data.get("public_leaderboard", True), "Games leaderboard on the public page"),
+            "public_examples": _bool(data.get("public_examples", True), "Show what each command says on the public page"),
             "public_hidden": hidden_clean,
         }
 
@@ -743,6 +785,9 @@ def validate(section: str, data, prefix: str = "!"):
             "tourDone": _bool(data.get("tourDone", False), "Tutorial"),
             "gsDone": _bool(data.get("gsDone", False), "Getting started"),
             "wnSeen": str(data.get("wnSeen", ""))[:20] if re.fullmatch(r"[0-9a-z.\-]{0,20}", str(data.get("wnSeen", ""))) else "",
+            # 1.13.0: the "New" tags already looked at (a variable like "$(accountage)", or "pinfirst"); anything else is dropped
+            "newSeen": [x for x in dict.fromkeys(data.get("newSeen") or []) if isinstance(x, str) and re.fullmatch(r"(\$\([a-z. ]{1,30}\)|[a-z]{1,20})", x)][:50]
+                       if isinstance(data.get("newSeen"), list) else [],
         }
 
     raise ValidationError("Unknown section.")
@@ -788,7 +833,7 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
     async def status(request):
         info = bot_account_info(state, store.get("settings"))
         mod = state.get("bot_mod") or {}
-        if (info["enabled"] and info["login"] and state.get("account_id") and not state.get("mod_busy")
+        if (info["enabled"] and info["login"] and state.get("account_id") and not state.get("mod_busy") and accounts.load() is None
                 and time.time() - mod.get("at", 0) > 120):      # keep the "is it a moderator?" answer fresh
             state["mod_task"] = asyncio.create_task(refresh_bot_mod(state))
         bot = state.get("bot")
@@ -819,6 +864,7 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             "game_limits": bot.game_limits() if bot and hasattr(bot, "game_limits") else None,
             "channels": channels_info(state),          # 1.12.0: every channel, which one is shown, who sends its replies
             "bot_add": state.get("bot_add"),            # 1.12.0: "Add bot account": waiting (code) / connected / error
+            "editor": editor.state_of(store),            # 1.13.0: the editor link (url, when it ends, edits applied)
             # what changed since the page last looked: it reloads the settings / the logs only when these move (1.9.0)
             "rev": f"{getattr(store, 'boot', 0)}:{getattr(store, 'rev', 0)}",
             "logrev": f"{getattr(store, 'boot', 0)}:{getattr(store.activity, 'rev', 0)}",   # All games: rounds used, cooldown left      # the Mini games round in progress (the card's live box)
@@ -904,6 +950,127 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             raise web.HTTPNotFound()
         return web.json_response({"ok": True, "bots": bots_info(state)})
 
+    async def _status_json():
+        """The status the page gets, for the editor link's copy of the app (1.13.0). Runs for the channel of the calling task."""
+        resp = await status(None)
+        return json.loads(resp.body)
+
+    global STATUS_FN
+    STATUS_FN = _status_json
+
+    async def editor_action(request):
+        """1.13.0: make a new editor link (a new password, shown once) or cancel it."""
+        try:
+            if request.match_info["action"] == "create":
+                return web.json_response(await editor.create(store, state.get("account") or ""))
+            if request.match_info["action"] == "cancel":
+                await editor.cancel(store)
+                return web.json_response({"ok": True})
+        except editor.EditorError as e:
+            return web.json_response({"error": str(e)}, status=400)
+        raise web.HTTPNotFound()
+
+    async def test_view(request):
+        """1.13.0 Test chat: what the pretend chat shows (the page asks every second)."""
+        from . import testchat
+        return web.json_response(testchat.get(state, store).view())
+
+    async def test_action(request):
+        """1.13.0 Test chat: say something as a pretend viewer, pretend an event, try a reply text, clear, pretend live."""
+        from . import testchat
+        sim = testchat.get(state, store)
+        action = request.match_info["action"]
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        name, role = str(body.get("name") or ""), str(body.get("role") or "viewer")
+        try:
+            if action == "say":
+                temp = body.get("temp")
+                if temp is not None:     # a command tried without saving it (the editor's Test button, a recipe): checked like a save
+                    if not isinstance(temp, dict) or len(temp) != 1:
+                        return web.json_response({"error": "Only one command can be tried at a time."}, status=400)
+                    temp = validate("commands", temp)
+                await sim.say(name, role, str(body.get("text") or ""), temp)
+            elif action == "event":
+                await sim.fake_event(str(body.get("key") or ""), body.get("value", 1), name, str(body.get("currency") or "USD"))
+            elif action == "try":
+                return web.json_response({"result": await sim.try_text(str(body.get("text") or ""), name, role, str(body.get("query") or ""))})
+            elif action == "clear":
+                sim.clear()
+            elif action == "live":
+                sim.set_live(bool(body.get("on")))
+            else:
+                raise web.HTTPNotFound()
+        except ValidationError as e:
+            return web.json_response({"error": str(e)}, status=400)
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
+        return web.json_response(sim.view())
+
+    def _giveaway_target(practice: bool):
+        """(store, bot) for a giveaway: the real ones, or the Test chat's pretend ones (practice)."""
+        if practice:
+            from . import testchat
+            sim = testchat.get(state, store)
+            return sim.store, sim
+        return store, state.get("bot")
+
+    async def titlebar_set(request):
+        """1.13.0: the page's colors, for the window's top bar (only in the app window; nothing happens in a browser)."""
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        bg, fg = str((body or {}).get("bg") or "").lower(), str((body or {}).get("fg") or "").lower()
+        if not (re.fullmatch(r"#[0-9a-f]{6}", bg) and re.fullmatch(r"#[0-9a-f]{6}", fg)):
+            return web.json_response({"error": "Colors must look like #1a2b3c."}, status=400)
+        if desktop.set_titlebar is not None:
+            desktop.set_titlebar(bg, fg, bool((body or {}).get("dark")))
+        return web.json_response({"ok": True, "window": desktop.set_titlebar is not None})
+
+    async def giveaway_view(request):
+        """1.13.0 Giveaways: the current giveaway (the page asks every 2 seconds while it's open)."""
+        from . import giveaway as G
+        st, bot = _giveaway_target(request.query.get("practice") == "1")
+        await G.tick(st, bot)
+        return web.json_response(G.view(st, G.load(st), bot, request.query.get("secret") == "1"))
+
+    async def giveaway_action(request):
+        """1.13.0 Giveaways: settings, start, close, draw (and reroll), remove an entry, clear."""
+        from . import giveaway as G
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        practice = bool(body.get("practice"))
+        st, bot = _giveaway_target(practice)
+        action = request.match_info["action"]
+        try:
+            if action == "settings":
+                G.update_settings(st, body.get("settings"))
+            elif action == "start":
+                await G.start(st, bot, str(body.get("type") or ""))
+            elif action == "close":
+                await G.close(st, bot)
+            elif action == "draw":
+                follows = None if (practice or bot is None) else getattr(bot, "giveaway_follows", None)
+                await G.draw(st, bot, follows)
+            elif action == "remove":
+                G.remove(st, str(body.get("login") or ""))
+            elif action == "clear":
+                G.clear(st)
+            else:
+                raise web.HTTPNotFound()
+        except G.GiveawayError as e:
+            return web.json_response({"error": str(e), "code": e.code}, status=400)
+        return web.json_response(G.view(st, G.load(st), bot, bool(body.get("secret"))))
+
     async def channel_action(request):
         """1.12.0: switch / add / remove a channel (main.py does the work; the page reloads afterwards)."""
         app_fns = state.get("app") or {}
@@ -918,7 +1085,7 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             elif action == "add":
                 app_fns["add_channel"]()
             elif action == "remove":
-                await app_fns["remove_channel"](str((data or {}).get("id", "")))
+                await app_fns["remove_channel"](str((data or {}).get("id", "")), bool((data or {}).get("disconnect")))
             else:
                 raise web.HTTPNotFound()
         except (KeyError, TypeError):
@@ -1157,7 +1324,13 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
     app.router.add_get("/api/logs", logs)
     app.router.add_post("/api/connect", connect)
     app.router.add_post("/api/support", support_send)
+    app.router.add_get("/api/test", test_view)              # 1.13.0: Test chat
+    app.router.add_post("/api/test/{action}", test_action)
+    app.router.add_get("/api/giveaway", giveaway_view)      # 1.13.0: Giveaways
+    app.router.add_post("/api/titlebar", titlebar_set)      # 1.13.0: the window's top bar in the app's colors
+    app.router.add_post("/api/giveaway/{action}", giveaway_action)
     app.router.add_post("/api/channels/{action}", channel_action)
+    app.router.add_post("/api/editor/{action}", editor_action)
     app.router.add_get("/api/bots", bots_get)
     app.router.add_post("/api/bots/{action}", bots_action)
     app.router.add_post("/api/disconnect", disconnect)

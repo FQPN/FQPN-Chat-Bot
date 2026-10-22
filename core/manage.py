@@ -30,16 +30,16 @@ USERLEVELS = {
 USERLEVEL_HELP = "everyone, subscriber, vip, moderator, owner"
 # Shortcut commands: instead of a reply, the command changes the stream's game or title (like Nightbot's !pg -a=!game ...).
 # In !cmadd / !cmedit, -a=!setgame or -a=!settitle makes the command a shortcut; the text after the options is the game or title.
-ACTIONS = ("text", "game", "title")
+ACTIONS = ("text", "game", "title", "pinfirst")      # 1.13.0: "pinfirst" = Pin first message (core/pinfirst.py, set up in the app)
 ACTION_BY_TARGET = {BUILTIN_PREFIX + BUILTIN_NAMES["game"]: "game", BUILTIN_PREFIX + BUILTIN_NAMES["title"]: "title"}
-ACTION_MAX = {"text": 500, "game": 100, "title": 140}       # 500 = Twitch's chat message limit (like Nightbot; 1.12.0, was 450)
+ACTION_MAX = {"text": 500, "game": 100, "title": 140, "pinfirst": 500}       # 500 = Twitch's chat message limit (like Nightbot; 1.12.0, was 450)
 ACTION_LEVEL = 3          # a shortcut changes the channel: only moderators and the broadcaster, whatever its user level says
 
 
 def effective_permission(cmd: dict) -> str:
     """The user level a command really needs (a shortcut always needs at least moderator)."""
     perm = cmd.get("permission", "everyone")
-    if cmd.get("action", "text") != "text" and perm not in ("moderator", "broadcaster"):
+    if cmd.get("action", "text") in ("game", "title") and perm not in ("moderator", "broadcaster"):
         return "moderator"
     return perm
 _FLAG = re.compile(r"^-(ul|cd|a)=(\S*)$", re.IGNORECASE)

@@ -3,7 +3,7 @@ import contextvars
 import logging
 import time
 
-from core import accounts, auth, botauth, dashboard, desktop, donations, notify, publiclist, updater, usage, watchdog
+from core import accounts, auth, botauth, dashboard, desktop, donations, editor, notify, publiclist, updater, usage, watchdog
 try:
     from core.greetings import DEVELOPERS as DEVELOPER_IDS      # (the developers' own channels are never turned off)
 except Exception:
@@ -120,7 +120,7 @@ async def main(open_browser=False):    # open_browser is ignored: the dashboard 
     state["app"] = {"start_channel": start_channel,
                     "add_channel": lambda: add_channel(runtimes, start_channel),
                     "switch_channel": lambda cid: switch_channel(runtimes, cid),
-                    "remove_channel": lambda cid: remove_channel(runtimes, cid)}
+                    "remove_channel": lambda cid, forget=False: remove_channel(runtimes, cid, forget)}
     await asyncio.gather(*[start_channel(rt) for rt in list(runtimes.values())])
 
 
@@ -143,6 +143,7 @@ async def pick_sender(rt: Runtime, account: dict):
             dest = accounts.bot_token_file(bid)
             if not dest.exists():
                 accounts._copy_checked(botauth.token_file(), dest)
+                botauth.clear_token()      # 1.13.0: one copy of the login only (the bot list's)
             if bid not in [b.get("id") for b in reg["bots"]]:
                 reg["bots"].append({"id": bid, "login": legacy["login"], "added": int(time.time())})
             entry.update(sender=bid, bot_moved=True)
@@ -270,8 +271,9 @@ async def _finish_add(rt: Runtime, runtimes: dict, start_channel) -> None:
             pass
 
 
-async def remove_channel(runtimes: dict, cid) -> None:
-    """Stops a channel's bot and takes it off the list. Its data folder is KEPT (adding it again brings everything back)."""
+async def remove_channel(runtimes: dict, cid, forget_login: bool = False) -> None:
+    """Stops a channel's bot and takes it off the list. Its data folder is KEPT (adding it again brings everything back).
+    forget_login (1.13.0, "Disconnect account" with several channels): its Twitch login is removed too."""
     cid = str(cid)
     reg = accounts.load()
     if not reg or cid not in runtimes or len([c for c in reg["channels"]]) <= 1:
@@ -289,6 +291,8 @@ async def remove_channel(runtimes: dict, cid) -> None:
     if reg.get("active") == cid:
         reg["active"] = reg["channels"][0]["id"]
     accounts.save(reg)
+    if forget_login:
+        accounts.channel_token_file(cid).unlink(missing_ok=True)
     if accounts.ACTIVE["id"] == cid:
         accounts.ACTIVE["id"] = reg["active"]
     log.info("Removed the channel %s from the list (its data folder is kept)", cid)
@@ -301,6 +305,7 @@ async def channel_loop(rt: Runtime, runtimes: dict):
     state["watchdog_task"] = asyncio.create_task(state["watchdog"].run())
     state["publist_syncer"] = publiclist.Syncer(store, state)    # the public command list website
     state["publist_task"] = asyncio.create_task(state["publist_syncer"].run())
+    state["editor_task"] = asyncio.create_task(editor.Syncer(store, state).run())     # 1.13.0: the editor link's edits
     state["banned"] = bool((store.get("usage_state") or {}).get("banned"))     # the last answer, until the website says otherwise
     state["usage_task"] = asyncio.create_task(usage.Reporter(state, store=store, on_change=lambda: dashboard.restart_bot(state)).run())     # channel name + app version, once a day (Settings > App explains it)
     last_error_notice = 0.0

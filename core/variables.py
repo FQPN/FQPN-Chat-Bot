@@ -1,5 +1,6 @@
 """Nightbot-style variables: $(user) $(touser) $(query) $(querystring)
 $(count) $(urlfetch URL) $(eval MATH) $(channel) $(game) $(title) $(uptime) $(viewers)
+1.13.0: $(accountage) $(random.chatter) $(followers) $(firststreak) $(weather CITY) $(time CITY)
 
 Safety rules:
 - Only the response template is expanded. Text that comes from chat (the
@@ -24,7 +25,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Awaitable, Callable
 from urllib.parse import quote, urljoin, urlsplit
-from . import jseval
+from . import jseval, world
 
 import aiohttp
 from aiohttp.abc import AbstractResolver
@@ -317,6 +318,12 @@ class Context:
     streak: int | None = None   # a viewer's Watch Streak (only set for the Watch Streak reply)
     extra: dict = field(default_factory=dict)   # variables of a Twitch event: bits, gifts, raider, viewers, level, tier, months, message
     fetch: Callable[[str], Awaitable[str]] = fetch_url
+    # 1.13.0
+    account_created: Callable[[str | None], Awaitable[datetime | None]] | None = None   # (a login, or None = the viewer)
+    random_chatter: Callable[[], str] | None = None      # someone who wrote in chat lately
+    followers: Callable[[], Awaitable[int | None]] | None = None
+    first_streak: Callable[[], int] | None = None         # how many streams in a row this viewer was first (Pin first message)
+    world_fetch: Callable[[str], Awaitable[dict]] = world.get_json
 
     @property
     def args(self) -> list[str]:
@@ -405,6 +412,33 @@ async def expand(template: str, ctx: Context) -> str:
             if key == "followage":
                 return follow_age(when, lang=ctx.lang)
             return f"followed {ctx.channel} on {follow_date(when)} ({follow_age(when)} ago)"
+        if key == "accountage":
+            other = arg.strip().lstrip("@") or (ctx.args[0].lstrip("@") if ctx.args else "")
+            if not ctx.account_created:
+                return "(unknown)"
+            try:
+                when = await ctx.account_created(restore(other) or None)
+            except Exception:
+                log.exception("$(accountage) lookup failed")
+                return "(account lookup failed)"
+            if when is None:
+                return "(no such account)" if ctx.lang != "ar" else "(لا يوجد حساب بهذا الاسم)"
+            return follow_age(when, lang=ctx.lang)
+        if key == "random.chatter":
+            return (ctx.random_chatter() if ctx.random_chatter else "") or ctx.user
+        if key == "followers":
+            try:
+                n = await ctx.followers() if ctx.followers else None
+            except Exception:
+                n = None
+            return "(unknown)" if n is None else str(n)
+        if key == "firststreak":
+            return str(ctx.first_streak() if ctx.first_streak else 0)
+        if key in ("weather", "time"):
+            city = restore(arg)
+            if key == "weather":
+                return await world.weather(city, ctx.lang, ctx.world_fetch)
+            return await world.local_time(city, ctx.lang, ctx.world_fetch)
         if key == "streak" and ctx.streak is not None:
             return str(ctx.streak)
         if key == "viewers" and "viewers" not in ctx.extra:

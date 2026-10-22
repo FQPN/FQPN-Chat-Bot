@@ -241,6 +241,7 @@ class Shell:
         self.window = None
         self.icon = None
         self.quitting = False
+        self._move_lock = threading.Lock()      # one "is it still on the screen?" check after a move at a time
 
     def closing(self):
         """Called just before the window closes. Returning False keeps it alive in the tray instead."""
@@ -280,7 +281,30 @@ class Shell:
         threading.Thread(target=self.page_visible, args=(True,), daemon=True).start()
         threading.Thread(target=self.bring_on_screen, daemon=True).start()
 
-    def bring_on_screen(self, wait: float = 0.4):
+    def moved_handler(self):
+        """pywebview's "moved" event (1.9.1): fires many times while dragging, so only one check runs at a time; it waits
+        for the mouse button to be let go, then fixes the window at once. Takes NO arguments (pywebview passes x, y)."""
+        def handler():
+            if not self._move_lock.acquire(blocking=False):
+                return
+            def go():
+                try:
+                    from core import winpos
+                    winpos.check_after_move(WINDOW_TITLE)
+                except Exception:
+                    log.exception("Could not check the window position")
+                finally:
+                    self._move_lock.release()
+            threading.Thread(target=go, daemon=True).start()
+        return handler
+
+    def screen_handler(self):
+        """pywebview's "restored" / "shown" events: check at once that the window is on a screen. Takes NO arguments."""
+        def handler():
+            threading.Thread(target=self.bring_on_screen, daemon=True).start()
+        return handler
+
+    def bring_on_screen(self, wait: float = 0.15):
         """After showing it from the tray / a second launch: if Windows put it off the screen, move it back."""
         try:
             from core import winpos
@@ -407,7 +431,16 @@ def run() -> None:
             ev = getattr(shell.window.events, name, None)        # (older pywebview versions don't have every event)
             if ev is not None:
                 ev += shell.visibility_handler(visible)
+                if name in ("restored", "shown"):
+                    ev += shell.screen_handler()          # 1.9.1: back from minimized / the tray -> on a screen at once
+        moved = getattr(shell.window.events, "moved", None)
+        if moved is not None:
+            moved += shell.moved_handler()                # 1.9.1: dragged partly above the screen -> fixed when you let go
         desktop.show_window = shell.show              # a second launch asks this copy to show its window
+        def _titlebar(bg, fg, dark):                  # 1.13.0: the top bar in the app's colors (Windows paints it)
+            from core import titlebar
+            threading.Thread(target=titlebar.apply, args=(WINDOW_TITLE, bg, fg, dark), daemon=True).start()
+        desktop.set_titlebar = _titlebar
         # private_mode=False + storage_path keeps the dashboard's theme/language between launches
         # On Windows the window must be the Edge (WebView2) one: the old built-in engine cannot show this dashboard properly.
         webview.start(shell.start_tray, (hidden,), private_mode=False, storage_path=str(home / "webview"),

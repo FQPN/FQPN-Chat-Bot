@@ -15,14 +15,14 @@ problems, notes = [], []
 
 REQUIRED = ["main.py", "launcher.py", "core/__init__.py", "core/auth.py", "core/bot.py", "core/dashboard.py",
             "core/dashboard.html", "core/store.py", "core/manage.py", "core/variables.py", "core/greetings.py",
-            "core/events.py", "core/version.py", "core/activity.py", "core/notify.py", "core/desktop.py", "core/updater.py", "core/botauth.py", "core/donations.py", "core/watchdog.py", "core/stream.py", "core/publiclist.py", "core/usage.py", "core/moderation.py", "core/logsafe.py", "core/jseval.py", "core/minigames.py", "core/gamewords.py", "core/winpos.py", "core/support.py", "core/accounts.py", "core/safefile.py", "core/botsender.py"]
+            "core/events.py", "core/version.py", "core/activity.py", "core/notify.py", "core/desktop.py", "core/updater.py", "core/botauth.py", "core/donations.py", "core/watchdog.py", "core/stream.py", "core/publiclist.py", "core/usage.py", "core/moderation.py", "core/logsafe.py", "core/jseval.py", "core/minigames.py", "core/gamewords.py", "core/winpos.py", "core/support.py", "core/accounts.py", "core/safefile.py", "core/botsender.py", "core/editor.py", "core/pinfirst.py", "core/world.py", "core/testchat.py", "core/giveaway.py", "core/titlebar.py"]
 
 # a phrase that only the NEW version of each file contains
 NEW_IN = {
     "main.py": ["open_browser", "updater.loop", "apply_launch_defaults", "python launcher.py", "botauth", "donations", "watchdog", "publiclist.Syncer", "usage.Reporter"],
-    "launcher.py": ["min_size=(1000, 650)", "class Shell", "ensure_single_instance", "fail_no_window", "edgechromium", "read_port", "fail_no_dashboard", "bring_on_screen", "winpos.start_watching"],
+    "launcher.py": ["min_size=(1000, 650)", "class Shell", "ensure_single_instance", "fail_no_window", "edgechromium", "read_port", "fail_no_dashboard", "bring_on_screen", "winpos.start_watching", "def moved_handler", "def screen_handler"],
     "core/store.py": ["ActivityLog", '"prefs"', "apply_launch_defaults", "disabled_builtins", "separate_bot", "donation", "tourDone", "gsDone", "stream_state", "public_hidden", "publist_state", "_migrate_games"],
-    "core/bot.py": ["store.activity", "notify.event", "_log_chat", "disabled_builtins", "BY_TYPED", "bot_account", "send_test", "on_donation", "live_fail", "StreamSession", "event_stream_online", "_find_game", "SEARCH_URL", "developer_messages", "event_mod_action", "ChannelModerateSubscription", "def _log_bot", "def _login_trouble", "def _quiet_check", "def _game_message", "helix/channels/followers", "def game_view"],
+    "core/bot.py": ["store.activity", "notify.event", "_log_chat", "disabled_builtins", "BY_TYPED", "bot_account", "send_test", "on_donation", "live_fail", "StreamSession", "event_stream_online", "_find_game", "SEARCH_URL", "developer_messages", "event_mod_action", "ChannelModerateSubscription", "def _log_bot", "def _login_trouble", "def _quiet_check", "def _game_message", "helix/channels/followers", "def game_view", "def _pin_first", "reply_to_message_id", "def _random_chatter", "def _add_total", "def _fqpn_init", "giveaway.on_message"],
     "core/donations.py": ["class DonationManager", "parse_streamelements", "CryptProtectData"],
     "core/events.py": ["DECIMAL", "donation"],
     "core/notify.py": ["donation"],
@@ -36,13 +36,20 @@ NEW_IN = {
     "core/minigames.py": ["class Round", "def new_round", "def add_win", "class ScrambleRound", "def reset_game"],
     "core/usage.py": ["class Reporter", "def payload", "def set_banned"],
     "core/moderation.py": ["class Moderator", "def bad_word", "def bad_link", "def describe_action"],
+    "core/winpos.py": ["def check_after_move", "SLACK ="],
+    "core/variables.py": ["random.chatter", "world.weather"],
+    "core/pinfirst.py": ["def claim", "PIN_CHOICES"],
+    "core/world.py": ["def local_time", "open-meteo"],
+    "core/testchat.py": ["class SimBot", "class SandboxStore"],
+    "core/giveaway.py": ["def weighted_pick", "async def on_message"],
+    "core/titlebar.py": ["def colorref", "DARK_MODE"],
     "core/greetings.py": ["DEVELOPERS", "def developer_messages"],
     "core/updater.py": ["NUDGE_GAP", "If-None-Match", "def nudge"],
-    "core/publiclist.py": ["class Syncer", "SITE =", "def build", "effective_permission"],
-    "core/dashboard.py": ['"prefs"', "updater", "/api/update/check", "/api/show", "disabled_builtins", "bind_first_free", "/api/botaccount/connect", "restart_bot", "/api/donations/", "tourDone", "gsDone", "/api/restart", "health_info", "The stream messages are invalid", "publist_info", "/api/publist/sync", "unknown reply type", "/api/update/nudge", "wnSeen", "section == \"moderation\"", "/api/dev/users", "/api/dev/ban", "bot.game_view()", "support_send", "channels_info", "bots_info"],
+    "core/publiclist.py": ["class Syncer", "SITE =", "def build", "effective_permission", "def game_rows", "def example"],
+    "core/dashboard.py": ['"prefs"', "updater", "/api/update/check", "/api/show", "disabled_builtins", "bind_first_free", "/api/botaccount/connect", "restart_bot", "/api/donations/", "tourDone", "gsDone", "/api/restart", "health_info", "The stream messages are invalid", "publist_info", "/api/publist/sync", "unknown reply type", "/api/update/nudge", "wnSeen", "section == \"moderation\"", "/api/dev/users", "/api/dev/ban", "bot.game_view()", "support_send", "channels_info", "bots_info", "def _pin_command", "/api/test/{action}", "/api/giveaway/{action}", "/api/titlebar"],
     "core/updater.py": ["def announce"],
     "core/desktop.py": ["quit_app", "show_window"],
-    "core/dashboard.html": ["data-pref", "spane-app", "updbtn", "toggleBuiltin", "transform-origin:15px 7px", 'class="sep"', "BNAME", "upop_title", "bac-cards", "botBanner", "dcards", "navActive", "ngrp", "startTour", "tourBtn", "v-greetings", "v-botaccount", "v-donations", "renderAccountMenu", "healthBanner", "renderStream", "renderPublist", "plmodal", "st_msg_on", "applyType", "mtype", "nudgeUpdate", "tr20_t", "usenote", "stmaster", "renderModeration", "mfmodal", "renderUsers", "appoff", "logtabs", "modRow", "botRow", "devgrp", "uspill", "renderMinigames", "mgmodal", "hl_heal_login", "tr22_t", "wnmodal", "wnCheck", "cmdSort", "cpager", "mgtabs", "mgLive", "v-support", "supSend", "chsw", "bamulti", "WNTOUR"],
+    "core/dashboard.html": ["data-pref", "spane-app", "updbtn", "toggleBuiltin", "transform-origin:15px 7px", 'class="sep"', "BNAME", "upop_title", "bac-cards", "botBanner", "dcards", "navActive", "ngrp", "startTour", "tourBtn", "v-greetings", "v-botaccount", "v-donations", "renderAccountMenu", "healthBanner", "renderStream", "renderPublist", "plmodal", "st_msg_on", "applyType", "mtype", "nudgeUpdate", "tr20_t", "usenote", "stmaster", "renderModeration", "mfmodal", "renderUsers", "appoff", "logtabs", "modRow", "botRow", "devgrp", "uspill", "renderMinigames", "mgmodal", "hl_heal_login", "tr22_t", "wnmodal", "wnCheck", "cmdSort", "cpager", "mgtabs", "mgLive", "v-support", "supSend", "chsw", "bamulti", "WNTOUR", "pinblock", "mreplyrow", "VGRP", "v-testchat", "TCREC", "v-giveaways", "gwChain"],
 }
 
 # a phrase that only the OLD version of a file contains (so it must NOT be there)
@@ -53,7 +60,7 @@ OLD_IN = {"core/dashboard.html": ["animation:tick", "transform-origin:0.75rem"],
 ROOT_FILES = ["launcher.py", "main.py", "check_install.py", "installer.iss", "requirements.txt", "README.md", "CHANGELOG.md",
               "RELEASING.md", "TwitchChatBot.spec", "icon.ico", "run.bat", "update.bat", "build.bat"]
 CORE_FILES = ["auth.py", "bot.py", "dashboard.py", "dashboard.html", "store.py", "manage.py", "variables.py", "greetings.py",
-              "events.py", "version.py", "activity.py", "notify.py", "desktop.py", "updater.py", "winpos.py", "support.py", "accounts.py", "safefile.py", "botsender.py"]
+              "events.py", "version.py", "activity.py", "notify.py", "desktop.py", "updater.py", "winpos.py", "support.py", "accounts.py", "safefile.py", "botsender.py", "editor.py", "pinfirst.py", "world.py", "testchat.py", "giveaway.py", "titlebar.py"]
 
 
 def ok(text):
@@ -142,6 +149,34 @@ if not problems:
             break
     else:
         ok("the program loads")
+
+# 7. (1.13.0) the bot never reuses a name TwitchIO uses itself: a method called "_setup" once replaced TwitchIO's own
+#    login step and the bot couldn't start. This compares with the REAL TwitchIO installed here.
+if not problems:
+    try:
+        import inspect as _inspect
+        import re as _re
+        from twitchio.ext import commands as _tc
+        from core import bot as _cb
+        theirs = set()
+        for _cls in _tc.Bot.__mro__:
+            if _cls is object:
+                continue
+            theirs |= set(vars(_cls))
+            try:
+                theirs |= set(_re.findall(r"self\.(\w+)\s*(?::[^=\n]+)?=", _inspect.getsource(_cls.__init__)))
+            except (TypeError, OSError):
+                pass
+        ours = {k for k in vars(_cb.TwitchBot) if k.startswith("_") and not k.startswith("__")}
+        ours |= set(_re.findall(r"self\.(_\w+)\s*(?::[^=\n]+)?=", _inspect.getsource(_cb.TwitchBot._fqpn_init)))
+        # names the app sets on purpose (set before TwitchIO starts, and used the same way since 1.0)
+        clash = sorted(n for n in ours & theirs if not n.startswith("__"))
+        if clash:
+            bad("The bot uses names that TwitchIO also uses: " + ", ".join(clash), "Send me this line (the bot may not start).")
+        else:
+            ok("the bot's names don't clash with TwitchIO's")
+    except Exception as e:
+        notes.append(f"Could not compare the bot with TwitchIO ({e.__class__.__name__}: {e}). Send me this line.")
 
 print()
 for n in notes:

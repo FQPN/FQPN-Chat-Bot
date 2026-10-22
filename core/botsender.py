@@ -31,7 +31,8 @@ MOD_TTL = 120.0            # how long "is the bot a moderator there?" is trusted
 
 class SendError(Exception):
     """code: login (expired / rejected) | scopes (a permission is missing) | notmod (needs moderator) | banned |
-    dropped (Twitch refused this message: chat mode, ...) | limit | offline | twitch"""
+    dropped (Twitch refused this message: chat mode, ...) | limit | offline | twitch |
+    unsure (1.13.0: sent, but Twitch didn't answer in time: never sent again by another account, so no double message)"""
     def __init__(self, code: str, detail: str = ""):
         super().__init__(detail or code)
         self.code, self.detail = code, detail
@@ -55,30 +56,87 @@ class BotSender:
         status, data = safefile.read(self.token_path())
         return data if status == "ok" and isinstance(data, dict) else None
 
-    async def token(self, force_refresh: bool = False) -> str:
+    async def token(self, force_refresh: bool = False, failed: str | None = None) -> str:
+        """The bot's access token, renewed when it is about to expire (or Twitch just refused it: `failed`).
+        1.13.0: Twitch's renewal key can be used ONCE. Before 1.13.0 a second copy of this login (the channel's old
+        bot_token.json, kept after it was copied into the bot list) was also renewed by the moderator check, and whichever
+        renewed second was refused: "login expired" every few hours. Now a refused renewal first tries those older copies
+        (the one with the newest key wins), and a network problem is never reported as an expired login."""
         async with self._lock:
             data = self.load()
             if not data:
                 self.problem = "login"
                 raise SendError("login", "This bot account's Twitch login is missing.")
+            if failed and data.get("access_token") != failed:
+                return data["access_token"]        # renewed meanwhile (another send got the same refusal first): use the new one
             if force_refresh or float(data.get("expires_at", 0)) - self.clock() < 120:
-                status, resp = await self._call("POST", auth.TOKEN_URL, form={"client_id": auth.CLIENT_ID, "grant_type": "refresh_token",
-                                                                              "refresh_token": data.get("refresh_token", "")})
-                if status != 200 or not resp.get("access_token"):
+                status, new = await self._renew(data.get("refresh_token", ""))
+                if status <= 0 or status >= 500:
+                    raise SendError("offline", "Twitch can't be reached to renew the bot account's login.")     # try again later
+                if new is None:
+                    new = await self._rescue(data)
+                if new is None:
                     self.problem = "login"
+                    log.warning("The bot account %s's Twitch login was refused when renewing it (Twitch answered %s)", self.login or self.bot_id, status)
                     raise SendError("login", "This bot account's Twitch login expired. Reconnect it on the Bot accounts page.")
-                data = {"access_token": resp["access_token"], "refresh_token": resp.get("refresh_token", data.get("refresh_token")),
-                        "expires_at": self.clock() + int(resp.get("expires_in", 0)), "scopes": resp.get("scope", data.get("scopes", []))}
+                data = new
                 safefile.write(self.token_path(), data)
+                self.problem = ""
             return data["access_token"]
 
+    async def _renew(self, refresh_token: str, scopes=None):
+        """(status, new login data or None). One renewal with Twitch."""
+        status, resp = await self._call("POST", auth.TOKEN_URL, form={"client_id": auth.CLIENT_ID, "grant_type": "refresh_token",
+                                                                      "refresh_token": refresh_token})
+        if status != 200 or not resp.get("access_token"):
+            return status, None
+        return status, {"access_token": resp["access_token"], "refresh_token": resp.get("refresh_token", refresh_token),
+                        "expires_at": self.clock() + int(resp.get("expires_in", 0)), "scopes": resp.get("scope", scopes or [])}
+
+    def _old_copies(self) -> list:
+        """Older files that may hold this bot's login: each channel's bot_token.json (before 1.12.0 / copied when the bot
+        was added) and the very old single one. Newest renewal first (it holds the only key Twitch still accepts)."""
+        paths = [accounts._auth_dir() / "bot_token.json"]
+        reg = accounts.load() or {}
+        paths += [accounts.channel_auth_file(c.get("id"), "bot_token.json") for c in reg.get("channels") or [] if c.get("id")]
+        found = []
+        for p in paths:
+            status, d = safefile.read(p)
+            if status == "ok" and isinstance(d, dict) and d.get("refresh_token"):
+                found.append((float(d.get("expires_at") or 0), p, d))
+        return sorted(found, key=lambda x: -x[0])
+
+    async def _rescue(self, data: dict):
+        """The renewal was refused: try the older copies of this login. One that works AND is this bot account is moved
+        into the bot list (and its old file removed); one that belongs to another account is saved back untouched."""
+        for _, path, old in self._old_copies():
+            if old.get("refresh_token") == data.get("refresh_token"):
+                continue
+            status, new = await self._renew(old["refresh_token"], old.get("scopes"))
+            if new is None:
+                continue
+            st, info = await self._call("GET", auth.VALIDATE_URL, oauth=new["access_token"])
+            if st == 200 and str(info.get("user_id")) == self.bot_id:
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+                log.info("The bot account %s's login was renewed from an older copy (%s)", self.login or self.bot_id, path.name)
+                return new
+            safefile.write(path, dict(old, **new))        # another account's login: keep it, with its new key
+        return None
+
     # ---------- talking to Twitch ----------
-    async def _call(self, method, url, params=None, json=None, token=None, form=None):
+    async def _call(self, method, url, params=None, json=None, token=None, form=None, oauth=None):
+        """(status, body). status 0 = Twitch couldn't be reached (nothing was sent); -1 = the request went out but no
+        answer came (it may or may not have arrived: a message is then NOT sent again by another account)."""
         if self._http is not None:
-            return await self._http(method, url, params, json if form is None else form, token)
+            return await self._http(method, url, params, json if form is None else form, token or oauth)
         headers = {"Client-Id": auth.CLIENT_ID}
         if token:
             headers["Authorization"] = f"Bearer {token}"
+        elif oauth:
+            headers["Authorization"] = f"OAuth {oauth}"
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as s:
                 async with s.request(method, url, params=params, json=json, data=form, headers=headers) as r:
@@ -87,14 +145,17 @@ class BotSender:
                     except (ValueError, aiohttp.ContentTypeError):
                         body = {}
                     return r.status, body if isinstance(body, dict) else {}
-        except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
+        except (aiohttp.ClientConnectorError, aiohttp.InvalidURL):
             return 0, {}
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
+            return -1, {}
 
     async def helix(self, method: str, path: str, params=None, body=None):
         """(status, body) of a Helix call as the bot; a rejected login is renewed once and retried."""
-        status, data = await self._call(method, HELIX + path, params, body, await self.token())
+        tok = await self.token()
+        status, data = await self._call(method, HELIX + path, params, body, tok)
         if status == 401:
-            status, data = await self._call(method, HELIX + path, params, body, await self.token(force_refresh=True))
+            status, data = await self._call(method, HELIX + path, params, body, await self.token(force_refresh=True, failed=tok))
         if status == 401:
             self.problem = "login"
         elif status in (200, 204):
@@ -147,6 +208,8 @@ class BotSender:
         msg = str((data or {}).get("message") or "")
         if status == 0:
             return SendError("offline", "Twitch can't be reached.")
+        if status == -1 or status >= 500:
+            return SendError("unsure", "Twitch didn't answer in time: the message may have been posted.")
         if status == 401:
             return SendError("login", msg)
         if status == 403:
