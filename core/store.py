@@ -149,6 +149,7 @@ DEFAULTS = {
     "greetings": {"enabled": True, "users": []},   # people to greet, each with one or more messages
     "greeted": {"session": "", "users": [], "last": {}},   # who was already greeted during the current stream
     "counters": {},
+    "chat_stats": {},                       # 1.14.0: Dashboard > Stream stats (core/chatstats.py), kept by the app
 }
 
 
@@ -180,6 +181,7 @@ class Store:
         self._migrate_events()
         self._migrate_blocked_words()
         self._migrate_games()
+        self._migrate_publist_on()
         # the activity shown on the Logs page, saved so it survives a restart
         self.activity = ActivityLog(self.dir / "activity.jsonl", days_fn=lambda: self.get("prefs").get("log_days", 30))
 
@@ -233,6 +235,22 @@ class Store:
         self.save("moderation", mod)
         block["words"] = []
         self.save("blocklist", block)
+
+    def _migrate_publist_on(self) -> None:
+        """1.14.0, once per channel: the public command list is switched on (the owner's choice), and !cmlist sends its link.
+        Marked in publist_state, so a streamer who switches it off again afterwards keeps it off."""
+        try:
+            ps = dict(self.get("publist_state") or {})
+            if ps.get("on_114"):
+                return
+            settings = dict(self.get("settings"))
+            if settings.get("public_list") is not True:
+                settings["public_list"] = True
+                self.save("settings", settings)
+            ps["on_114"] = True
+            self.save("publist_state", ps)
+        except Exception:
+            log.exception("Could not switch the public command list on")
 
     def _migrate_games(self) -> None:
         """1.9.0 added «رتب»: a game missing from games.json gets its default settings (switched off), and saved wins

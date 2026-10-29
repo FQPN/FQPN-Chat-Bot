@@ -45,33 +45,41 @@ HEX_RE = re.compile(r"^#[0-9a-f]{6}$")
 LB_ROWS = 10
 
 
+LB_KEYS = {"l": "letters", "u": "scramble", "e": "emoji", "r": "reverse", "m": "math", "s": "ladder", "q": "trivia"}      # (short keys: the website's format)
+
+
 def leaderboard(wins, n: int = LB_ROWS) -> dict:
-    """1.13.0: the games' top 10 for the public page: all games together (with each game's part), حروف, رتب."""
+    """1.13.0: the games' top 10 for the public page: all games together (with each game's part), and each game
+    (1.14.0: l = حروف, u = رتب, e = ايموجي, r = عكس, m = احسب)."""
     from . import minigames
     rows = []
     for e in (wins or {}).values():
         if isinstance(e, dict):
-            rows.append({"n": str(e.get("name") or "?")[:40], "w": int(minigames.wins_of(e, None) or 0),
-                         "l": int(minigames.wins_of(e, "letters") or 0), "u": int(minigames.wins_of(e, "scramble") or 0)})
+            row = {"n": str(e.get("name") or "?")[:40], "w": int(minigames.wins_of(e, None) or 0)}
+            for k, g in LB_KEYS.items():
+                row[k] = int(minigames.wins_of(e, g) or 0)
+            rows.append(row)
     def best(key):
         r = [x for x in rows if x[key] > 0]
         r.sort(key=lambda x: (-x[key], x["n"].lower()))
         return r[:n]
-    return {"all": [{"n": x["n"], "w": x["w"], "l": x["l"], "u": x["u"]} for x in best("w")],
-            "l": [{"n": x["n"], "w": x["l"]} for x in best("l")], "u": [{"n": x["n"], "w": x["u"]} for x in best("u")]}
+    out = {"all": [dict({"n": x["n"], "w": x["w"]}, **{k: x[k] for k in LB_KEYS}) for x in best("w")]}
+    for k in LB_KEYS:
+        out[k] = [{"n": x["n"], "w": x[k]} for x in best(k)]
+    return out
 
 
 EXAMPLE_MAX = 100
 ANNOUNCE_RE = re.compile(r"^/announce(?:blue|green|orange|purple)?\s+", re.IGNORECASE)
 SAMPLES = {   # 1.13.0: what a reply looks like on the public page: variables become example values, in the app's language
-    "en": {"user": "viewer", "touser": "sam", "query": "…", "querystring": "…", "count": "7", "game": "(the game)", "title": "(the stream title)",
+    "en": {"user": "viewer", "touser": "sam", "query": "…", "querystring": "…", "count": "7", "getcount": "7", "game": "(the game)", "title": "(the stream title)",
            "uptime": "2h 15m", "viewers": "120", "followers": "(the follower count)", "follow": "1 year, 2 months", "followage": "1 year, 2 months",
-           "followdate": "Jan 5, 2025", "accountage": "3 years, 4 months", "random.chatter": "(a random viewer)", "firststreak": "3",
+           "followdate": "Jan 5, 2025", "accountage": "3 years, 4 months", "random.chatter": "(a random viewer)", "firststreak": "3", "firststreakpeak": "7",
            "weather": "(the weather in {a})", "time": "(the time in {a})", "eval": "(a calculated value)", "urlfetch": "(text from a website)",
            "act_game": "(moderators change the stream's game with it)", "act_title": "(moderators change the stream title with it)"},
-    "ar": {"user": "مشاهد", "touser": "سامي", "query": "…", "querystring": "…", "count": "7", "game": "(اللعبة)", "title": "(عنوان البث)",
+    "ar": {"user": "مشاهد", "touser": "سامي", "query": "…", "querystring": "…", "count": "7", "getcount": "7", "game": "(اللعبة)", "title": "(عنوان البث)",
            "uptime": "2س 15د", "viewers": "120", "followers": "(عدد المتابعين)", "follow": "سنة وشهران", "followage": "سنة وشهران",
-           "followdate": "5 يناير 2025", "accountage": "3 سنوات و4 أشهر", "random.chatter": "(مشاهد عشوائي)", "firststreak": "3",
+           "followdate": "5 يناير 2025", "accountage": "3 سنوات و4 أشهر", "random.chatter": "(مشاهد عشوائي)", "firststreak": "3", "firststreakpeak": "7",
            "weather": "(الطقس في {a})", "time": "(الوقت في {a})", "eval": "(قيمة محسوبة)", "urlfetch": "(نص من موقع)",
            "act_game": "(يغيّر به المشرفون لعبة البث)", "act_title": "(يغيّر به المشرفون عنوان البث)"},
 }
@@ -129,7 +137,7 @@ def game_rows(games: dict) -> list:
     from . import minigames
     games = games or {}
     out = []
-    on = [g for g in ("letters", "scramble") if (games.get(g) or {}).get("enabled")]
+    on = [g for g in ("letters", "scramble", "emoji", "reverse", "math", "ladder", "trivia") if (games.get(g) or {}).get("enabled")]
     perm = lambda who: who if who in ("everyone", "subscriber", "vip", "moderator") else "moderator"
     for g in on:
         cfg = games[g]
@@ -139,7 +147,35 @@ def game_rows(games: dict) -> list:
     if on:
         sh = games.get("shared") or {}
         out += [{"name": n, "perm": "everyone", "game": "shared", "what": "wins"} for n in minigames.aliases(sh.get("wins_cmd"))]
-        out += [{"name": n, "perm": "everyone", "game": "shared", "what": "top"} for n in minigames.aliases(sh.get("top_cmd"))]
+        out += [{"name": n, "perm": "everyone", "game": "shared", "what": "top"} for n in minigames.aliases(sh.get("top_cmd"))]        out += [{"name": n, "perm": "everyone", "game": "shared", "what": "random"} for n in minigames.aliases(sh.get("random_cmd") or ["لعبه؟", "لعبة؟"])]
+    return out
+
+
+def all_commands(commands, settings, games, lang: str = "en", channel: str = "") -> list:
+    """1.14.0, the Test chat's Commands tab and its "!" pop-up: every command of the channel (also the switched-off ones
+    and the ones hidden from the public page), with who can use it, an example of its reply, and what may follow it
+    ("user" = @name, "text"). Then the mini games' commands and the built-in ones (the page words what those do)."""
+    out = []
+    for name, c in sorted((commands or {}).items(), key=lambda kv: (kv[0].lower(), kv[0])):
+        if not isinstance(c, dict) or c.get("action") == "pinfirst":
+            continue
+        resp = str(c.get("response") or "")
+        arg = "user" if "$(touser" in resp else "text" if ("$(query" in resp or c.get("action") in ("game", "title")) else ""
+        out.append({"name": name, "kind": "own", "perm": manage.effective_permission(c), "on": c.get("enabled", True) is not False,
+                    "ex": example(c, lang, channel), "arg": arg})
+    seen = {r["name"] for r in out}
+    for r in game_rows(games):
+        if r["name"] not in seen:
+            out.append(dict(r, kind="game", on=True, arg=""))
+            seen.add(r["name"])
+    off = set((settings or {}).get("disabled_builtins") or [])
+    for key, perm in BUILTIN_PUBLIC:
+        names = ["app?", "برنامج؟"] if key == "app" else [manage.BUILTIN_PREFIX + manage.BUILTIN_NAMES[key]]
+        for n in names:
+            if n not in seen:
+                out.append({"name": n, "kind": "builtin", "key": key, "perm": perm, "on": key not in off,
+                            "arg": "text" if key in ("addcom", "editcom", "delcom") else ""})
+                seen.add(n)
     return out
 
 

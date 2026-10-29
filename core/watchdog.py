@@ -139,6 +139,8 @@ class Watchdog:
         return bool(self.verified_at) and self.clock() - self.verified_at <= within
 
     def warning(self, bot) -> str:
+        if getattr(bot, "cert_fail", 0) >= 2:                         # 1.14.0: something on the PC blocks secure connections
+            return "cert"
         return "live" if getattr(bot, "live_fail", 0) >= 3 else ""      # the live check keeps failing: timers may be waiting
 
     async def tick(self, woke: bool = False) -> None:

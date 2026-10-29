@@ -19,6 +19,8 @@ MAX_WORDS = 10
 WORD_MAX = 25
 DEFAULT_REPLY = "$(user) is first!"
 REPLAY_GAP = 30          # with "Only once per stream" off: at most one pin every 30 s (Twitch's shortest pin)
+WINDOW_MIN = 5           # 1.14.0: only in the first 5 minutes of the stream; nobody by then = the streak is broken
+WINDOW_CHOICES = (0, 1, 2, 3, 5, 10, 15, 30)     # minutes; 0 = any time in the stream
 
 _TASHKEEL = re.compile("[\u0610-\u061a\u064b-\u065f\u0670\u06d6-\u06ed\u0640]")
 _AR = str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ى": "ي", "ة": "ه", "ؤ": "و", "ئ": "ي", "ک": "ك", "ی": "ي"})
@@ -46,9 +48,20 @@ def clean_words(raw) -> list:
     return out[:MAX_WORDS]
 
 
-def matches(text: str, words) -> bool:
-    """The message starts with one of the trigger words (a word of its own: "first!" and "FIRST hi" count, "firstly" doesn't)."""
-    msg = [n for n in (norm(w) for w in str(text or "").split()) if n]
+def matches(text: str, words, own_names=()) -> bool:
+    """The message starts with one of the trigger words (a word of its own: "first!" and "FIRST hi" count, "firstly" doesn't).
+    1.14.0: never a command or a question: "!first", "!اول", "first?", "اول؟", or a message that is one of the channel's own
+    command names (like a command «اول؟» that shows the streak)."""
+    raw = str(text or "").strip()
+    if not raw or raw[0] in "!！":
+        return False
+    first = raw.split()[0]
+    if first.rstrip("!.،,~") and first.rstrip("!.،,~")[-1] in "?؟":
+        return False
+    names = {str(n).strip().casefold() for n in own_names or ()}
+    if raw.casefold() in names or first.casefold() in names:
+        return False
+    msg = [n for n in (norm(w) for w in raw.split()) if n]
     if not msg:
         return False
     for trig in words or []:
@@ -68,13 +81,33 @@ def claim(state: dict, stream_id, login: str, user: str, once: bool = True, now:
     """Someone wrote a trigger word in this stream. Returns (new state, streak) when they win, or None when the win is
     already taken (once per stream) or the last pin was less than 30 s ago (once per stream off)."""
     st = dict(state or {})
+    peaks = dict(st.get("peaks") or {})          # 1.14.0: each viewer's best streak ever ($(firststreakpeak))
     if st.get("stream") == stream_id and st.get("winner"):
         if once or now - float(st.get("at") or 0) < REPLAY_GAP:
             return None
         st["at"] = now
         return st, int(st.get("streak") or 0) if st.get("winner") == login else 0     # a later pin: the streak stays the first winner's
     streak = int(st.get("streak") or 0) + 1 if st.get("winner") == login else 1
-    return {"stream": stream_id, "winner": login, "user": user, "streak": streak, "at": now}, streak
+    peaks[login] = max(int(peaks.get(login) or 0), streak)
+    return {"stream": stream_id, "winner": login, "user": user, "streak": streak, "at": now, "peaks": peaks}, streak
+
+
+def missed(state: dict, stream_id) -> dict:
+    """1.14.0: the first minutes of this stream passed and nobody was first: the streak is broken (best streaks are kept).
+    Returns the new state, or None when this stream already has a winner or was already marked."""
+    st = dict(state or {})
+    if st.get("stream") == stream_id:
+        return None
+    return {"stream": stream_id, "winner": "", "user": "", "streak": 0, "at": 0, "peaks": dict(st.get("peaks") or {})}
+
+
+def peak_of(states: dict, login: str) -> int:
+    """$(firststreakpeak): this viewer's best streak ever (any Pin first message command)."""
+    best = 0
+    for st in (states or {}).values():
+        if isinstance(st, dict):
+            best = max(best, int((st.get("peaks") or {}).get(login) or 0))
+    return max(best, streak_of(states, login))
 
 
 def streak_of(states: dict, login: str) -> int:

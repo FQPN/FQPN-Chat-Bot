@@ -18,12 +18,59 @@ def available() -> bool:
     return _sender is not None
 
 
+_chime: bytes = b""
+
+
+def chime() -> bytes:
+    """1.14.0: the app's own notification sound (instead of Windows' standard beep): three soft, rising bell notes
+    (C6, E6, G6), about half a second. Made here, in memory, as a small WAV: no sound file to ship or lose."""
+    global _chime
+    if _chime:
+        return _chime
+    import io, math, struct, wave
+    rate, total = 22050, 0.75
+    notes = ((0.00, 1046.50), (0.09, 1318.51), (0.18, 1567.98))        # when each note starts (s), its pitch (Hz)
+    n = int(rate * total)
+    samples = []
+    for i in range(n):
+        t, v = i / rate, 0.0
+        for start, f in notes:
+            x = t - start
+            if x < 0:
+                continue
+            env = min(1.0, x / 0.006) * math.exp(-x * 7.5)               # a quick, soft attack, then a bell-like fade
+            v += env * (math.sin(2 * math.pi * f * x) + 0.22 * math.sin(4 * math.pi * f * x) + 0.06 * math.sin(6 * math.pi * f * x))
+        tail = min(1.0, (total - t) / 0.05)                                 # no click at the very end
+        samples.append(int(max(-1.0, min(1.0, v * 0.24 * tail)) * 32767))
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(struct.pack("<%dh" % len(samples), *samples))
+    _chime = buf.getvalue()
+    return _chime
+
+
 def _beep() -> None:
-    try:
-        import winsound
-        winsound.MessageBeep(winsound.MB_ICONASTERISK)
-    except Exception:       # not Windows, or no sound device
-        pass
+    """Plays the chime without holding anything up (a sound from memory can't be played "in the background" by Windows,
+    so a short helper thread plays it). Falls back to Windows' beep."""
+    def play():
+        try:
+            import winsound
+            try:
+                winsound.PlaySound(chime(), winsound.SND_MEMORY | winsound.SND_NODEFAULT)
+            except Exception:
+                winsound.MessageBeep(winsound.MB_ICONASTERISK)
+        except Exception:       # not Windows, or no sound device
+            pass
+    import threading
+    threading.Thread(target=play, daemon=True).start()
+
+
+def play_sound() -> None:
+    """Settings > Notifications > Listen."""
+    _beep()
 
 
 def send(prefs: dict, title: str, message: str) -> bool:

@@ -350,6 +350,22 @@ def _bool(v, what: str) -> bool:
         raise ValidationError(f"{what} must be on or off.")
     return v
 
+
+TIMER_MIN_LINES = (0, 2, 5, 10, 20, 50)        # 1.14.0: a timer waits for this many new chat messages (0 = never waits)
+
+
+def _min_lines(v, name):
+    if isinstance(v, bool) or v not in TIMER_MIN_LINES:
+        raise ValidationError(f"Choose how many chat messages '{name}' waits for, from the list.")
+    return int(v)
+
+
+def _window(v):
+    """1.14.0: Pin first message: only in the first N minutes of the stream (0 = any time)."""
+    if isinstance(v, bool) or v not in pinfirst.WINDOW_CHOICES:
+        raise ValidationError("Choose how many minutes from the list.")
+    return int(v)
+
 
 def _pin_command(name: str, c: dict) -> dict:
     """A Pin first message command (1.13.0), checked: trigger words, how long the pin stays, the three switches, the reply."""
@@ -371,6 +387,7 @@ def _pin_command(name: str, c: dict) -> dict:
     return {"response": reply, "permission": "everyone", "cooldown": 0, "enabled": _bool(c.get("enabled", True), f"Enabled for '{name}'"),
             "aliases": [], "action": pinfirst.ACTION, "words": words, "pin_secs": int(secs),
             "block_bad": _bool(c.get("block_bad", True), "Block bad words"), "once": _bool(c.get("once", True), "Only once per stream"),
+            "pin": _bool(c.get("pin", True), "Pin the message"), "window_min": _window(c.get("window_min", pinfirst.WINDOW_MIN)),
             "reply_on": _bool(c.get("reply_on", False), "Reply when pinned")}
 
 
@@ -446,6 +463,7 @@ def validate(section: str, data, prefix: str = "!"):
                 "message": _text(t.get("message"), f"Message for '{name}'"),
                 "interval_minutes": _number(t.get("interval_minutes"), f"Interval for '{name}'", 1, 1440),
                 "enabled": _bool(t.get("enabled"), f"Enabled for '{name}'"),
+                "min_lines": _min_lines(t.get("min_lines", 0), name),     # 1.14.0: wait for chat
             })
         return out
 
@@ -589,10 +607,10 @@ def validate(section: str, data, prefix: str = "!"):
         if not isinstance(sh, dict):
             raise ValidationError("The mini games settings are invalid.")
         dflt = minigames.defaults()
-        found = {"letters": {}, "scramble": {}, "shared": {}}
+        found = {part: {} for part in minigames.GAME_CMDS}
         seen = {}
         for part, fields in minigames.GAME_CMDS.items():
-            src = {"letters": c, "scramble": sc, "shared": sh}[part]
+            src = {"letters": c, "scramble": sc, "shared": sh}.get(part) or (data.get(part) if isinstance(data.get(part), dict) else {})
             for k in fields:
                 raw = src.get(k, dflt[part][k])
                 if isinstance(raw, str):
@@ -660,7 +678,51 @@ def validate(section: str, data, prefix: str = "!"):
         off = [c for c in dict.fromkeys(str(x).strip() for x in off) if c in known_cats]
         if not minigames.scramble_entries({"words": swords, "word_cats": word_cats, "categories_off": off}):
             raise ValidationError("Keep at least one category in play, or the game has no words.")
-        return {"letters": dict(cmds, enabled=_bool(c.get("enabled", False), "Game switch"), who_starts=c.get("who_starts", "moderator"),
+        # 1.14.0: «ايموجي», «عكس», «احسب»
+        quick = {}
+        for g in minigames.QUICK_GAMES:
+            q, d = data.get(g, {}) or {}, dflt[g]
+            if q.get("who_starts", d["who_starts"]) not in minigames.WHO:
+                raise ValidationError("Choose who can start a round.")
+            out = dict(found[g], enabled=_bool(q.get("enabled", False), "Game switch"), who_starts=q.get("who_starts", d["who_starts"]),
+                       round_seconds=int(_number(q.get("round_seconds", d["round_seconds"]), "Round time", 10, 600)),
+                       auto_minutes=int(_number(q.get("auto_minutes", 0), "Automatic rounds", 0, 240)),
+                       announce=_bool(q.get("announce", True), "Announcements"))
+            if "hint" in d:
+                out["hint"] = _bool(q.get("hint", True), "Hint")
+            if g == "ladder":                    # 1.14.0 «سلم»: how many words
+                if q.get("words", 3) not in minigames.LADDER_WORDS or isinstance(q.get("words", 3), bool):
+                    raise ValidationError("Choose how many words from the list.")
+                out["words"] = int(q.get("words", 3))
+            if g == "math":
+                if q.get("level", "normal") not in minigames.MATH_LEVELS:
+                    raise ValidationError("Choose how hard the sums are.")
+                out["level"] = q.get("level", "normal")
+            if g == "trivia":                    # 1.14.0 «سؤال»: easy = the choices are shown, hard = only the question
+                if q.get("level", "hard") not in minigames.TRIVIA_LEVELS:
+                    raise ValidationError("Choose how hard the questions are.")
+                out["level"] = q.get("level", "hard")
+            if g == "emoji":
+                raw = q.get("puzzles", []) or []
+                if not isinstance(raw, list) or len(raw) > 1000:
+                    raise ValidationError("The emoji puzzles couldn't be read.")
+                puzzles = []
+                for item in raw:
+                    if not isinstance(item, dict):
+                        raise ValidationError("The emoji puzzles couldn't be read.")
+                    e = _text(item.get("e"), "Emojis", 40).strip()
+                    ans = item.get("a") or []
+                    if isinstance(ans, str):
+                        ans = [ans]
+                    if not isinstance(ans, list):
+                        raise ValidationError("The emoji puzzles couldn't be read.")
+                    ans = list(dict.fromkeys(a for a in (_text(x, "Answer", 30, required=False).strip() for x in ans) if a))[:5]
+                    if not ans:
+                        raise ValidationError(f"«{e}»: give at least one answer.")
+                    puzzles.append({"e": e, "a": ans})
+                out["puzzles"] = puzzles
+            quick[g] = out
+        return {**quick, "letters": dict(cmds, enabled=_bool(c.get("enabled", False), "Game switch"), who_starts=c.get("who_starts", "moderator"),
                                 round_seconds=int(_number(c.get("round_seconds", 60), "Round time", 15, 600)),
                                 auto_minutes=int(_number(c.get("auto_minutes", 0), "Automatic rounds", 0, 240)),
                                 categories=cats, letters=letters, words=words,
@@ -671,10 +733,12 @@ def validate(section: str, data, prefix: str = "!"):
                                  auto_minutes=int(_number(sc.get("auto_minutes", 0), "Automatic rounds", 0, 240)),
                                  announce=_bool(sc.get("announce", True), "Announcements"), words=swords,
                                  show_category=_bool(sc.get("show_category", True), "Show the category"),
-                                 word_cats=word_cats, categories_off=off),
+                                 word_cats=word_cats, categories_off=off,
+                                 max_letters=int(_number(sc.get("max_letters", 5), "Word length", 3, 7))),
                 "shared": dict(found["shared"],
                                rounds_per_stream=int(_number(sh.get("rounds_per_stream", 0), "Rounds per stream", 0, minigames.MAX_ROUNDS)),
-                               cooldown_seconds=int(_number(sh.get("cooldown_seconds", 0), "Cooldown between rounds", 0, minigames.MAX_COOLDOWN)))}
+                               cooldown_seconds=int(_number(sh.get("cooldown_seconds", 0), "Cooldown between rounds", 0, minigames.MAX_COOLDOWN)),
+                               enabled=_bool(sh.get("enabled", True), "All mini games"))}
 
     if section == "game_wins":
         if not isinstance(data, dict) or len(data) > 100000:
@@ -1032,6 +1096,101 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             desktop.set_titlebar(bg, fg, bool((body or {}).get("dark")))
         return web.json_response({"ok": True, "window": desktop.set_titlebar is not None})
 
+    async def commands_usage(request):
+        from . import chatstats
+        bot = state.get("bot")
+        st = getattr(bot, "stats", None)
+        return web.json_response({"usage": chatstats.commands_usage(st.data if st is not None else store.get("chat_stats"))})
+
+    async def stream_stats(request):
+        """1.14.0: Dashboard > Stream stats: ?r=stream (this or the last stream) | 7 | 30 (days)."""
+        from . import chatstats
+        rng = request.query.get("r", "stream")
+        rng = rng if rng in ("stream", "7", "30") else "stream"
+        bot = state.get("bot")
+        st = getattr(bot, "stats", None)
+        data = st.data if st is not None else store.get("chat_stats")
+        return web.json_response(chatstats.view(data, rng, live=bool(getattr(bot, "is_live", False))))
+
+    def _backup_now():
+        from . import backup, version
+        return backup.make(store, version.VERSION, str(state.get("account") or ""))
+
+    async def backup_save(request):
+        """1.14.0: "Save a backup": Windows' "Save as" window in the app; elsewhere (a browser) the page downloads it."""
+        from . import backup
+        b = _backup_now()
+        name, text = backup.file_name(), backup.dumps(b)
+        hook = getattr(desktop, "save_dialog", None)
+        if hook is None:
+            return web.json_response({"download": text, "name": name, "summary": backup.summary(b)})
+        try:
+            path = await asyncio.get_running_loop().run_in_executor(None, hook, name)
+        except Exception:
+            log.exception("Backup: the Save as window failed")
+            return web.json_response({"download": text, "name": name, "summary": backup.summary(b)})   # the page downloads it instead
+        if not path:
+            return web.json_response({"cancelled": True})
+        try:
+            from pathlib import Path
+            Path(path).write_text(text, encoding="utf-8")
+        except OSError as e:
+            return web.json_response({"error": "write", "detail": str(e)[:150]}, status=500)
+        log.info("Backup saved to %s", path)
+        return web.json_response({"saved": Path(path).name, "summary": backup.summary(b)})
+
+    async def _backup_read(request):
+        from . import backup
+        raw = await request.read()
+        return backup.read(raw)
+
+    async def backup_check(request):
+        """1.14.0: what's inside a backup file, before restoring it (nothing changes)."""
+        from . import backup
+        try:
+            return web.json_response({"summary": backup.summary(await _backup_read(request))})
+        except backup.BackupError as e:
+            return web.json_response({"error": str(e)}, status=400)
+
+    async def backup_restore(request):
+        """1.14.0: save the current setup aside first (in the data folder), then restore every part that passes the checks."""
+        from . import backup
+        try:
+            b = await _backup_read(request)
+        except backup.BackupError as e:
+            return web.json_response({"error": str(e)}, status=400)
+        safety = backup.file_name("FQPN-Chat-Bot-before-restore", minutes=True)
+        try:
+            (store.dir / safety).write_text(backup.dumps(_backup_now()), encoding="utf-8")
+        except OSError as e:
+            log.exception("Backup: could not save the current setup first")
+            return web.json_response({"error": "safety", "detail": str(e)[:150]}, status=500)   # never restore without the undo copy
+
+        def side_effects(name, old, new):          # the same follow-ups as saving that page
+            if name == "prefs":
+                try:
+                    desktop.apply_prefs(new)
+                except Exception:
+                    log.exception("Backup: could not change the start-up setting")
+                store.activity.prune()
+            if name in ("commands", "settings") and state.get("publist_wake") is not None:
+                state["publist_wake"].set()
+            if name == "settings" and bool((old or {}).get("separate_bot")) != bool((new or {}).get("separate_bot")):
+                restart_bot(state)
+
+        res = backup.restore(store, b, lambda n, d: validate(n, keep_tour_flag(n, d, store)), side_effects)
+        log.info("Backup restored (%d parts; skipped: %s); the setup before is %s", len(res["restored"]), res["skipped"], safety)
+        return web.json_response(dict(res, safety=safety, summary=backup.summary(b)))
+
+    async def test_commands(request):
+        """1.14.0: every command the Test chat can try (as the test sees them: your real ones plus any test-only change)."""
+        from . import testchat
+        sim = testchat.get(state, store)
+        s = sim.store
+        lang = "ar" if (s.get("ui") or {}).get("language") == "ar" else "en"
+        return web.json_response({"commands": publiclist.all_commands(s.get("commands"), s.get("settings"), s.get("games"), lang,
+                                                                   str(state.get("account") or ""))})
+
     async def giveaway_view(request):
         """1.13.0 Giveaways: the current giveaway (the page asks every 2 seconds while it's open)."""
         from . import giveaway as G
@@ -1182,6 +1341,8 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
         code, body, _ = await publiclist.http_send("GET", token, None, path="/api/dev/users")
         if code == 0:
             return web.json_response({"error": "The website can't be reached right now."}, status=503)
+        if code == 200 and isinstance(body, dict):
+            body["site"] = publiclist.SITE.rstrip("/")          # 1.14.0: for the users' public list links
         return web.json_response(body, status=code if code in (200, 401, 403) else 502)
 
     async def dev_ban(request):
@@ -1325,6 +1486,12 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
     app.router.add_post("/api/connect", connect)
     app.router.add_post("/api/support", support_send)
     app.router.add_get("/api/test", test_view)              # 1.13.0: Test chat
+    app.router.add_get("/api/test/commands", test_commands)  # 1.14.0: the Commands tab and the "!" pop-up
+    app.router.add_get("/api/stats", stream_stats)            # 1.14.0: Dashboard > Stream stats
+    app.router.add_get("/api/stats/commands", commands_usage)  # 1.14.0: Commands page: uses and last use
+    app.router.add_post("/api/backup/save", backup_save)      # 1.14.0: Backup & restore (Settings > App)
+    app.router.add_post("/api/backup/check", backup_check)
+    app.router.add_post("/api/backup/restore", backup_restore)
     app.router.add_post("/api/test/{action}", test_action)
     app.router.add_get("/api/giveaway", giveaway_view)      # 1.13.0: Giveaways
     app.router.add_post("/api/titlebar", titlebar_set)      # 1.13.0: the window's top bar in the app's colors

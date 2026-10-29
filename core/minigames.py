@@ -13,8 +13,11 @@ import time
 
 from .moderation import _TASHKEEL
 
-GAME_KEYS = ("letters", "scramble")
-GAME_NAMES = {"letters": "حروف", "scramble": "رتب"}      # short Arabic names: chat (!الأوائل حروف) and the leaderboard tabs
+GAME_KEYS = ("letters", "scramble", "emoji", "reverse", "math", "ladder", "trivia")      # 1.14.0: + «ايموجي», «عكس», «احسب»
+GAME_NAMES = {"letters": "حروف", "scramble": "رتب", "emoji": "ايموجي", "reverse": "عكس", "math": "احسب", "ladder": "سلم", "trivia": "سؤال"}      # chat (!الأوائل حروف) and the leaderboard tabs
+QUICK_GAMES = ("emoji", "reverse", "math", "ladder", "trivia")      # 1.14.0: the bot posts a challenge; the first right answer wins
+MATH_LEVELS = ("easy", "normal", "hard")
+TRIVIA_LEVELS = ("easy", "hard")        # 1.14.0 «سؤال»: easy = the 4 choices are shown; hard (default) = only the question
 CATEGORIES = ("اسم", "جماد", "نبات", "حيوان", "بلاد")
 DEFAULT_LETTERS = "ابتجحخدرزسشصطعفقكلمنهوي"        # the hard ones (ث ذ ض ظ غ ء) are off by default; the streamer can add them
 WHO = ("everyone", "subscriber", "vip", "moderator", "broadcaster")
@@ -23,13 +26,16 @@ WHO = ("everyone", "subscriber", "vip", "moderator", "broadcaster")
 MAX_ALIASES = 5             # names per game command (Arabic and English, for example)
 MAX_ROUNDS = 500            # "rounds per stream" can go up to this (0 = no limit)
 MAX_COOLDOWN = 3600         # seconds between rounds, at most an hour
-GAME_CMDS = {"letters": ("start_cmd", "approve_cmd"), "scramble": ("start_cmd",), "shared": ("wins_cmd", "top_cmd")}
+GAME_CMDS = {"letters": ("start_cmd", "approve_cmd"), "scramble": ("start_cmd",), "emoji": ("start_cmd",), "reverse": ("start_cmd",),
+             "math": ("start_cmd",), "ladder": ("start_cmd",), "trivia": ("start_cmd",), "shared": ("wins_cmd", "top_cmd", "random_cmd")}
 
 
 def defaults() -> dict:
     # "shared" = the settings for all games (1.9.0): the wins / top 5 commands, and the round limit and cooldown.
     # Every command is a list of names (aliases): any of them works in chat.
-    return {"shared": {"wins_cmd": ["!فوز", "!wins"], "top_cmd": ["!الأوائل", "!top"], "rounds_per_stream": 0, "cooldown_seconds": 0},
+    # 1.14.0: random_cmd «لعبه؟» starts a round of a random game (among the ones switched on)
+    return {"shared": {"wins_cmd": ["!فوز", "!wins"], "top_cmd": ["!الأوائل", "!top"], "random_cmd": ["لعبه؟", "لعبة؟"],
+                       "rounds_per_stream": 0, "cooldown_seconds": 0, "enabled": True},      # 1.14.0: enabled = the main switch
             "letters": {"enabled": False, "start_cmd": ["!حروف"], "approve_cmd": ["!صح"],
                         "who_starts": "moderator", "round_seconds": 60, "auto_minutes": 0, "categories": list(CATEGORIES), "announce": True,
                         "letters": DEFAULT_LETTERS, "words": {c: [] for c in CATEGORIES}},
@@ -37,7 +43,18 @@ def defaults() -> dict:
                          "auto_minutes": 0, "announce": True, "words": [],
                          # 1.10.0: categories make it easier. The built-in words keep the category they come from (the five
                          # of the first game); your own words can have one (word -> category). Turned-off categories aren't played.
-                         "show_category": True, "word_cats": {}, "categories_off": []}}
+                         "show_category": True, "word_cats": {}, "categories_off": [],
+                         "max_letters": 5},          # 1.14.0: easier: everyday words, 3 to 5 letters (up to 7 in the settings)
+            "emoji": {"enabled": False, "start_cmd": ["!ايموجي"], "who_starts": "moderator", "round_seconds": 30, "hint": True,
+                      "auto_minutes": 0, "announce": True, "puzzles": []},        # your own: [{"e": "🐪🏜️", "a": ["صحراء"]}]
+            "reverse": {"enabled": False, "start_cmd": ["!عكس"], "who_starts": "moderator", "round_seconds": 30, "hint": True,
+                        "auto_minutes": 0, "announce": True},
+            "math": {"enabled": False, "start_cmd": ["!احسب"], "who_starts": "moderator", "round_seconds": 20,
+                     "auto_minutes": 0, "announce": True, "level": "normal"},
+            "ladder": {"enabled": False, "start_cmd": ["!سلم"], "who_starts": "moderator", "round_seconds": 30,     # 1.14.0
+                       "auto_minutes": 0, "announce": True, "words": 3},
+            "trivia": {"enabled": False, "start_cmd": ["!سؤال"], "who_starts": "moderator", "round_seconds": 30,
+                       "auto_minutes": 0, "announce": True, "level": "hard", "hint": True}}
 
 
 def cmd_key(word: str) -> str:
@@ -199,12 +216,12 @@ _POOL_CATS: list = []        # the same built-in words with the category each co
 
 
 def scramble_pool(extra=()) -> list:
-    """The built-in words that make good puzzles (one word, 3-7 letters, not starting with ال) + the streamer's own."""
+    """The built-in words (1.14.0: the everyday list, core/gamewords_easy.py) + the streamer's own."""
     if not _POOL:
-        from .gamewords import WORDS
+        from .gamewords_easy import EASY
         seen = set()
-        for cat in CATEGORIES:
-            for w in WORDS.get(cat, "").split():
+        for cat, text in EASY.items():
+            for w in text.split():
                 if scramble_ok(w) and not w.startswith("ال") and norm(w) not in seen:
                     seen.add(norm(w))
                     _POOL.append(w)
@@ -232,8 +249,9 @@ def scramble_entries(cfg: dict) -> list:
         if scramble_ok(w) and norm(w) not in seen:
             seen[norm(w)] = len(out)
             out.append((w, str(cats.get(w) or "").strip()))
+    longest = max(SCRAMBLE_MIN, min(SCRAMBLE_MAX, int((cfg or {}).get("max_letters") or 5)))      # 1.14.0 (your own words: any length)
     for w, cat in _POOL_CATS:
-        if norm(w) not in seen:
+        if norm(w) not in seen and len(w) <= longest:
             seen[norm(w)] = len(out)
             out.append((w, cat))
     return [(w, c) for w, c in out if not c or c not in off]
@@ -241,8 +259,9 @@ def scramble_entries(cfg: dict) -> list:
 
 def scramble_categories(cfg: dict) -> list:
     """Every category that has words: the built-in ones first, then your own (for the "categories in play" list)."""
+    from .gamewords_easy import EASY
     own = [str(c).strip() for c in ((cfg or {}).get("word_cats") or {}).values() if str(c).strip()]
-    return list(dict.fromkeys(list(CATEGORIES) + own))
+    return list(dict.fromkeys(list(EASY) + own))
 
 
 def shuffle_letters(word: str, rng=random) -> list:
@@ -292,6 +311,196 @@ def new_scramble(cfg: dict, avoid=(), clock=time.time, rng=random) -> ScrambleRo
     return ScrambleRound(word, int(cfg.get("round_seconds") or 45), clock, rng, category=cat)
 
 
+# ---------- 1.14.0: «ايموجي», «عكس», «احسب»: the bot posts a challenge, the first right answer wins ----------
+
+_AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
+_TO_AR = str.maketrans("0123456789", "٠١٢٣٤٥٦٧٨٩")
+
+
+class QuickRound:
+    """A challenge (prompt) with its accepted answers. answer = what is shown when time is up (and in the win message)."""
+
+    def __init__(self, key: str, prompt: str, answers, seconds: int, clock=time.time, hint: str = ""):
+        self.key, self.prompt, self.clock, self.hint = key, prompt, clock, hint
+        self.answers = [str(a).strip() for a in answers if str(a).strip()]
+        self.answer = self.answers[0] if self.answers else ""
+        self.started = clock()
+        self.seconds = seconds
+        self.ends = self.started + seconds
+        self.hint_at = self.started + seconds / 2
+        self.hinted = False
+        self.done = False
+
+    @property
+    def over(self) -> bool:
+        return self.done or self.clock() >= self.ends
+
+    def check(self, text: str, who=None):
+        """'win' or None. The whole message is the answer (a few words at most).
+        1.14.0: «سلم»: N different words starting with the letter; «سؤال»: the choice's text (the owner: no numbers), and a
+        wrong guess (another choice) locks that viewer out of this round (so nobody can just send all four)."""
+        t = str(text).strip()
+        if self.key == "ladder":
+            return self._ladder(t)
+        if self.key == "trivia":
+            return self._trivia(t, who)
+        if not t or len(t) > 30 or t.startswith("!") or len(t.split()) > 3:
+            return None
+        if self.key == "math":
+            digits = t.translate(_AR_DIGITS).replace(" ", "").lstrip("=")
+            return "win" if re.fullmatch(r"-?\d{1,7}", digits) and int(digits) == int(self.answer) else None
+        n = norm(t)
+        return "win" if any(n == norm(a) for a in self.answers) else None
+
+    def _ladder(self, t: str):
+        if not t or t.startswith("!") or len(t) > 160:
+            return None
+        want, letter, good = int(getattr(self, "count", 3)), norm(getattr(self, "letter", "")), []
+        for w in re.split(r"[\s،,.؛;:!؟?]+", t):
+            n = norm(w)
+            if n.startswith("ال") and letter != "ا" and len(n) > 3:
+                n = n[2:]                            # «التمر» counts for ت
+            if len(n) < 2 or len(set(n)) < 2 or not n.startswith(letter) or n in good:
+                continue
+            good.append(n)
+        if len(good) >= want:
+            self.win_text = "، ".join(x for x in t.split() if x)[:80]
+            return "win"
+        return None
+
+    def _trivia(self, t: str, who):
+        if not t or t.startswith("!") or len(t) > 40:
+            return None
+        n = trivia_key(t)                            # the answer's own text: «مسقط», «المحيط الهادئ», «7» (also «٧»)
+        if not getattr(self, "show_choices", True):  # hard: only the question; the first right answer wins, no lockout
+            return "win" if n and n in {trivia_key(a) for a in self.answers} else None
+        if who is not None and who in self.out:
+            return None
+        pick = next((i for i, c in enumerate(self.choices) if trivia_key(c) == n), None)
+        if pick is None and n in {trivia_key(a) for a in self.answers}:
+            pick = self.right                        # a short form of the right one («الهادئ»)
+        if pick is None:
+            return None                              # just chatting: not a guess
+        if pick == self.right:
+            return "win"
+        if who is not None:
+            self.out.add(who)
+        return None
+
+
+def trivia_key(text: str) -> str:
+    """«سؤال» answers compared: norm() (ال, أ/إ/آ, ة/ه, tashkeel), digits as Western, any capitals, spaces ignored («أبو ظبي» = «ابوظبي»)."""
+    return norm(str(text).translate(_AR_DIGITS)).casefold().replace(" ", "")
+
+
+def trivia_hint(answer: str) -> str:
+    """«سؤال» on hard: how the answer starts (with «ال», 3 letters: «الع»; else 1) and how many letters (and words)."""
+    a = _TASHKEEL.sub("", str(answer)).strip()
+    if re.fullmatch(r"[\d٠-٩]+", a):
+        return ""                                    # a number: any hint would give it away (no hint is sent)
+    start = a[:3] if a.startswith("ال") and len(a) > 4 else a[:1]
+    n, w = len(a.replace(" ", "")), len(a.split())
+    return f"💡 تلميح: يبدأ بـ «{start}» ({n} حروف" + ({2: "، كلمتين"}.get(w, f"، {w} كلمات") if w > 1 else "") + ")"
+
+
+def emoji_puzzles(cfg: dict) -> list:
+    """[(emojis, [answers])]: your own puzzles first, then the built-in ones."""
+    from .gamewords_easy import EMOJI
+    own = []
+    for p in (cfg or {}).get("puzzles") or []:
+        if isinstance(p, dict) and str(p.get("e") or "").strip() and p.get("a"):
+            own.append((str(p["e"]).strip(), [str(a).strip() for a in p["a"] if str(a).strip()]))
+    return own + [(e, a.split("|")) for e, a in EMOJI]
+
+
+def letters_hint(word: str) -> str:
+    n = len(_TASHKEEL.sub("", word).replace(" ", ""))
+    return f"💡 تلميح: تبدأ بحرف «{word[:1]}» ({n} حروف)"
+
+
+def new_emoji(cfg: dict, avoid=(), clock=time.time, rng=random) -> QuickRound:
+    pool = emoji_puzzles(cfg)
+    fresh = [p for p in pool if p[0] not in set(avoid)] or pool
+    e, answers = rng.choice(fresh)
+    return QuickRound("emoji", e, answers, int(cfg.get("round_seconds") or 30), clock, letters_hint(answers[0]))
+
+
+def new_reverse(cfg: dict, avoid=(), clock=time.time, rng=random) -> QuickRound:
+    """An everyday word (3 to 6 letters) shown backwards: «ةرايس» -> سيارة. Never one that reads the same both ways."""
+    scramble_pool()
+    pool = [w for w, _ in _POOL_CATS if 3 <= len(w) <= 6 and norm(w[::-1]) != norm(w)]
+    recent = {norm(a) for a in avoid}
+    word = rng.choice([w for w in pool if norm(w) not in recent] or pool)
+    return QuickRound("reverse", word[::-1], [word], int(cfg.get("round_seconds") or 30), clock, letters_hint(word))
+
+
+def new_math(cfg: dict, clock=time.time, rng=random) -> QuickRound:
+    """easy: + and - (up to 20); normal: also x up to 10; hard: bigger numbers and ÷ (always a whole answer).
+    Shown with Arabic digits; Arabic or Western digits both count."""
+    level = cfg.get("level") if cfg.get("level") in MATH_LEVELS else "normal"
+    ops = {"easy": "+-", "normal": "+-x", "hard": "+-x/"}[level]
+    op = rng.choice(ops)
+    big = level == "hard"
+    if op == "+":
+        a, b = rng.randint(1, 99 if big else 20), rng.randint(1, 99 if big else 20)
+        ans = a + b
+    elif op == "-":
+        a, b = rng.randint(1, 99 if big else 20), rng.randint(1, 99 if big else 20)
+        a, b = max(a, b), min(a, b)
+        ans = a - b
+    elif op == "x":
+        a, b = rng.randint(2, 15 if big else 10), rng.randint(2, 15 if big else 10)
+        ans = a * b
+    else:
+        b, ans = rng.randint(2, 12), rng.randint(2, 12)
+        a = b * ans
+    sign = {"+": "+", "-": "−", "x": "×", "/": "÷"}[op]
+    prompt = f"{a} {sign} {b} = ؟"       # 1.14.0 (owner): Western digits, also in Arabic (both are accepted as answers)
+    return QuickRound("math", prompt, [str(ans)], int(cfg.get("round_seconds") or 20), clock)
+
+
+LADDER_LETTERS = "ابتجحخدرزسشصعفقكلمنهوي"        # letters with many easy words (not ث ذ ض ظ غ)
+LADDER_WORDS = (2, 3, 4, 5)
+
+
+def new_ladder(cfg: dict, avoid=(), clock=time.time, rng=random) -> QuickRound:
+    """1.14.0 «سلم»: the fastest to write N different words starting with a letter."""
+    n = int(cfg.get("words") or 3)
+    n = n if n in LADDER_WORDS else 3
+    letters = [c for c in LADDER_LETTERS if c not in set(avoid)] or list(LADDER_LETTERS)
+    letter = rng.choice(letters)
+    r = QuickRound("ladder", letter, [letter], int(cfg.get("round_seconds") or 30), clock)
+    r.letter, r.count, r.win_text = letter, n, ""
+    return r
+
+
+def new_trivia(cfg: dict, avoid=(), clock=time.time, rng=random) -> QuickRound:
+    """1.14.0 «سؤال»: an easy question. level "easy": the 4 shuffled choices are shown; "hard" (default): only the question,
+    with a halfway hint (first letter + letters). Viewers write the answer itself (not a number); trivia_ar.ALSO = short forms."""
+    from .trivia_ar import QUESTIONS, ALSO
+    pool = [q for q in QUESTIONS if q[0] not in set(avoid)] or list(QUESTIONS)
+    q, right, *wrong = rng.choice(pool)
+    choices = [right] + list(wrong)
+    rng.shuffle(choices)
+    easy = cfg.get("level") == "easy"
+    r = QuickRound("trivia", q, [right] + list(ALSO.get(right, ())), int(cfg.get("round_seconds") or 30), clock,
+                   "" if easy else trivia_hint(right))
+    r.choices, r.right, r.out, r.show_choices = choices, choices.index(right), set(), easy
+    return r
+
+
+def new_quick(game: str, cfg: dict, avoid=(), clock=time.time, rng=random) -> QuickRound:
+    if game == "ladder":
+        return new_ladder(cfg, avoid, clock, rng)
+    if game == "trivia":
+        return new_trivia(cfg, avoid, clock, rng)
+    if game == "emoji":
+        return new_emoji(cfg, avoid, clock, rng)
+    if game == "reverse":
+        return new_reverse(cfg, avoid, clock, rng)
+    return new_math(cfg, clock, rng)
+
+
 # ---------- wins: a total per viewer plus how many came from each game ----------
 
 def add_win(wins: dict, uid: str, name: str, game: str = "letters") -> int:
@@ -328,7 +537,7 @@ def top(wins: dict, n: int = 5, game: str | None = None) -> list:
 
 
 def game_named(text: str):
-    """'letters' / 'scramble' for «حروف» / «رتب» (also with ! or ال), else None."""
+    """The game for its short name: «حروف», «رتب», «ايموجي», «عكس», «احسب» (also with ! or ال), else None."""
     want = norm(str(text).strip().lstrip("!"))
     return next((k for k, v in GAME_NAMES.items() if norm(v) == want), None) if want else None
 

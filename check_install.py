@@ -15,7 +15,7 @@ problems, notes = [], []
 
 REQUIRED = ["main.py", "launcher.py", "core/__init__.py", "core/auth.py", "core/bot.py", "core/dashboard.py",
             "core/dashboard.html", "core/store.py", "core/manage.py", "core/variables.py", "core/greetings.py",
-            "core/events.py", "core/version.py", "core/activity.py", "core/notify.py", "core/desktop.py", "core/updater.py", "core/botauth.py", "core/donations.py", "core/watchdog.py", "core/stream.py", "core/publiclist.py", "core/usage.py", "core/moderation.py", "core/logsafe.py", "core/jseval.py", "core/minigames.py", "core/gamewords.py", "core/winpos.py", "core/support.py", "core/accounts.py", "core/safefile.py", "core/botsender.py", "core/editor.py", "core/pinfirst.py", "core/world.py", "core/testchat.py", "core/giveaway.py", "core/titlebar.py"]
+            "core/events.py", "core/version.py", "core/activity.py", "core/notify.py", "core/desktop.py", "core/updater.py", "core/botauth.py", "core/donations.py", "core/watchdog.py", "core/stream.py", "core/publiclist.py", "core/usage.py", "core/moderation.py", "core/logsafe.py", "core/jseval.py", "core/minigames.py", "core/gamewords.py", "core/winpos.py", "core/support.py", "core/accounts.py", "core/safefile.py", "core/botsender.py", "core/editor.py", "core/pinfirst.py", "core/world.py", "core/testchat.py", "core/giveaway.py", "core/titlebar.py", "core/netfix.py", "core/gamewords_easy.py", "core/backup.py", "core/perfmon.py", "core/chatstats.py", "core/trivia_ar.py", "core/botsay.py", "core/gamesearch.py"]
 
 # a phrase that only the NEW version of each file contains
 NEW_IN = {
@@ -60,7 +60,7 @@ OLD_IN = {"core/dashboard.html": ["animation:tick", "transform-origin:0.75rem"],
 ROOT_FILES = ["launcher.py", "main.py", "check_install.py", "installer.iss", "requirements.txt", "README.md", "CHANGELOG.md",
               "RELEASING.md", "TwitchChatBot.spec", "icon.ico", "run.bat", "update.bat", "build.bat"]
 CORE_FILES = ["auth.py", "bot.py", "dashboard.py", "dashboard.html", "store.py", "manage.py", "variables.py", "greetings.py",
-              "events.py", "version.py", "activity.py", "notify.py", "desktop.py", "updater.py", "winpos.py", "support.py", "accounts.py", "safefile.py", "botsender.py", "editor.py", "pinfirst.py", "world.py", "testchat.py", "giveaway.py", "titlebar.py"]
+              "events.py", "version.py", "activity.py", "notify.py", "desktop.py", "updater.py", "winpos.py", "support.py", "accounts.py", "safefile.py", "botsender.py", "editor.py", "pinfirst.py", "world.py", "testchat.py", "giveaway.py", "titlebar.py", "netfix.py", "gamewords_easy.py", "backup.py", "perfmon.py", "chatstats.py", "trivia_ar.py", "botsay.py", "gamesearch.py"]
 
 
 def ok(text):
@@ -127,7 +127,7 @@ elif not missing:
 
 # 5. libraries
 for name, needed, pip in [("aiohttp", True, "aiohttp"), ("twitchio", True, "twitchio"),
-                          ("webview", False, "pywebview"), ("pystray", False, "pystray"), ("PIL", False, "Pillow")]:
+                          ("webview", False, "pywebview"), ("pystray", False, "pystray"), ("PIL", False, "Pillow"), ("truststore", False, "truststore")]:
     try:
         importlib.import_module(name)
         ok(f"library {pip} is installed")
@@ -135,7 +135,7 @@ for name, needed, pip in [("aiohttp", True, "aiohttp"), ("twitchio", True, "twit
         if needed:
             bad(f"The library {pip} is not installed in this Python.", "Run:  pip install -r requirements.txt   (with your venv active)")
         else:
-            notes.append(f"{pip} is not installed. Only needed for the app window and tray icon: pip install -r requirements.txt")
+            notes.append(f"{pip} is not installed. " + ("Without it, an antivirus / VPN that checks secure connections can keep the bot disconnected" if pip == "truststore" else "Only needed for the app window and tray icon") + ": pip install -r requirements.txt")
 
 # 6. can the program actually load?
 if not problems:

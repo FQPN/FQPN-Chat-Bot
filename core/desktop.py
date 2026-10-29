@@ -17,6 +17,7 @@ caps = {"installed": FROZEN, "startup": WINDOWS and FROZEN, "tray": False, "noti
 quit_app = None   # set by the launcher: closes the app window for real (used to install an update)
 show_window = None   # set by the launcher: brings the app window to the front (a second launch asks for this)
 set_titlebar = None  # 1.13.0, set by the launcher: paints the window's top bar (bg, fg, dark) in the app's colors
+save_dialog = None   # 1.14.0, set by the launcher: Windows' "Save as" window (a suggested file name) -> the chosen path, or None
 
 
 def startup_command(minimized: bool, exe: str | None = None) -> str:

@@ -309,6 +309,7 @@ class Context:
     uptime: str = ""
     viewers: int = 0        # how many people are watching right now (updated with every live check)
     count: Callable[[], int] = lambda: 0
+    named_count: Callable[[str, bool], int] | None = None   # 1.14.0: $(count name) / $(getcount name), shared by commands
     game: Callable[[], Awaitable[str]] | None = None
     title: Callable[[], Awaitable[str]] | None = None
     followed_at: Callable[[], Awaitable[datetime | None]] | None = None
@@ -323,6 +324,9 @@ class Context:
     random_chatter: Callable[[], str] | None = None      # someone who wrote in chat lately
     followers: Callable[[], Awaitable[int | None]] | None = None
     first_streak: Callable[[], int] | None = None         # how many streams in a row this viewer was first (Pin first message)
+    first_peak: Callable[[], int] | None = None           # 1.14.0: this viewer's best streak ever ($(firststreakpeak))
+    followed_of: Callable | None = None                   # 1.14.0: $(followage name): (account exists, followed at | None)
+    first_of: Callable[[str, bool], int] | None = None    # 1.14.0: $(firststreak name) / $(firststreakpeak name)
     world_fetch: Callable[[str], Awaitable[dict]] = world.get_json
 
     @property
@@ -387,7 +391,11 @@ async def expand(template: str, ctx: Context) -> str:
         if key == "querystring":
             return quote(ctx.query, safe="")
         if key == "count":
+            if arg.strip():                               # 1.14.0: a named counter, shared by every command that uses it
+                return str(ctx.named_count(arg, True)) if ctx.named_count else "0"
             return str(ctx.count())
+        if key == "getcount":                             # 1.14.0: read a named counter (it doesn't go up)
+            return str(ctx.named_count(arg, False)) if ctx.named_count and arg.strip() else "0"
         if key == "channel":
             return ctx.channel
         if key == "uptime":
@@ -396,6 +404,26 @@ async def expand(template: str, ctx: Context) -> str:
             return await ctx.game()
         if key == "title" and ctx.title:
             return await ctx.title()
+        if key in ("follow", "followdate", "followage") and arg.strip():   # 1.14.0: about the name given, like $(followage $(touser))
+            other = restore(arg.strip()).lstrip("@").strip()
+            if other.lower() == str(ctx.channel or "").lower():
+                return "owns this channel" if key == "follow" else "(channel owner)"
+            if not ctx.followed_of or not other:
+                return "(unknown)"
+            try:
+                exists, when = await ctx.followed_of(other)
+            except Exception:
+                log.exception("$(%s name) lookup failed", key)
+                return "(follow lookup failed)"
+            if not exists:
+                return "(no such account)" if ctx.lang != "ar" else "(لا يوجد حساب بهذا الاسم)"
+            if when is None:
+                return f"isn't following {ctx.channel}" if key == "follow" else "(not following)"
+            if key == "followdate":
+                return follow_date(when)
+            if key == "followage":
+                return follow_age(when, lang=ctx.lang)
+            return f"followed {ctx.channel} on {follow_date(when)} ({follow_age(when)} ago)"
         if key in ("follow", "followdate", "followage"):
             if ctx.is_owner:
                 return "owns this channel" if key == "follow" else "(channel owner)"
@@ -432,8 +460,13 @@ async def expand(template: str, ctx: Context) -> str:
             except Exception:
                 n = None
             return "(unknown)" if n is None else str(n)
+        if key in ("firststreak", "firststreakpeak") and arg.strip():    # 1.14.0: someone else's streak
+            other = restore(arg.strip()).lstrip("@").strip().lower()
+            return str(ctx.first_of(other, key == "firststreakpeak") if ctx.first_of and other else 0)
         if key == "firststreak":
             return str(ctx.first_streak() if ctx.first_streak else 0)
+        if key == "firststreakpeak":
+            return str(ctx.first_peak() if ctx.first_peak else 0)
         if key in ("weather", "time"):
             city = restore(arg)
             if key == "weather":

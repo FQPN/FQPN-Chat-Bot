@@ -3,3 +3,5 @@ aiohttp>=3.9
 pywebview
 pystray
 Pillow
+truststore>=0.9
+psutil>=5.9

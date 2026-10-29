@@ -86,6 +86,16 @@ class StoreRouter:
 
 
 async def main(open_browser=False):    # open_browser is ignored: the dashboard is only shown in the app window
+    try:                                  # 1.14.0: the health log can see if this loop is ever blocked
+        from core import perfmon
+        perfmon.LOOP = asyncio.get_running_loop()
+    except Exception:
+        pass
+    try:                                  # 1.14.0 (the launcher already did it: this covers running main.py directly)
+        from core import netfix
+        netfix.use_system_certs()
+    except ImportError:
+        pass
     reg = accounts.load()                 # 1.12.0: one folder per channel (None = the old layout, not moved yet)
     accounts.ACTIVE["id"] = reg["active"] if reg else None
     runtimes: dict = {}

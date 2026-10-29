@@ -24,7 +24,8 @@ const MAX_NAME = 60;
 const MAX_BODY = 256 * 1024;   // bytes (1.13.0: 64 -> 256 KB, each command can carry a short example)
 const MAX_EX = 100;             // 1.13.0: an example reply, at most this many characters
 const BI_KEYS = ["commands", "title", "game", "app", "addcom", "editcom", "delcom"];
-const GAME_ROWS = { letters: ["start", "approve"], scramble: ["start"], shared: ["wins", "top"] };
+const GAME_ROWS = { letters: ["start", "approve"], scramble: ["start"], emoji: ["start"], reverse: ["start"], math: ["start"], ladder: ["start"], trivia: ["start"], shared: ["wins", "top", "random"] };
+const LB_KEYS = ["l", "u", "e", "r", "m", "s", "q"];          // 1.14.0: حروف, رتب, ايموجي, عكس, احسب
 const MIN_GAP = 5;             // seconds between two saves of the same channel
 const PERMS = ["everyone", "subscriber", "vip", "moderator", "broadcaster"];
 const LOGIN_RE = /^[a-z0-9_]{1,25}$/;
@@ -135,7 +136,7 @@ async function handle(req, env) {
     return ["/api/editor/link", "/api/editor/page", "/api/editor/data", "/api/editor/changes", "/api/editor/ack"].includes(path) ? editorOwner(req, env, url) : editorGuest(req, env, url);
   }
   if (req.method !== "GET" && req.method !== "HEAD") return json({ error: "Method not allowed." }, 405, { Allow: "GET" });
-  if (path === "/") return page(homeBody(url.origin, await latest()), "FQPN's Chat Bot · Twitch moderation chat bot", 200, 600);
+  if (path === "/") return page(homeBody(url.origin, await latest(), await userCount(env)), "FQPN's Chat Bot · Twitch moderation chat bot", 200, 600);
   if (path === "/download/windows" || path === "/download") {
     const l = await latest();                      // the newest installer, or the releases page when GitHub can't be reached
     return new Response(null, { status: 302, headers: { Location: l ? l.url : RELEASES + "/latest", "Cache-Control": "no-store" } });
@@ -260,9 +261,14 @@ function cleanLeaderboard(lb) {
   const n = (x) => Math.max(0, Math.min(1e9, Math.floor(Number(x) || 0)));
   const rows = (a, parts) => (Array.isArray(a) ? a : []).slice(0, 10).map((r) => {
     const name = String((r && r.n) || "").replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, "").trim().slice(0, 40);
-    return name ? (parts ? { n: name, w: n(r.w), l: n(r.l), u: n(r.u) } : { n: name, w: n(r.w) }) : null;
+    if (!name) return null;
+    const out = { n: name, w: n(r.w) };
+    if (parts) LB_KEYS.forEach((k) => { out[k] = n(r[k]); });
+    return out;
   }).filter((r) => r && r.w > 0);
-  return { all: rows(lb.all, true), l: rows(lb.l, false), u: rows(lb.u, false) };
+  const out = { all: rows(lb.all, true) };
+  LB_KEYS.forEach((k) => { out[k] = rows(lb[k], false); });
+  return out;
 }
 
 function cleanList(body) {
@@ -721,9 +727,38 @@ async function devUsers(req, env) {
   const d = await devWho(req, env);
   if (d.res) return d.res;
   await setup(env.DB);
-  const rows = (await env.DB.prepare("SELECT s.user_id, s.login, s.display, s.version, s.first_seen, s.last_seen, (b.user_id IS NOT NULL) AS banned " +
-                                     "FROM seen s LEFT JOIN bans b ON b.user_id = s.user_id ORDER BY s.last_seen DESC").all()).results || [];
-  return json({ now: Math.floor(Date.now() / 1000), users: rows.map((r) => ({ ...r, banned: !!r.banned, developer: DEVELOPERS.has(String(r.user_id)) })) });
+  const rows = (await env.DB.prepare("SELECT s.user_id, s.login, s.display, s.version, s.first_seen, s.last_seen, (b.user_id IS NOT NULL) AS banned, " +
+                                     "(l.login IS NOT NULL) AS has_list FROM seen s LEFT JOIN bans b ON b.user_id = s.user_id " +
+                                     "LEFT JOIN lists l ON l.login = s.login ORDER BY s.last_seen DESC").all()).results || [];
+  const live = await liveNow(d.who, rows.map((r) => String(r.user_id)));     // 1.14.0: who is live right now (null: Twitch didn't answer)
+  return json({ now: Math.floor(Date.now() / 1000), live_checked: live !== null, users: rows.map((r) => {
+    const l = live && live.get(String(r.user_id));
+    return { ...r, banned: !!r.banned, developer: DEVELOPERS.has(String(r.user_id)), has_list: !!r.has_list,
+             live: live === null ? null : !!l, viewers: l ? l.viewers : 0, game: l ? l.game : "", live_since: l ? l.since : 0 };
+  }) });
+}
+
+// 1.14.0: Twitch's "Get Streams" with the developer's own login (any Twitch login may ask it): up to 100 channels a call.
+// Map user_id -> { viewers, game, since } for the ones live now; null when Twitch can't be asked (the page then says so).
+async function liveNow(who, ids) {
+  const out = new Map();
+  try {
+    for (let i = 0; i < ids.length; i += 100) {
+      const q = ids.slice(i, i + 100).filter((x) => /^\d{1,20}$/.test(x)).map((x) => "user_id=" + x).join("&");
+      if (!q) continue;
+      const r = await fetch("https://api.twitch.tv/helix/streams?first=100&" + q, { headers: { Authorization: "Bearer " + who.token, "Client-Id": who.clientId } });
+      if (!r.ok) return null;
+      const j = await r.json();
+      for (const st of j.data || []) {
+        if (st.type !== "live") continue;
+        out.set(String(st.user_id), { viewers: Number(st.viewer_count) || 0, game: String(st.game_name || "").slice(0, 80),
+                                      since: Math.floor(Date.parse(st.started_at || "") / 1000) || 0 });
+      }
+    }
+  } catch (e) {
+    return null;
+  }
+  return out;
 }
 
 async function devBan(req, env) {
@@ -776,7 +811,8 @@ function page(body, title, status, maxAge, data, script = CLIENT, cspExtra = "")
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&family=Tajawal:wght@400;500;700&display=swap">
-<style nonce="${nonce}">${CSS}${data && HEX_RE.test(String(data.accent || "")) ? ":root{--red2:" + data.accent + "}" : ""}</style>
+<style nonce="${nonce}">${CSS}${data && HEX_RE.test(String(data.accent || "")) ? ":root{--red2:" + data.accent + ";--glow1:color-mix(in srgb," + data.accent + " 42%,transparent);--glow2:color-mix(in srgb," + data.accent + " 24%,transparent)}" +
+  "@media (prefers-color-scheme:light){:root{--glow1:color-mix(in srgb," + data.accent + " 16%,transparent);--glow2:color-mix(in srgb," + data.accent + " 9%,transparent)}}" : ""}</style>
 </head>
 <body>
 <main class="wrap">${body}</main>
@@ -802,7 +838,7 @@ const TEXT = {
   en: {
     commands: "Commands", count: "{n} commands", count1: "1 command", count2: "2 commands", count_few: "{n} commands", search: "Search commands", none: "No commands match your search.",
     empty: "This channel has no public commands yet.", copy: "Click a command to copy it.", copied: "Copied {c}",
-    g_builtin: "Built-in commands", g_games: "Mini games", bd_commands: "Links to this page with every command.", bd_title: "Shows the stream title. Moderators change it by writing a new title after it.", bd_game: "Shows the game. Moderators change it by writing a game name after it.", bd_app: "Says which app runs this chat bot.", bd_addcom: "Moderators add a new command from chat.", bd_editcom: "Moderators change a command's reply from chat.", bd_delcom: "Moderators delete a command from chat.", gd_letters_start: "Starts a Letters round: be the first to write a word from the category that starts with the given letter.", gd_letters_approve: "Moderators accept a word the bot didn't know, and that viewer wins the round.", gd_scramble_start: "Starts a word scramble: the first to write the word in the right order wins.", gd_shared_wins: "Shows how many rounds you've won.", gd_shared_top: "Shows the top 5 players. Add a game's name to see just that game.", bi_who: "Built in to FQPN's Chat Bot · {w} can use it", g_everyone: "Everyone", g_subscriber: "Subscribers", g_vip: "VIPs", g_moderator: "Moderators", g_broadcaster: "Broadcaster",
+    g_builtin: "Built-in commands", g_games: "Mini games", bd_commands: "Links to this page with every command.", bd_title: "Shows the stream title. Moderators change it by writing a new title after it.", bd_game: "Shows the game. Moderators change it by writing a game name after it.", bd_app: "Says which app runs this chat bot.", bd_addcom: "Moderators add a new command from chat.", bd_editcom: "Moderators change a command's reply from chat.", bd_delcom: "Moderators delete a command from chat.", gd_letters_start: "Starts a Letters round: be the first to write a word from the category that starts with the given letter.", gd_letters_approve: "Moderators accept a word the bot didn't know, and that viewer wins the round.", gd_scramble_start: "Starts a word scramble: the first to write the word in the right order wins.", gd_shared_wins: "Shows how many rounds you've won.", gd_shared_top: "Sends the link to the games leaderboard.", gd_emoji_start: "Starts «ايموجي»: guess the word from the emojis; the first right answer wins.", gd_reverse_start: "Starts «عكس»: a word written backwards; the first to write it the right way wins.", gd_math_start: "Starts «احسب»: a quick sum; the first right answer wins.", gd_ladder_start: "Starts «سلم»: the fastest to write a few words starting with a letter wins.", gd_trivia_start: "Starts «سؤال»: an easy question with 4 choices; the first right answer wins.", gd_shared_random: "Starts a round of a random game.", bi_who: "Built in to FQPN's Chat Bot · {w} can use it", g_everyone: "Everyone", g_subscriber: "Subscribers", g_vip: "VIPs", g_moderator: "Moderators", g_broadcaster: "Broadcaster",
     updated: "Updated {t}", made: "Made with FQPN's Chat Bot", lang: "العربية",
     home_t: "Public command lists", home_d: "Streamers who use FQPN's Chat Bot can share their chat commands here. Open a link like {u} to see a channel's list.",
     miss_t: "No list here", miss_d: "There is no public command list for {c}. The streamer can switch it on in FQPN's Chat Bot, on the Commands page.",
@@ -822,15 +858,21 @@ const TEXT = {
     miss_d0: "This page doesn't exist.",
     // the home page (download)
     h_title: "Twitch moderation chat bot", h_lead: "Commands, timers, greetings, replies to Twitch events, chat moderation and mini games, all set up in an app in English and Arabic. Free.",
-    dl: "Download for Windows", dl_meta: "Version {v} · {d} · {s} MB", dl_down: "Get the newest version from GitHub", dl_req: "Windows 10 or 11 · installs for your user, no administrator needed",
+    dl: "Download for Windows", dl_users: "streamers use it", dl_meta: "Version {v} · {d} · {s} MB", dl_down: "Get the newest version from GitHub", dl_req: "Windows 10 or 11 · installs for your user, no administrator needed",
     dl_all: "All versions and what changed",
     f_t: "What it does",
-    f1_t: "Commands", f1_d: "With aliases, user levels, cooldowns and variables like $(user), $(followage) and $(uptime).",
-    f2_t: "Timers and greetings", f2_d: "Messages on a schedule while you're live, and a greeting for the people you choose, once per stream.",
-    f3_t: "Twitch events", f3_d: "Replies for follows, subscriptions, gift subs, raids, hype trains, bits and watch streaks.",
-    f4_t: "Moderation", f4_d: "Chat filters, a blocklist, and a log of everything the bot and your moderators did.",
-    f5_t: "Mini games", f5_d: "\u2067«اسم، جماد، نبات، حيوان، بلاد»\u2069 and \u2067«رتب»\u2069, with leaderboards and a limit of rounds per stream.",
-    f6_t: "English and Arabic", f6_d: "The whole app in both languages, right to left in Arabic, in dark and light.",
+    f1_t: "Commands", f1_d: "With aliases, user levels, cooldowns and variables like $(user), $(followage), $(weather city) and $(accountage).",
+    f2_t: "Timers", f2_d: "Messages on a schedule while you're live, like a reminder to follow or to join your Discord.",
+    f3_t: "Twitch events", f3_d: "Replies for follows, subs, gift subs, raids, hype trains, bits, watch streaks and donations, with running totals.",
+    f4_t: "Greetings", f4_d: "A hello for the people you choose, once per stream, in your own words.",
+    f5_t: "Blocklist", f5_d: "People the bot ignores: their commands get no answer.",
+    f6_t: "Moderation", f6_d: "Filters for bad words in Arabic and English, links, caps, emotes, symbols and spam, and a log of what was done.",
+    f7_t: "Mini games", f7_d: "Five games: «حروف», «رتب», «ايموجي», «عكس» and «احسب», with «لعبه؟» for a random one, and leaderboards.",
+    f8_t: "Test chat", f8_d: "Try every command, game and event reply as any viewer, without Twitch. With ready-made recipes.",
+    f9_t: "Giveaways", f9_d: "Draw an active chatter, let viewers join with a keyword, or guess a number. Subscriber luck and rerolls.",
+    f10_t: "Public command list", f10_d: "One link to a page with all your commands, an example of what each says, and the games leaderboard.",
+    f11_t: "Editor link", f11_d: "Let someone you trust edit your commands from the website, with a link and a one-time password.",
+    f12_t: "English and Arabic", f12_d: "The whole app in both languages, right to left in Arabic, in dark and light.",
     s_t: "Install in a minute",
     s1: "Download the installer above.",
     s2: "Run it. If Windows shows “Windows protected your PC”, click More info, then Run anyway.",
@@ -848,10 +890,11 @@ const TEXT = {
     c_t: "How it's different", c_lead: "Compared with Nightbot, StreamElements and WizeBot, which run on their companies' servers.",
     c_us: "FQPN's Chat Bot", c_yes: "Yes", c_no: "No",
     c1: "Where it runs", c1a: "On your PC", c1b: "On their servers",
-    c2: "Your commands and settings", c2a: "Saved only on your PC", c2b: "Saved on their servers",
-    c3: "Open source", c3a: "yes", c3b: "no",
+    c2: "Runs 100% locally", c2a: "yes", c2b: "no",
+    c10: "No account required", c10a: "yes", c10b: "no",
+    c11: "No subscription", c11a: "yes", c11b: "yes", c11b2: "Paid extras",
     c5: "Free", c5a: "yes", c5b: "yes",
-    c7: "Talks as your channel account, or any account you choose", c7a: "yes", c7b: "no",
+    c7: "Talks as you or your own bot", c7a: "yes", c7b: "no",
     c8: "Chat moderation (filters, blocklist)", c8a: "yes", c8b: "yes",
     c9: "Replies in chat to Twitch events (follows, subs, gift subs, raids, bits)", c9a: "yes", c9b: "yes", c9b0: "no",
     c6: "Works while your PC is off", c6a: "no", c6b: "yes",
@@ -861,7 +904,7 @@ const TEXT = {
   ar: {
     commands: "الأوامر", count: "{n} أمر", count1: "أمر واحد", count2: "أمران", count_few: "{n} أوامر", search: "ابحث في الأوامر", none: "لا توجد أوامر تطابق بحثك.",
     empty: "لا توجد أوامر عامة لهذه القناة بعد.", copy: "اضغط على أمر لنسخه.", copied: "تم نسخ {c}",
-    g_builtin: "الأوامر المدمجة", g_games: "الألعاب", bd_commands: "رابط لهذه الصفحة بكل الأوامر.", bd_title: "يعرض عنوان البث. يغيّره المشرفون بكتابة عنوان جديد بعده.", bd_game: "يعرض اللعبة. يغيّرها المشرفون بكتابة اسم لعبة بعده.", bd_app: "يقول أي برنامج يشغّل هذا البوت.", bd_addcom: "يضيف المشرفون أمرًا جديدًا من الدردشة.", bd_editcom: "يغيّر المشرفون رد أمر من الدردشة.", bd_delcom: "يحذف المشرفون أمرًا من الدردشة.", gd_letters_start: "يبدأ جولة «حروف»: أول من يكتب كلمة من الفئة تبدأ بالحرف المعروض يفوز.", gd_letters_approve: "يقبل المشرفون كلمة لم يعرفها البوت، ويفوز ذلك المشاهد بالجولة.", gd_scramble_start: "يبدأ لعبة «رتّب»: أول من يكتب الكلمة بالترتيب الصحيح يفوز.", gd_shared_wins: "يعرض كم جولة فزت بها.", gd_shared_top: "يعرض أفضل 5 لاعبين. أضف اسم لعبة لترى تلك اللعبة فقط.", bi_who: "مدمج في FQPN's Chat Bot · يستخدمه: {w}", g_everyone: "الجميع", g_subscriber: "المشتركون", g_vip: "VIP", g_moderator: "المشرفون", g_broadcaster: "صاحب القناة",
+    g_builtin: "الأوامر المدمجة", g_games: "الألعاب", bd_commands: "رابط لهذه الصفحة بكل الأوامر.", bd_title: "يعرض عنوان البث. يغيّره المشرفون بكتابة عنوان جديد بعده.", bd_game: "يعرض اللعبة. يغيّرها المشرفون بكتابة اسم لعبة بعده.", bd_app: "يقول أي برنامج يشغّل هذا البوت.", bd_addcom: "يضيف المشرفون أمرًا جديدًا من الدردشة.", bd_editcom: "يغيّر المشرفون رد أمر من الدردشة.", bd_delcom: "يحذف المشرفون أمرًا من الدردشة.", gd_letters_start: "يبدأ جولة «حروف»: أول من يكتب كلمة من الفئة تبدأ بالحرف المعروض يفوز.", gd_letters_approve: "يقبل المشرفون كلمة لم يعرفها البوت، ويفوز ذلك المشاهد بالجولة.", gd_scramble_start: "يبدأ لعبة «رتّب»: أول من يكتب الكلمة بالترتيب الصحيح يفوز.", gd_shared_wins: "يعرض كم جولة فزت بها.", gd_shared_top: "يرسل رابط لوحة أوائل الألعاب.", gd_emoji_start: "يبدأ «ايموجي»: خمّن الكلمة من الإيموجي؛ أول جواب صحيح يفوز.", gd_reverse_start: "يبدأ «عكس»: كلمة مكتوبة بالعكس؛ أول من يكتبها صح يفوز.", gd_math_start: "يبدأ «احسب»: عملية حسابية سريعة؛ أول جواب صحيح يفوز.", gd_ladder_start: "يبدأ «سلم»: أسرع من يكتب عدة كلمات تبدأ بحرف يفوز.", gd_trivia_start: "يبدأ «سؤال»: سؤال سهل بأربعة خيارات؛ أول جواب صحيح يفوز.", gd_shared_random: "يبدأ جولة من لعبة عشوائية.", bi_who: "مدمج في FQPN's Chat Bot · يستخدمه: {w}", g_everyone: "الجميع", g_subscriber: "المشتركون", g_vip: "VIP", g_moderator: "المشرفون", g_broadcaster: "صاحب القناة",
     updated: "آخر تحديث {t}", made: "صُنعت باستخدام FQPN's Chat Bot", lang: "English",
     home_t: "قوائم الأوامر العامة", home_d: "يمكن لصنّاع المحتوى الذين يستخدمون FQPN's Chat Bot مشاركة أوامر الشات هنا. افتح رابطًا مثل {u} لرؤية قائمة القناة.",
     miss_t: "لا توجد قائمة هنا", miss_d: "لا توجد قائمة أوامر عامة لـ {c}. يمكن لصاحب القناة تفعيلها في FQPN's Chat Bot من صفحة الأوامر.",
@@ -880,15 +923,21 @@ const TEXT = {
     ed_st_wait: "بانتظار التطبيق", ed_st_ok: "طُبّق", ed_st_bad: "رُفض", ed_op_set: "حُفظ", ed_op_del: "حُذف",
     miss_d0: "هذه الصفحة غير موجودة.",
     h_title: "بوت شات وإشراف لتويتش", h_lead: "أوامر ومؤقتات وترحيب وردود على أحداث تويتش وإشراف على الشات وألعاب، كلها تُضبط من تطبيق بالعربي والإنجليزي. مجاني.",
-    dl: "تحميل لويندوز", dl_meta: "الإصدار {v} · {d} · {s} ميغابايت", dl_down: "احصل على أحدث إصدار من GitHub", dl_req: "ويندوز 10 أو 11 · يُثبَّت لحسابك فقط، بدون صلاحيات المسؤول",
+    dl: "تحميل لويندوز", dl_users: "ستريمر يستخدمونه", dl_meta: "الإصدار {v} · {d} · {s} ميغابايت", dl_down: "احصل على أحدث إصدار من GitHub", dl_req: "ويندوز 10 أو 11 · يُثبَّت لحسابك فقط، بدون صلاحيات المسؤول",
     dl_all: "كل الإصدارات وما تغيّر فيها",
     f_t: "ماذا يفعل",
-    f1_t: "الأوامر", f1_d: "بأسماء بديلة ومستويات للمستخدمين وفترات انتظار ومتغيرات مثل \u2066$(user)\u2069 و\u2066$(followage)\u2069 و\u2066$(uptime)\u2069.",
-    f2_t: "المؤقتات والترحيب", f2_d: "رسائل بجدول أثناء البث، وترحيب بمن تختارهم مرة في كل بث.",
-    f3_t: "أحداث تويتش", f3_d: "ردود على المتابعة والاشتراكات واشتراكات الهدايا والغارات وقطار الحماس والبيتس وسلسلة المشاهدة.",
-    f4_t: "الإشراف", f4_d: "فلاتر للشات وقائمة حظر وسجل لكل ما فعله البوت والمشرفون.",
-    f5_t: "الألعاب", f5_d: "«اسم، جماد، نبات، حيوان، بلاد» و«رتب»، مع لوحات صدارة وحد للجولات في كل بث.",
-    f6_t: "عربي وإنجليزي", f6_d: "التطبيق كله باللغتين، من اليمين لليسار بالعربي، بالوضع الداكن والفاتح.",
+    f1_t: "الأوامر", f1_d: "بأسماء بديلة ومستويات للمستخدمين وفترات انتظار ومتغيرات مثل \\u2066$(user)\\u2069 و\\u2066$(followage)\\u2069 و\\u2066$(weather city)\\u2069 و\\u2066$(accountage)\\u2069.",
+    f2_t: "المؤقتات", f2_d: "رسائل بجدول زمني أثناء البث، مثل تذكير بالمتابعة أو بالانضمام للديسكورد.",
+    f3_t: "أحداث تويتش", f3_d: "ردود على المتابعة والاشتراكات والإهداءات والغارات وقطار الحماس والـ Bits وسلاسل المشاهدة والتبرعات، مع المجموع.",
+    f4_t: "التحيات", f4_d: "ترحيب بمن تختارهم، مرة في كل بث، بكلماتك.",
+    f5_t: "قائمة الحظر", f5_d: "أشخاص يتجاهلهم البوت: لا رد على أوامرهم.",
+    f6_t: "الإشراف", f6_d: "فلاتر للكلمات السيئة بالعربية والإنجليزية والروابط والأحرف الكبيرة والإيموجي والرموز والسبام، وسجل لما حدث.",
+    f7_t: "الألعاب", f7_d: "خمس ألعاب: «حروف» و«رتب» و«ايموجي» و«عكس» و«احسب»، و«لعبه؟» للعبة عشوائية، مع لوحة الأوائل.",
+    f8_t: "تجربة الدردشة", f8_d: "جرّب كل أمر ولعبة ورد حدث كأي مشاهد، بدون تويتش. مع وصفات أوامر جاهزة.",
+    f9_t: "السحوبات", f9_d: "اسحب أحد المتفاعلين، أو دع المشاهدين يشاركون بكلمة، أو يخمّنون رقمًا. حظ للمشتركين وإعادة السحب.",
+    f10_t: "قائمة الأوامر العامة", f10_d: "رابط واحد لصفحة فيها كل أوامرك، ومثال على ما يقوله كل أمر، ولوحة أوائل الألعاب.",
+    f11_t: "رابط التعديل", f11_d: "اسمح لشخص تثق به بتعديل أوامرك من الموقع، برابط وكلمة مرور لمرة واحدة.",
+    f12_t: "العربية والإنجليزية", f12_d: "التطبيق كله باللغتين، من اليمين لليسار بالعربية، بالوضع الداكن والفاتح.",
     s_t: "التثبيت في دقيقة",
     s1: "حمّل المثبّت من الأعلى.",
     s2: "شغّله. إذا ظهرت رسالة «Windows protected your PC» فاضغط More info ثم Run anyway.",
@@ -906,10 +955,11 @@ const TEXT = {
     c_t: "ما الذي يميّزه", c_lead: "مقارنة بـ Nightbot وStreamElements وWizeBot، وهي تعمل على خوادم شركاتها.",
     c_us: "FQPN's Chat Bot", c_yes: "نعم", c_no: "لا",
     c1: "أين يعمل", c1a: "على جهازك", c1b: "على خوادمهم",
-    c2: "أوامرك وإعداداتك", c2a: "محفوظة على جهازك فقط", c2b: "محفوظة على خوادمهم",
-    c3: "مفتوح المصدر", c3a: "yes", c3b: "no",
+    c2: "يعمل محليًا 100%", c2a: "yes", c2b: "no",
+    c10: "بدون إنشاء حساب", c10a: "yes", c10b: "no",
+    c11: "بدون اشتراك", c11a: "yes", c11b: "yes", c11b2: "مزايا مدفوعة",
     c5: "مجاني", c5a: "yes", c5b: "yes",
-    c7: "يكتب باسم حساب قناتك، أو أي حساب تختاره", c7a: "yes", c7b: "no",
+    c7: "يكتب باسمك أو باسم بوتك", c7a: "yes", c7b: "no",
     c8: "الإشراف على الشات (فلاتر، قائمة حظر)", c8a: "yes", c8b: "yes",
     c9: "يرد في الشات على أحداث تويتش (المتابعة، الاشتراكات، الهدايا، الغارات، البيتس)", c9a: "yes", c9b: "yes", c9b0: "no",
     c6: "يعمل وجهازك مطفأ", c6a: "no", c6b: "yes",
@@ -920,9 +970,16 @@ const TEXT = {
 
 const ICONS = {   // small line icons for the feature cards (inline SVG: nothing extra to load)
   f1: '<path d="M4 17l6-6-6-6M12 19h8"/>', f2: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
-  f3: '<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>', f4: '<path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
-  f5: '<rect x="2.5" y="7" width="19" height="11" rx="5"/><path d="M7.5 10.5v4M5.5 12.5h4M15.5 11.5h.01M17.5 13.5h.01"/>',
-  f6: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 3.7 5.7 3.7 9s-1.2 6.3-3.7 9c-2.5-2.7-3.7-5.7-3.7-9S9.5 5.7 12 3z"/>',
+  f3: '<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>',
+  f4: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>',
+  f5: '<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>',
+  f6: '<path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
+  f7: '<rect x="2.5" y="7" width="19" height="11" rx="5"/><path d="M7.5 10.5v4M5.5 12.5h4M15.5 11.5h.01M17.5 13.5h.01"/>',
+  f8: '<path d="M4 5h16v11H9l-5 4z"/><path d="m10 8.5 4 2-4 2z"/>',
+  f9: '<rect x="3.5" y="9" width="17" height="11.5" rx="1.5"/><path d="M2.5 9h19v-3h-19zM12 6v14.5"/>',
+  f10: '<path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/>',
+  f11: '<path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/>',
+  f12: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 3.7 5.7 3.7 9s-1.2 6.3-3.7 9c-2.5-2.7-3.7-5.7-3.7-9S9.5 5.7 12 3z"/>',
 };
 const T = (k) => esc(TEXT.en[k]);
 const BOTS = ["Nightbot", "StreamElements", "WizeBot"];     // the comparison's columns (names only: nothing loaded from them)
@@ -932,25 +989,36 @@ function cell(v, key, us) {         // "yes" / "no" -> a mark and the word; anyt
   return `<td${cls} data-t="${key}">${T(key)}</td>`;
 }
 
-function homeBody(origin, rel) {
+// 1.14.0: how many channels use the app (the ones it has heard from, banned ones left out), next to the Download button
+async function userCount(env) {
+  try {
+    await setup(env.DB);
+    const r = await env.DB.prepare("SELECT COUNT(*) AS n FROM seen s WHERE NOT EXISTS (SELECT 1 FROM bans b WHERE b.user_id = s.user_id)").first();
+    return Number((r && r.n) || 0);
+  } catch (e) {
+    return 0;
+  }
+}
+
+function homeBody(origin, rel, users = 0) {
   const meta = rel ? `<p class="dlmeta" data-t="dl_meta" data-v="${esc(rel.version)}" data-d="${rel.date}" data-s="${(rel.size / 1048576).toFixed(1)}" dir="auto">${
     esc(TEXT.en.dl_meta.replace("{v}", rel.version).replace("{d}", new Date(rel.date * 1000).toISOString().slice(0, 10)).replace("{s}", (rel.size / 1048576).toFixed(1)))}</p>`
     : `<p class="dlmeta" data-t="dl_down">${T("dl_down")}</p>`;
   const icon = (k) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[k]}</svg>`;
-  const feats = [1, 2, 3, 4, 5, 6].map((n) => `<div class="feat">${icon("f" + n)}<h3 data-t="f${n}_t">${T("f" + n + "_t")}</h3><p data-t="f${n}_d">${T("f" + n + "_d")}</p></div>`).join("");
+  const feats = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((n) => `<div class="feat">${icon("f" + n)}<h3 data-t="f${n}_t">${T("f" + n + "_t")}</h3><p data-t="f${n}_d">${T("f" + n + "_d")}</p></div>`).join("");
   const steps = [1, 2, 3, 4].map((n) => `<li><span class="num" aria-hidden="true">${n}</span><span data-t="s${n}">${T("s" + n)}</span></li>`).join("");
   const faq = [1, 2, 3, 4, 5, 6].map((n) => `<details><summary data-t="q${n}">${T("q" + n)}</summary><p data-t="a${n}">${T("a" + n)}</p></details>`).join("");
   return `<header class="top"><div class="who"><img class="logo" src="${LOGO}" alt="" width="48" height="48"><div><b class="brand">FQPN's Chat Bot</b></div></div>${langBtn()}</header>
 <section class="hero">
 <h1 data-t="h_title">${T("h_title")}</h1>
 <p class="lead" data-t="h_lead">${T("h_lead")}</p>
-<div class="dlbox"><a class="dl" id="dl" href="/download/windows"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M4 20h16"/></svg><span data-t="dl">${T("dl")}</span></a>
+<div class="dlbox"><div class="dlrow"><a class="dl" id="dl" href="/download/windows"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M4 20h16"/></svg><span data-t="dl">${T("dl")}</span></a>${users >= 2 ? `<span class="dlusers"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M15.5 4.8a3.5 3.5 0 0 1 0 6.4M18 14.8c1.9.8 3.1 2.6 3.5 5.2"/></svg><b>${users}</b> <span data-t="dl_users">${T("dl_users")}</span></span>` : ""}</div>
 ${meta}<p class="req" data-t="dl_req">${T("dl_req")}</p><p class="req"><a href="${esc(rel ? rel.notes : RELEASES)}" rel="noopener" data-t="dl_all">${T("dl_all")}</a></p></div>
 </section>
 <section><h2 data-t="f_t">${T("f_t")}</h2><div class="feats">${feats}</div></section>
 <section><h2 data-t="c_t">${T("c_t")}</h2><p class="lead small" data-t="c_lead">${T("c_lead")}</p>
 <div class="cmpwrap"><table class="cmp"><thead><tr><th></th><th class="us" data-t="c_us">${T("c_us")}</th>${BOTS.map((b) => `<th>${b}</th>`).join("")}</tr></thead><tbody>${
-  [1, 2, 7, 9, 3, 8, 5, 6].map((n) => `<tr${n === 6 ? ' class="con"' : ""}><th scope="row" data-t="c${n}">${T("c" + n)}</th>${cell(TEXT.en["c" + n + "a"], "c" + n + "a", true)}${
+  [1, 2, 10, 11, 7, 9, 8, 5, 6].map((n) => `<tr${n === 6 ? ' class="con"' : ""}><th scope="row" data-t="c${n}">${T("c" + n)}</th>${cell(TEXT.en["c" + n + "a"], "c" + n + "a", true)}${
     BOTS.map((_, i) => { const k = TEXT.en["c" + n + "b" + i] !== undefined ? "c" + n + "b" + i : "c" + n + "b"; return cell(TEXT.en[k], k, false); }).join("")}</tr>`).join("")
 }</tbody></table></div>
 <p class="cmpnote" data-t="c_note">${T("c_note")}</p></section>
@@ -976,7 +1044,7 @@ ${view.leaderboard ? `<nav class="tabs" id="tabs"><button type="button" class="t
 <p class="hint" data-t="copy">${esc(TEXT.en.copy)}</p>
 <div id="groups"></div>
 <p class="empty" id="none" hidden></p></div>
-${view.leaderboard ? `<div id="pane-lb" hidden><div class="subtabs"><button type="button" class="sub-tab on" data-sub="all" data-t="lb_all">${esc(TEXT.en.lb_all)}</button><button type="button" class="sub-tab" data-sub="l">حروف</button><button type="button" class="sub-tab" data-sub="u">رتب</button></div><div class="lb" id="lbrows"></div></div>` : ""}
+${view.leaderboard ? `<div id="pane-lb" hidden><div class="subtabs"><button type="button" class="sub-tab on" data-sub="all" data-t="lb_all">${esc(TEXT.en.lb_all)}</button><button type="button" class="sub-tab" data-sub="l">حروف</button><button type="button" class="sub-tab" data-sub="u">رتب</button><button type="button" class="sub-tab" data-sub="e">ايموجي</button><button type="button" class="sub-tab" data-sub="r">عكس</button><button type="button" class="sub-tab" data-sub="m">احسب</button><button type="button" class="sub-tab" data-sub="s">سلم</button><button type="button" class="sub-tab" data-sub="q">سؤال</button></div><div class="lb" id="lbrows"></div></div>` : ""}
 <footer class="foot"><span id="updated"></span><span data-t="made">${esc(TEXT.en.made)}</span></footer>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>`;
 }
@@ -1080,6 +1148,9 @@ a.chname:hover,a.chname:focus-visible{border-bottom-color:var(--red2);outline:no
 .lead.small{font-size:15px}
 .dlbox{display:flex;flex-direction:column;align-items:flex-start;gap:6px}
 .dl{display:inline-flex;align-items:center;gap:10px;background:var(--red2);color:#fff;text-decoration:none;font-weight:600;font-size:18px;padding:14px 26px;border-radius:12px;box-shadow:0 10px 30px -12px var(--red2)}
+.dlrow{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.dlusers{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border:1px solid var(--line);border-radius:12px;color:var(--mute);font-size:15px}
+.dlusers b{color:var(--text);font-size:17px}.dlusers svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .dl:hover,.dl:focus-visible{filter:brightness(1.15);outline:none}
 .dl:focus-visible{box-shadow:0 0 0 3px color-mix(in srgb,var(--red2) 45%,transparent)}
 .dl svg,.feat svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
@@ -1115,7 +1186,7 @@ table.cmp{width:100%;border-collapse:collapse;font-size:15px;min-width:680px}
 .cmp td.us{color:var(--text);background:color-mix(in srgb,var(--red2) 7%,transparent)}
 .cmp tr.con td.us{color:var(--soft)}
 .cmpnote{color:var(--mute);font-size:14px;margin:10px 2px 0}
-@media (max-width:520px){.hero h1{font-size:30px}.dl{width:100%;justify-content:center}.dlbox{align-items:stretch}}
+@media (max-width:520px){.hero h1{font-size:30px}.dl{width:100%;justify-content:center}.dlbox{align-items:stretch}.dlrow{flex-direction:column;align-items:stretch}.dlusers{justify-content:center}}
 @media (max-width:520px){h1{font-size:23px}.wrap{padding-left:14px;padding-right:14px}}
 [hidden]{display:none!important}
 .tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:18px;overflow-x:auto;overflow-y:hidden;padding-bottom:1px}
@@ -1169,7 +1240,7 @@ function drawLb(){
     var row=document.createElement("div");row.className="lbrow";
     var rk=document.createElement("span");rk.className="rk";rk.textContent=String(i+1);
     var nm=document.createElement("div");nm.className="nm";var b=document.createElement("bdi");b.textContent=r.n;nm.appendChild(b);
-    if(sub==="all"){var s=document.createElement("small");s.textContent="حروف "+(r.l||0)+" · رتب "+(r.u||0);nm.appendChild(s)}
+    if(sub==="all"){var s=document.createElement("small");s.textContent=[["l","حروف"],["u","رتب"],["e","ايموجي"],["r","عكس"],["m","احسب"],["s","سلم"],["q","سؤال"]].filter(function(g){return r[g[0]]}).map(function(g){return g[1]+" "+r[g[0]]}).join(" · ");nm.appendChild(s)}
     var w=document.createElement("span");w.className="wn";w.textContent=r.w===1?t("win1"):t("wins",{n:r.w});
     row.appendChild(rk);row.appendChild(nm);row.appendChild(w);box.appendChild(row)})}
 function showTab(tab){

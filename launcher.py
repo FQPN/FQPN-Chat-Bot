@@ -398,10 +398,16 @@ def run() -> None:
             RotatingFileHandler(home / "bot.log", maxBytes=1_000_000, backupCount=2, encoding="utf-8"),
         ],
     )
-    from core import logsafe
+    from core import logsafe, netfix
     logsafe.install()          # no Twitch login keys in bot.log
+    netfix.use_system_certs()  # 1.14.0: secure connections checked like Windows does (antivirus / VPN certificates): before any connection
     configure(home, resource_dir())
     log.info("Data folder: %s", home)
+    try:                       # 1.14.0: one line a minute in perf.log (CPU, RAM, threads, how responsive the bot is)
+        from core import perfmon
+        perfmon.start(home)
+    except Exception:
+        log.exception("The health log could not start")
 
     import main
     from core import dashboard, desktop
@@ -441,6 +447,12 @@ def run() -> None:
             from core import titlebar
             threading.Thread(target=titlebar.apply, args=(WINDOW_TITLE, bg, fg, dark), daemon=True).start()
         desktop.set_titlebar = _titlebar
+        def _save_dialog(name):                       # 1.14.0: Backup > "Save a backup": Windows' own "Save as" window
+            r = shell.window.create_file_dialog(webview.SAVE_DIALOG, save_filename=name, file_types=("FQPN backup (*.fqpn)", "All files (*.*)"))
+            if isinstance(r, (list, tuple)):
+                r = r[0] if r else None
+            return str(r) if r else None
+        desktop.save_dialog = _save_dialog
         # private_mode=False + storage_path keeps the dashboard's theme/language between launches
         # On Windows the window must be the Edge (WebView2) one: the old built-in engine cannot show this dashboard properly.
         webview.start(shell.start_tray, (hidden,), private_mode=False, storage_path=str(home / "webview"),

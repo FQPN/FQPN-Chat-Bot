@@ -1,5 +1,31 @@
 # Changelog
 
+  ## 1.14.0
+   - The app is much faster and much lighter on your PC: it no longer keeps the graphics card and the CPU busy while it's open (also behind a game), its stats are counted in memory and saved once a minute, and nothing on the page moves after a few seconds.
+   - The built-in commands (!cmlist, !title, !game, !cmadd, !cmedit, !cmdel, «app?») answer in Arabic when the app is in Arabic.
+   - New variables $(count name) and $(getcount name): a counter with a name, shared by several commands (!death adds 1 with $(count deaths), !deaths shows it with $(getcount deaths)).
+   - Variables about someone else: $(followage $(touser)), $(followdate $(touser)), $(follow $(touser)), $(firststreak $(touser)) and $(firststreakpeak $(touser)) are about the person mentioned (!followage @FQPN); alone they stay about the viewer, so your commands work as before. !wins @name shows that person's wins and leaderboard place. The !followage, !me and !first recipes use it, and a new !vs compares two people.
+   - !game finds the game you mean: short and Arabic names (gta, جاتا, valo, فالو, ماين, ببجي, fc, سوالف…), the closest name, and what's popular on Twitch right now (GTA V rather than San Andreas).
+   - Backup & restore in Settings > App: save your whole setup in one file, or bring it back from one (on a new PC, or to undo changes). Before restoring, your current setup is saved in the data folder, so a restore can be undone. Your Twitch logins, donation keys and the editor link are never in the file.
+   - The public command list is switched on for every channel (once, with this update), and !cmlist sends its link. If you don't want it, switch it off in Commands > Public list: it stays off.
+   - Dashboard: Stream stats for this stream, 7 or 30 days (messages, chatters, new chatters, commands used, followers, top commands, top chatters, top Twitch emotes with their pictures), and your commands page link with Copy. Counted on your PC and saved once a minute.
+   - Commands: Public list and Editor link are under one Share button.
+   - Commands: each command shows how often it was used in the last 30 days and when it was last used.
+   - Mini games: one switch turns all games off or on again; each game keeps its own setting.
+   - Timers can wait for chat: they post only after a few new chat messages (2 to 50, off at first).
+   - Fixed: the narrow sidebar showed grey blocks between its parts instead of thin lines, and «app?» was squeezed in small windows.
+   - Five new mini games: «ايموجي» (guess the word from simple emoji puzzles like 🐝🍯 → عسل; over 120 built in, add your own), «عكس» (write a backwards word the right way), «احسب» (a quick sum in Western digits, like 7 × 8: easy, normal or hard), «سلم» (the fastest to write 3 different words starting with a letter; 2 to 5 words in its settings) and «سؤال» (over 100 easy questions; viewers write the answer itself, like مسقط. Hard, the start: only the question, with a hint halfway. Easy: the 4 choices are shown too, and a wrong choice means no second try that round). Start them with !ايموجي, !عكس, !احسب, !سلم and !سؤال; «لعبه؟» starts a random game.
+   - «رتب» is easier: only everyday words, 3 to 5 letters by default (up to 7 in its settings).
+   - !top sends the link to your games leaderboard (when your public command list is on); the leaderboard has a tab for every game.
+   - The website: how many streamers use the app, next to the Download button; one card for each chat tool, and the comparison has "Runs 100% locally", "No account required" and "No subscription". (Publish web/worker.js.)
+   - Fixed: the app could keep the graphics card and the CPU busy (fans spinning, the PC slow or freezing) as long as its window was open, also behind a game: three animations never stopped (the background glow, the status dot, the sidebar sparkles). They are short now, and pause while you use another window. A small health log (perf.log in the data folder, one line a minute) helps find any other cause.
+   - Fixed: the bot could keep disconnecting ("CERTIFICATE_VERIFY_FAILED") on PCs where an antivirus HTTPS scanning / web shield, a VPN or a network filter checks secure connections. Secure connections are now checked the way Windows does (truststore). If something still blocks Twitch, a clear warning says what to do.
+   - A new look for the Test chat: lines like Twitch chat (time, small role tags), one-click roles, a random viewer, a Live/Offline pill, and a Commands tab with every command of your channel (search, filters, Send, Edit). Type ! in the message box to pick a command; ↑ brings back your last messages.
+   - New recipes in Test chat > Recipes: 27 ready-made commands that together use every variable a command can use, each showing which variables it uses.
+   - Developers' Users page: who is live right now (with viewers and game, from Twitch), a Watch button, and a Public list button for channels that have one. (Publish web/worker.js.)
+   - The Blocklist in the menu shows how many users are blocked.
+   - Pin first message: only counts in the first minutes of the stream (5 by default); if nobody writes the word by then, the streak is broken. You're never first on your own stream, "!first", "first?", "اول؟" or the name of one of your commands don't count, and it can just count the streak without pinning. New variable $(firststreakpeak): a viewer's best streak ever.
+
   ## 1.13.0
    - Editor link (Commands > Editor link): give someone you trust a link and a password; they can change your Commands, Timers, Events, Greetings, Blocklist, Moderation and Mini games from the website, on the app's own pages, and read the Logs.
    - A new password every time, the link ends after 24 hours, and you can cancel it at any moment. Every change is checked by your app and written in the Logs.

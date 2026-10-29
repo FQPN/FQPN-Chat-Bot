@@ -75,6 +75,8 @@ class SandboxStore:
 
 
 class SimBot(TwitchBot):
+    count_stats = False             # 1.14.0: the Test chat never counts in Stream stats
+    pin_window_applies = False      # 1.14.0: Pin first message's "first minutes" don't apply in Test chat (try it any time)
     owner_id = None          # (plain values here: the real ones come from TwitchIO, which a pretend bot never starts)
     bot_id = None
 
@@ -292,6 +294,11 @@ class SimBot(TwitchBot):
             return None
         users = await live.fetch_users(logins=[login])
         return await live._followed_at(str(users[0].id)) if users else None
+
+    async def _followed_of(self, login: str):
+        if self.live is None:
+            return True, None
+        return await self.live._followed_of(login)
 
     async def _account_created(self, login, chatter):
         if self.live is None:
