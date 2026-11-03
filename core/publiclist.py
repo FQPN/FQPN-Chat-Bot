@@ -16,7 +16,7 @@ import time
 
 import aiohttp
 
-from . import auth, manage
+from . import auth, manage, minigames
 from .version import VERSION
 
 log = logging.getLogger("twitchbot.publiclist")
@@ -45,19 +45,20 @@ HEX_RE = re.compile(r"^#[0-9a-f]{6}$")
 LB_ROWS = 10
 
 
-LB_KEYS = {"l": "letters", "u": "scramble", "e": "emoji", "r": "reverse", "m": "math", "s": "ladder", "q": "trivia"}      # (short keys: the website's format)
+LB_KEYS = {"l": "letters", "u": "scramble", "e": "emoji", "r": "reverse", "m": "math", "s": "ladder", "q": "trivia", "g": "riddle", "t": "translate", "o": "opposite", "d": "oddone"}      # (short keys: the website's format)
 
 
-def leaderboard(wins, n: int = LB_ROWS) -> dict:
+def leaderboard(wins, n: int = LB_ROWS, period=None, now=None) -> dict:
     """1.13.0: the games' top 10 for the public page: all games together (with each game's part), and each game
-    (1.14.0: l = حروف, u = رتب, e = ايموجي, r = عكس, m = احسب)."""
+    (1.14.0: l = حروف, u = رتب, e = ايموجي, r = عكس, m = احسب). 1.15.0: the all-time board also carries "week" and
+    "month" boards of the same shape (this week / this month on this PC's clock; a new week starts empty by itself)."""
     from . import minigames
     rows = []
     for e in (wins or {}).values():
         if isinstance(e, dict):
-            row = {"n": str(e.get("name") or "?")[:40], "w": int(minigames.wins_of(e, None) or 0)}
+            row = {"n": str(e.get("name") or "?")[:40], "w": int(minigames.wins_of(e, None, period, now) or 0)}
             for k, g in LB_KEYS.items():
-                row[k] = int(minigames.wins_of(e, g) or 0)
+                row[k] = int(minigames.wins_of(e, g, period, now) or 0)
             rows.append(row)
     def best(key):
         r = [x for x in rows if x[key] > 0]
@@ -66,6 +67,9 @@ def leaderboard(wins, n: int = LB_ROWS) -> dict:
     out = {"all": [dict({"n": x["n"], "w": x["w"]}, **{k: x[k] for k in LB_KEYS}) for x in best("w")]}
     for k in LB_KEYS:
         out[k] = [{"n": x["n"], "w": x[k]} for x in best(k)]
+    if period is None:
+        for p in minigames.PERIODS:
+            out[p] = leaderboard(wins, n, p, now)
     return out
 
 
@@ -76,12 +80,12 @@ SAMPLES = {   # 1.13.0: what a reply looks like on the public page: variables be
            "uptime": "2h 15m", "viewers": "120", "followers": "(the follower count)", "follow": "1 year, 2 months", "followage": "1 year, 2 months",
            "followdate": "Jan 5, 2025", "accountage": "3 years, 4 months", "random.chatter": "(a random viewer)", "firststreak": "3", "firststreakpeak": "7",
            "weather": "(the weather in {a})", "time": "(the time in {a})", "eval": "(a calculated value)", "urlfetch": "(text from a website)",
-           "act_game": "(moderators change the stream's game with it)", "act_title": "(moderators change the stream title with it)"},
+           "act_game": "(moderators change the stream's game with it)", "act_title": "(moderators change the stream title with it)", "clip": "(a clip link)"},
     "ar": {"user": "مشاهد", "touser": "سامي", "query": "…", "querystring": "…", "count": "7", "getcount": "7", "game": "(اللعبة)", "title": "(عنوان البث)",
            "uptime": "2س 15د", "viewers": "120", "followers": "(عدد المتابعين)", "follow": "سنة وشهران", "followage": "سنة وشهران",
            "followdate": "5 يناير 2025", "accountage": "3 سنوات و4 أشهر", "random.chatter": "(مشاهد عشوائي)", "firststreak": "3", "firststreakpeak": "7",
            "weather": "(الطقس في {a})", "time": "(الوقت في {a})", "eval": "(قيمة محسوبة)", "urlfetch": "(نص من موقع)",
-           "act_game": "(يغيّر به المشرفون لعبة البث)", "act_title": "(يغيّر به المشرفون عنوان البث)"},
+           "act_game": "(يغيّر به المشرفون لعبة البث)", "act_title": "(يغيّر به المشرفون عنوان البث)", "clip": "(رابط كليب)"},
 }
 
 
@@ -137,7 +141,7 @@ def game_rows(games: dict) -> list:
     from . import minigames
     games = games or {}
     out = []
-    on = [g for g in ("letters", "scramble", "emoji", "reverse", "math", "ladder", "trivia") if (games.get(g) or {}).get("enabled")]
+    on = [g for g in minigames.GAME_KEYS if (games.get(g) or {}).get("enabled")]
     perm = lambda who: who if who in ("everyone", "subscriber", "vip", "moderator") else "moderator"
     for g in on:
         cfg = games[g]
@@ -147,7 +151,9 @@ def game_rows(games: dict) -> list:
     if on:
         sh = games.get("shared") or {}
         out += [{"name": n, "perm": "everyone", "game": "shared", "what": "wins"} for n in minigames.aliases(sh.get("wins_cmd"))]
-        out += [{"name": n, "perm": "everyone", "game": "shared", "what": "top"} for n in minigames.aliases(sh.get("top_cmd"))]        out += [{"name": n, "perm": "everyone", "game": "shared", "what": "random"} for n in minigames.aliases(sh.get("random_cmd") or ["لعبه؟", "لعبة؟"])]
+        out += [{"name": n, "perm": "everyone", "game": "shared", "what": "top"} for n in minigames.aliases(sh.get("top_cmd"))]
+        out += [{"name": n, "perm": "everyone", "game": "shared", "what": "random"} for n in minigames.aliases(sh.get("random_cmd") or ["لعبه؟", "لعبة؟"])]
+        out += [{"name": n, "perm": "everyone", "game": "shared", "what": "list"} for n in minigames.aliases(sh.get("list_cmd"))]    # 1.15.0 «العاب؟»
     return out
 
 

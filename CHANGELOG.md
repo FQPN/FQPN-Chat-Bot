@@ -1,6 +1,28 @@
 # Changelog
 
-  ## 1.14.0
+  ## 1.15.0
+
+- Four new mini games, so there are 11: «الدخيل» (odd one out: 4 words, 3 belong together; write the one that doesn't. Easy = clearly different groups, Hard = close ones; writing one of the other three locks you out of that round, and the winner's message says what the other three have in common), «ضد» (write the opposite word: about 130 pairs, Easy = everyday words, Hard = harder ones; every fair opposite counts), «لغز» (about 90 easy Arabic riddles, every fair answer counts, a hint halfway, 45 seconds) and «ترجم» (translate a word: Easy or Hard, the direction is random every round, or always English → Arabic or Arabic → English; every fair translation counts). Each has a hint halfway and its own leaderboard tab on the commands page.
+- «سؤال» has about 270 questions now (it had about 100), in three difficulties: Easy, Medium and Hard, or Mixed (all of them). "How viewers answer" (only the question, or with 4 choices) is its own setting.
+- Bot account: choose what the bot account sends (command replies, mini games, timers, events, greetings, stream messages, giveaways, moderation warnings). Anything switched off comes from your own account. On the Bot accounts page, for one channel or several. Deleting messages, timeouts and the test message always use the bot account.
+- Counters: in Commands > Custom, a Commands | Counters switch next to the search shows every counter ($(count name) / $(getcount name)) with its number (never below 0), − / + buttons, an exact number box, which commands add to it or show it, and its last change ("+1 by chat · 3 min ago"). Reset one or all, rename one (your commands are updated to the new name) or delete one nothing uses. New counter can also make the two commands for you (one adds 1 for moderators, one shows the number for everyone).
+- Dashboard: a Counters card with − / + for each counter, to fix a count in one click during the stream.
+- Mini games: every game can now be started by everyone (set once, with this update). Change it in a game's ⚙ if you want moderators only: it stays the way you set it.
+- Mini games: every game starts two ways by default, like «حروف؟» or «!حروف» (added for you where you kept the old command), and the new «العاب؟» / «games?» command lists the commands of the games that are on.
+- Timers work like Nightbot's: “Chat lines” counts the chat messages of the last 5 minutes, and a timer that's due while chat is too quiet skips that time instead of posting the moment chat wakes up (so timers no longer pile up). Two timer messages are never sent within a minute of each other: the one that has waited longest goes first. New timers wait for 2 messages, and every timer that had Chat lines off is set to 2 once, with this update (turn it off again and it stays off).
+- Leaderboards: All time, This week (starting on Sunday) and This month, in the app and on the commands page; «!الأوائل أسبوع» / «!الأوائل شهر» in chat, and «!فوز» shows this week and month too. Every win counts in all three; all-time wins are never touched. The app's leaderboard now also has tabs for «لغز», «ترجم» and «ضد».
+- New variable $(clip): makes a Twitch clip of the last moments of the stream and gives its link (only while live), with a ready-made «!كليب» recipe (mods, 60 s cooldown). Clips need Twitch reconnected once; nobody is logged out by the update. In Test chat it's a pretend link.
+- Blocklist: block someone for 1 to 99 minutes or hours, or permanently. A temporary block shows the time left with a bar and ends on its own (also when the app was closed); Make permanent keeps it. Your current blocked users stay permanent.
+- Tutorial: 14 more steps (counters: the Commands | Counters switch, changing a counter, New counter and the Dashboard card; Stream stats, finding a command, who can use it and its cooldown, announcements, all-games settings, the leaderboard, recipes, giveaway settings, pausing the bot, backups). Each step shows the page and where you are on it («Mini games · 2 of 3»), and Skip this page jumps to the next page.
+- Backup & restore: restoring a backup always failed with "This isn't a FQPN's Chat Bot backup" (the file was sent in a way the app refuses). Fixed, and any other problem now says what it was.
+- Several channels: one of your channels can send the replies of another (account 1 for account 2, and the other way round). Choose it in “Who sends the replies” on the Bot accounts page: no new sign-in, and it uses the channel's own login. Signing in a channel as a bot account now explains this instead of only refusing.
+- Mini games: in English, the « » around the game names and the start command on each card now read the right way on every PC.
+- The commands page no longer says «سؤال» has 4 choices.
+- Commands: Aliases are chips, like Trigger words: type a name and press Enter (or a comma); × removes one. Pasting "a, b, c" adds all three. Saved aliases are kept as they are.
+- Sidebar: a gear for Settings, and a thin line between the sections. "Bot account(s)" keeps the same name before and after you open it.
+- Fixed: disconnecting one of your channels (with several channels) stopped the whole app: every channel's bot and the app's pages froze. Now only that channel stops, and its background work stops with it.
+
+## 1.14.0
    - The app is much faster and much lighter on your PC: it no longer keeps the graphics card and the CPU busy while it's open (also behind a game), its stats are counted in memory and saved once a minute, and nothing on the page moves after a few seconds.
    - The built-in commands (!cmlist, !title, !game, !cmadd, !cmedit, !cmdel, «app?») answer in Arabic when the app is in Arabic.
    - New variables $(count name) and $(getcount name): a counter with a name, shared by several commands (!death adds 1 with $(count deaths), !deaths shows it with $(getcount deaths)).

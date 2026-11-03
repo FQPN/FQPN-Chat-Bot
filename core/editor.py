@@ -202,6 +202,8 @@ def apply_put(store, change: dict):
             if isinstance(data, dict) and k in data:
                 cur[k] = data[k]
         data = cur
+    if section == "blocklist" and isinstance(data, dict) and "timed" not in data:
+        data = dict(data, timed=(store.get("blocklist") or {}).get("timed") or [])    # 1.15.0: an older page never wipes timed blocks
     try:
         clean = dashboard.validate(section, data)
         if section in ("commands", "games"):

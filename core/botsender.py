@@ -154,10 +154,13 @@ class BotSender:
         """(status, body) of a Helix call as the bot; a rejected login is renewed once and retried."""
         tok = await self.token()
         status, data = await self._call(method, HELIX + path, params, body, tok)
+        if status == 401 and _missing_scope(data):
+            self.problem = "scopes"        # 1.15.0: a permission this login doesn't have; renewing would not help
+            return status, data
         if status == 401:
             status, data = await self._call(method, HELIX + path, params, body, await self.token(force_refresh=True, failed=tok))
         if status == 401:
-            self.problem = "login"
+            self.problem = "scopes" if _missing_scope(data) else "login"
         elif status in (200, 204):
             self.problem = ""
         return status, data
@@ -256,7 +259,82 @@ class BotSender:
         return {"state": "ready" if mod else "notmod"}
 
 
+def _missing_scope(data) -> bool:
+    """Twitch's 401 for a permission the login doesn't have ("Missing scope: …"), not for an expired login."""
+    return isinstance(data, dict) and "scope" in str(data.get("message") or "").lower()
+
+
+class ChannelSender(BotSender):
+    """1.15.0 (owner): one of YOUR CHANNELS sends for another of your channels (account 1 sends in account 2's chat and the
+    other way round). It uses that channel's own login: nothing to sign in again, nothing saved twice. That login has every
+    permission a bot login has EXCEPT user:read:moderated_channels, so is_mod asks another way (below). That channel's running bot (TwitchIO) normally renews the login and saves it to the
+    channel's file; this only renews it when it is already expired or Twitch refused it, saves it, and hands the new login
+    to that channel's running bot (HANDOFF), so there is still only one renewal key in use. Its Twitch user id is the
+    channel id, so sending / announcing / moderating work exactly like a bot account's."""
+    def __init__(self, cid, login: str = "", clock=time.time, http=None):
+        super().__init__(str(cid), login, clock, http)
+        self.channel_id = str(cid)
+
+    def token_path(self):
+        return accounts.channel_token_file(self.channel_id)
+
+    async def is_mod(self, channel_id) -> bool | None:
+        """1.15.0 (owner's test): a CHANNEL login can't list where it is a moderator (bot logins can:
+        user:read:moderated_channels, which channel logins never asked for). So it asks to delete a message that doesn't
+        exist, with its moderator:manage:chat_messages permission: Twitch answers 404 (not found) to a moderator and 403
+        (not a moderator) to anyone else. Nothing is ever deleted."""
+        cid = str(channel_id)
+        if cid == self.bot_id:
+            return True
+        hit = self._mods.get(cid)
+        if hit and self.clock() - hit[1] < MOD_TTL:
+            return hit[0]
+        import uuid
+        status, _ = await self.helix("DELETE", "moderation/chat", {"broadcaster_id": cid, "moderator_id": self.bot_id,
+                                                                     "message_id": str(uuid.uuid4())})
+        if status in (204, 404):
+            found = True
+        elif status == 403:
+            found = False
+        else:
+            return None
+        self._mods[cid] = (found, self.clock())
+        return found
+
+    def _old_copies(self) -> list:
+        return []
+
+    async def token(self, force_refresh: bool = False, failed: str | None = None) -> str:
+        async with self._lock:
+            data = self.load()
+            if not data:
+                self.problem = "login"
+                raise SendError("login", "This channel's Twitch login is missing: connect it again in the app.")
+            if failed and data.get("access_token") != failed:
+                return data["access_token"]            # its own bot renewed it meanwhile
+            if not (force_refresh or float(data.get("expires_at", 0)) - self.clock() < 60):
+                return data["access_token"]
+            status, new = await self._renew(data.get("refresh_token", ""), data.get("scopes"))
+            if status <= 0 or status >= 500:
+                raise SendError("offline", "Twitch can't be reached to renew this channel's login.")
+            if new is None:
+                again = self.load() or {}
+                if again.get("access_token") and again.get("access_token") != data.get("access_token"):
+                    return again["access_token"]       # its own bot renewed it first: use that one
+                self.problem = "login"
+                raise SendError("login", "This channel's Twitch login expired: connect it again in the app.")
+            safefile.write(self.token_path(), dict(data, **new))
+            self.problem = ""
+            if HANDOFF is not None:
+                try:
+                    await HANDOFF(self.channel_id, new)
+                except Exception:
+                    log.warning("Couldn't hand the renewed login to %s's running bot (it reconnects with it by itself)", self.login)
+            return new["access_token"]
+
+
 SENDERS: dict = {}
+HANDOFF = None      # main.py: async (channel id, new login) -> gives a renewed login to that channel's running bot
 
 
 def get(bot_id, login: str = "") -> BotSender:
@@ -264,6 +342,17 @@ def get(bot_id, login: str = "") -> BotSender:
     s = SENDERS.get(str(bot_id))
     if s is None:
         s = SENDERS[str(bot_id)] = BotSender(str(bot_id), login)
+    elif login:
+        s.login = login
+    return s
+
+
+def get_channel(cid, login: str = "") -> ChannelSender:
+    """1.15.0: THE sender for one of your channels used as the sender of another (one per channel)."""
+    key = "ch:" + str(cid)
+    s = SENDERS.get(key)
+    if s is None:
+        s = SENDERS[key] = ChannelSender(str(cid), login)
     elif login:
         s.login = login
     return s

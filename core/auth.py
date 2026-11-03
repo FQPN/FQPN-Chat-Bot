@@ -27,6 +27,7 @@ SCOPES = [
     "moderator:read:moderators",       # Logs: mod changes
     "moderator:read:vips",             # Logs: VIP changes
 ]
+OPTIONAL_SCOPES = ["clips:edit"]   # 1.15.0 $(clip): asked for at every new login, never required (no one is logged out for it)
 last_problem: str | None = None  # set to "permissions" when a reconnect is needed for new scopes
 
 AUTH_DIR = Path(__file__).resolve().parent.parent / "authentication"
@@ -112,7 +113,7 @@ async def device_login(on_code=None, open_browser: bool = True) -> dict:
     async with aiohttp.ClientSession() as session:
         async with session.post(
             DEVICE_URL,
-            data={"client_id": CLIENT_ID, "scopes": " ".join(SCOPES)},
+            data={"client_id": CLIENT_ID, "scopes": " ".join(SCOPES + OPTIONAL_SCOPES)},
         ) as r:
             dev = await r.json()
             if r.status != 200:
@@ -136,7 +137,7 @@ async def device_login(on_code=None, open_browser: bool = True) -> dict:
                 TOKEN_URL,
                 data={
                     "client_id": CLIENT_ID,
-                    "scopes": " ".join(SCOPES),
+                    "scopes": " ".join(SCOPES + OPTIONAL_SCOPES),
                     "device_code": dev["device_code"],
                     "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
                 },

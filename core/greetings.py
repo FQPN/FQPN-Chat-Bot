@@ -13,6 +13,7 @@ DEVELOPERS = frozenset({
     "754527671",     # fqpn_
 })
 DEVELOPER_GREETING = "حيوووووو بالمبرمج الاسطوري 🔥"
+DEVELOPER_GREETINGS = {"1299878164": "يهلا وغلا ب اقوى مبرمجة 🔥"}      # 1.15.0 (owner): 1asoom's own; anyone else: the one above
 
 
 def messages_for(greetings: dict, login: str) -> list[str]:
@@ -37,7 +38,7 @@ def developer_messages(greetings: dict, login: str, user_id, owner_id) -> list[s
     uid = str(user_id or "")
     if uid not in DEVELOPERS or uid == str(owner_id or "") or not greetings.get("enabled", True) or has_entry(greetings, login):
         return []
-    return [DEVELOPER_GREETING]
+    return [DEVELOPER_GREETINGS.get(uid, DEVELOPER_GREETING)]
 
 
 def claim(greeted: dict, session: str, login: str, messages: list[str], rng=random):

@@ -78,6 +78,10 @@ class SimBot(TwitchBot):
     count_stats = False             # 1.14.0: the Test chat never counts in Stream stats
     pin_window_applies = False      # 1.14.0: Pin first message's "first minutes" don't apply in Test chat (try it any time)
     owner_id = None          # (plain values here: the real ones come from TwitchIO, which a pretend bot never starts)
+
+    async def _make_clip(self) -> tuple:
+        """1.15.0 $(clip): the Test chat never makes a real clip (nothing reaches Twitch): a pretend link instead."""
+        return "https://clips.twitch.tv/(test-clip)", None
     bot_id = None
 
     def __init__(self, account: dict, store, live=None):

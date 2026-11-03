@@ -1,0 +1,207 @@
+"""1.15.0 (owner): the Counters view (Commands > Custom > Counters) and the Dashboard's Counters card.
+
+A counter is a named number that commands change with $(count name) (+1, shows it) and read with $(getcount name).
+The numbers stay where they always were (counters.json, as "name:deaths", so backups keep them); counter_meta.json only
+remembers the last change of each one ("+1 by chat 3 minutes ago", "set by you"), for the page.
+
+A counter shows on the page when it has a number saved, or when one of your commands uses it (then it is 0 until the
+first $(count))."""
+import re
+import time
+
+from . import manage
+
+MAX_COUNTERS = 100
+MAX_VALUE = 10_000_000
+_USE = re.compile(r"\$\((count|getcount)\s+([^)]*)\)", re.I)
+
+
+class CounterError(Exception):
+    pass
+
+
+def norm(name) -> str:
+    """The counter's real name: letters, digits and _ only, small letters, at most 30 (the same rule as $(count name))."""
+    return re.sub(r"[^\w]", "", str(name or "").strip().casefold())[:30]
+
+
+def _key(name: str) -> str:
+    return "name:" + name
+
+
+def note(store, name: str, how: str, by: str) -> None:
+    """Remembers a counter's last change: how = "+1" / "-1" / "set" / "reset" / "new", by = "chat" / "you"."""
+    meta = dict(store.get("counter_meta") or {})
+    meta[name] = {"at": int(time.time()), "how": how, "by": by}
+    store.save("counter_meta", meta)
+
+
+def uses(commands: dict) -> dict:
+    """counter -> [(command, "adds" | "shows")], from every command's reply."""
+    out: dict = {}
+    for cname, c in (commands or {}).items():
+        for kind, arg in _USE.findall(str((c or {}).get("response") or "")):
+            n = norm(arg)
+            if not n:
+                continue
+            what = "adds" if kind.lower() == "count" else "shows"
+            if (cname, what) not in out.setdefault(n, []):
+                out[n].append((cname, what))
+    return out
+
+
+def view(store) -> list:
+    """Every counter for the page: [{name, value, used: [[command, adds|shows]], last: {at, how, by} | None}], A to Z."""
+    counters = store.get("counters") or {}
+    meta = store.get("counter_meta") or {}
+    used = uses(store.get("commands") or {})
+    names = {k[5:] for k in counters if k.startswith("name:")} | set(used)
+    return [{"name": n, "value": max(0, int(counters.get(_key(n), 0))), "used": [list(u) for u in used.get(n, [])],
+             "last": meta.get(n)} for n in sorted(names)]
+
+
+def _value(v) -> int:
+    if isinstance(v, bool):
+        raise CounterError("Type a whole number.")
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        raise CounterError("Type a whole number.")
+    if f != int(f):
+        raise CounterError("Type a whole number.")
+    if f < 0:
+        raise CounterError("A counter can't go below 0.")          # 1.15.0 (owner): 0 is the lowest
+    if abs(f) > MAX_VALUE:
+        raise CounterError("That number is too big.")
+    return int(f)
+
+
+def _exists(store, name: str) -> bool:
+    return _key(name) in (store.get("counters") or {}) or name in uses(store.get("commands") or {})
+
+
+def _set(store, name: str, value: int, how: str) -> int:
+    counters = dict(store.get("counters") or {})
+    counters[_key(name)] = value
+    store.save("counters", counters)
+    note(store, name, how, "you")
+    return value
+
+
+def act(store, action: str, body: dict, validate_commands=None, clash=None) -> None:
+    """The page's buttons. validate_commands / clash: the dashboard's own checks, for the commands made or renamed."""
+    name = norm(body.get("name"))
+    if action == "resetall":
+        counters = dict(store.get("counters") or {})
+        names = [v["name"] for v in view(store)]
+        for n in names:
+            counters[_key(n)] = 0
+        store.save("counters", counters)
+        meta = dict(store.get("counter_meta") or {})
+        for n in names:
+            meta[n] = {"at": int(time.time()), "how": "reset", "by": "you"}
+        store.save("counter_meta", meta)
+        return
+    if not name:
+        raise CounterError("Give the counter a name: letters, numbers or _ (like deaths).")
+    if action == "create":
+        if _exists(store, name):
+            raise CounterError(f"There is already a counter called {name}.")
+        if len([v for v in view(store)]) >= MAX_COUNTERS:
+            raise CounterError(f"You can have up to {MAX_COUNTERS} counters.")
+        start = _value(body.get("start", 0))
+        made = []
+        if body.get("make_commands"):
+            made = _make_commands(store, name, body, validate_commands, clash)
+        _set(store, name, start, "new")
+        return made
+    if not _exists(store, name):
+        raise CounterError(f"The counter {name} isn't there anymore.")
+    if action == "set":
+        _set(store, name, _value(body.get("value")), "set")
+    elif action == "add":
+        try:
+            step = int(float(body.get("by", 1)))
+        except (TypeError, ValueError):
+            step = 1
+        cur = max(0, int((store.get("counters") or {}).get(_key(name), 0)))     # (below 0 from before 1.15.0 = 0)
+        step = 1 if step > 0 else -1
+        if cur + step < 0:
+            raise CounterError(f"{name} is already 0: a counter can't go below 0.")
+        _set(store, name, min(MAX_VALUE, cur + step), "+1" if step > 0 else "-1")
+    elif action == "reset":
+        _set(store, name, 0, "reset")
+    elif action == "delete":
+        users = [c for c, _ in uses(store.get("commands") or {}).get(name, [])]
+        if users:                       # it would only come back at 0: the commands still count it
+            raise CounterError(f"{' and '.join(users[:3])} still use this counter. Change or delete "
+                               f"{'that command' if len(users) == 1 else 'those commands'} first.")
+        counters = dict(store.get("counters") or {})
+        counters.pop(_key(name), None)
+        store.save("counters", counters)
+        meta = dict(store.get("counter_meta") or {})
+        meta.pop(name, None)
+        store.save("counter_meta", meta)
+    elif action == "rename":
+        new = norm(body.get("new"))
+        if not new:
+            raise CounterError("Give the counter a name: letters, numbers or _ (like deaths).")
+        if new == name:
+            return
+        if _exists(store, new):
+            raise CounterError(f"There is already a counter called {new}.")
+        commands = dict(store.get("commands") or {})
+        changed = False
+        for cname, c in commands.items():
+            resp = str((c or {}).get("response") or "")
+            fixed = _USE.sub(lambda m: f"$({m.group(1)} {new})" if norm(m.group(2)) == name else m.group(0), resp)
+            if fixed != resp:
+                commands[cname] = dict(c, response=fixed)
+                changed = True
+        if changed:
+            if validate_commands:
+                commands = validate_commands(commands)
+            store.save("commands", commands)
+        counters = dict(store.get("counters") or {})
+        if _key(name) in counters:
+            counters[_key(new)] = counters.pop(_key(name))
+        store.save("counters", counters)
+        meta = dict(store.get("counter_meta") or {})
+        if name in meta:
+            meta[new] = meta.pop(name)
+        store.save("counter_meta", meta)
+    else:
+        raise CounterError("Unknown action.")
+
+
+def _make_commands(store, name: str, body: dict, validate_commands, clash) -> list:
+    """"Also make the commands for me": one that adds 1 (moderators) and one that shows the number (everyone)."""
+    ar = body.get("lang") == "ar"
+    add_name = manage.clean_name(str(body.get("add_cmd") or "")) if str(body.get("add_cmd") or "").strip() else ""
+    show_name = manage.clean_name(str(body.get("show_cmd") or "")) if str(body.get("show_cmd") or "").strip() else ""
+    if not add_name and not show_name:
+        return []
+    if add_name and add_name == show_name:
+        raise CounterError("The two commands need different names.")
+    commands = dict(store.get("commands") or {})
+    used = manage.names_in_use(commands)
+    for n in (add_name, show_name):
+        if n and n in used:
+            raise CounterError(f"{n} is already one of your commands. Choose another name.")
+    made = []
+    if add_name:
+        commands[add_name] = {"response": (f"+1 {name}! صار العدد: $(count {name})" if ar else f"+1 {name}! Now at $(count {name})"),
+                              "permission": "moderator", "cooldown": 5, "enabled": True, "aliases": []}
+        made.append(add_name)
+    if show_name:
+        commands[show_name] = {"response": (f"{name}: $(getcount {name})"),
+                               "permission": "everyone", "cooldown": 10, "enabled": True, "aliases": []}
+        made.append(show_name)
+    if validate_commands:
+        commands = validate_commands(commands)
+    if clash:
+        reason = clash(commands)
+        if reason:
+            raise CounterError(reason)
+    store.save("commands", commands)
+    return made

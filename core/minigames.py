@@ -13,11 +13,16 @@ import time
 
 from .moderation import _TASHKEEL
 
-GAME_KEYS = ("letters", "scramble", "emoji", "reverse", "math", "ladder", "trivia")      # 1.14.0: + «ايموجي», «عكس», «احسب»
-GAME_NAMES = {"letters": "حروف", "scramble": "رتب", "emoji": "ايموجي", "reverse": "عكس", "math": "احسب", "ladder": "سلم", "trivia": "سؤال"}      # chat (!الأوائل حروف) and the leaderboard tabs
-QUICK_GAMES = ("emoji", "reverse", "math", "ladder", "trivia")      # 1.14.0: the bot posts a challenge; the first right answer wins
+GAME_KEYS = ("letters", "scramble", "emoji", "reverse", "math", "ladder", "trivia", "riddle", "translate", "opposite", "oddone")      # 1.14.0: + «ايموجي», «عكس», «احسب»; 1.15.0: + «لغز», «ترجم», «ضد»
+GAME_NAMES = {"letters": "حروف", "scramble": "رتب", "emoji": "ايموجي", "reverse": "عكس", "math": "احسب", "ladder": "سلم", "trivia": "سؤال", "riddle": "لغز", "translate": "ترجم", "opposite": "ضد", "oddone": "الدخيل"}      # chat (!الأوائل حروف) and the leaderboard tabs
+QUICK_GAMES = ("emoji", "reverse", "math", "ladder", "trivia", "riddle", "translate", "opposite", "oddone")      # 1.14.0: the bot posts a challenge; the first right answer wins
 MATH_LEVELS = ("easy", "normal", "hard")
-TRIVIA_LEVELS = ("easy", "hard")        # 1.14.0 «سؤال»: easy = the 4 choices are shown; hard (default) = only the question
+TRIVIA_LEVELS = ("easy", "hard")
+TRIVIA_TIERS = ("easy", "medium", "hard", "mixed")     # 1.15.0 (owner): how hard the questions themselves are
+ODDONE_LEVELS = ("easy", "hard")     # 1.15.0 «الدخيل»: clearly different groups / close ones
+TRANSLATE_LEVELS = ("easy", "hard")     # 1.15.0 «ترجم»: everyday words / less common ones
+TRANSLATE_WAYS = ("en_ar", "ar_en", "mixed")
+OPPOSITE_LEVELS = ("easy", "hard")     # 1.15.0 «ضد»: everyday words / harder ones   # English word -> write it in Arabic, the other way, or either        # 1.14.0 «سؤال»: easy = the 4 choices are shown; hard (default) = only the question
 CATEGORIES = ("اسم", "جماد", "نبات", "حيوان", "بلاد")
 DEFAULT_LETTERS = "ابتجحخدرزسشصطعفقكلمنهوي"        # the hard ones (ث ذ ض ظ غ ء) are off by default; the streamer can add them
 WHO = ("everyone", "subscriber", "vip", "moderator", "broadcaster")
@@ -27,7 +32,8 @@ MAX_ALIASES = 5             # names per game command (Arabic and English, for ex
 MAX_ROUNDS = 500            # "rounds per stream" can go up to this (0 = no limit)
 MAX_COOLDOWN = 3600         # seconds between rounds, at most an hour
 GAME_CMDS = {"letters": ("start_cmd", "approve_cmd"), "scramble": ("start_cmd",), "emoji": ("start_cmd",), "reverse": ("start_cmd",),
-             "math": ("start_cmd",), "ladder": ("start_cmd",), "trivia": ("start_cmd",), "shared": ("wins_cmd", "top_cmd", "random_cmd")}
+             "math": ("start_cmd",), "ladder": ("start_cmd",), "trivia": ("start_cmd",), "riddle": ("start_cmd",),
+             "translate": ("start_cmd",), "opposite": ("start_cmd",), "oddone": ("start_cmd",), "shared": ("wins_cmd", "top_cmd", "random_cmd", "list_cmd")}
 
 
 def defaults() -> dict:
@@ -35,26 +41,35 @@ def defaults() -> dict:
     # Every command is a list of names (aliases): any of them works in chat.
     # 1.14.0: random_cmd «لعبه؟» starts a round of a random game (among the ones switched on)
     return {"shared": {"wins_cmd": ["!فوز", "!wins"], "top_cmd": ["!الأوائل", "!top"], "random_cmd": ["لعبه؟", "لعبة؟"],
+                       "list_cmd": ["العاب؟", "ألعاب؟", "!العاب", "games?"],      # 1.15.0 (owner): lists the games that are on
                        "rounds_per_stream": 0, "cooldown_seconds": 0, "enabled": True},      # 1.14.0: enabled = the main switch
-            "letters": {"enabled": False, "start_cmd": ["!حروف"], "approve_cmd": ["!صح"],
-                        "who_starts": "moderator", "round_seconds": 60, "auto_minutes": 0, "categories": list(CATEGORIES), "announce": True,
+            "letters": {"enabled": False, "start_cmd": ["حروف؟", "!حروف"], "approve_cmd": ["!صح"],
+                        "who_starts": "everyone", "round_seconds": 60, "auto_minutes": 0, "categories": list(CATEGORIES), "announce": True,
                         "letters": DEFAULT_LETTERS, "words": {c: [] for c in CATEGORIES}},
-            "scramble": {"enabled": False, "start_cmd": ["!رتب"], "who_starts": "moderator", "round_seconds": 45, "hint": True,
+            "scramble": {"enabled": False, "start_cmd": ["رتب؟", "!رتب"], "who_starts": "everyone", "round_seconds": 45, "hint": True,
                          "auto_minutes": 0, "announce": True, "words": [],
                          # 1.10.0: categories make it easier. The built-in words keep the category they come from (the five
                          # of the first game); your own words can have one (word -> category). Turned-off categories aren't played.
                          "show_category": True, "word_cats": {}, "categories_off": [],
                          "max_letters": 5},          # 1.14.0: easier: everyday words, 3 to 5 letters (up to 7 in the settings)
-            "emoji": {"enabled": False, "start_cmd": ["!ايموجي"], "who_starts": "moderator", "round_seconds": 30, "hint": True,
+            "emoji": {"enabled": False, "start_cmd": ["ايموجي؟", "!ايموجي"], "who_starts": "everyone", "round_seconds": 30, "hint": True,
                       "auto_minutes": 0, "announce": True, "puzzles": []},        # your own: [{"e": "🐪🏜️", "a": ["صحراء"]}]
-            "reverse": {"enabled": False, "start_cmd": ["!عكس"], "who_starts": "moderator", "round_seconds": 30, "hint": True,
+            "reverse": {"enabled": False, "start_cmd": ["عكس؟", "!عكس"], "who_starts": "everyone", "round_seconds": 30, "hint": True,
                         "auto_minutes": 0, "announce": True},
-            "math": {"enabled": False, "start_cmd": ["!احسب"], "who_starts": "moderator", "round_seconds": 20,
+            "math": {"enabled": False, "start_cmd": ["احسب؟", "!احسب"], "who_starts": "everyone", "round_seconds": 20,
                      "auto_minutes": 0, "announce": True, "level": "normal"},
-            "ladder": {"enabled": False, "start_cmd": ["!سلم"], "who_starts": "moderator", "round_seconds": 30,     # 1.14.0
+            "ladder": {"enabled": False, "start_cmd": ["سلم؟", "!سلم"], "who_starts": "everyone", "round_seconds": 30,     # 1.14.0
                        "auto_minutes": 0, "announce": True, "words": 3},
-            "trivia": {"enabled": False, "start_cmd": ["!سؤال"], "who_starts": "moderator", "round_seconds": 30,
-                       "auto_minutes": 0, "announce": True, "level": "hard", "hint": True}}
+            "trivia": {"enabled": False, "start_cmd": ["سؤال؟", "!سؤال"], "who_starts": "everyone", "round_seconds": 30,
+                       "auto_minutes": 0, "announce": True, "level": "hard", "hint": True, "questions": "easy"},
+            "riddle": {"enabled": False, "start_cmd": ["لغز؟", "!لغز"], "who_starts": "everyone", "round_seconds": 45,     # 1.15.0
+                       "auto_minutes": 0, "announce": True, "hint": True},
+            "translate": {"enabled": False, "start_cmd": ["ترجم؟", "!ترجم"], "who_starts": "everyone", "round_seconds": 30,   # 1.15.0
+                          "auto_minutes": 0, "announce": True, "hint": True, "level": "easy", "way": "mixed"},      # (owner: random by default)
+            "opposite": {"enabled": False, "start_cmd": ["ضد؟", "!ضد"], "who_starts": "everyone", "round_seconds": 30,   # 1.15.0
+                         "auto_minutes": 0, "announce": True, "hint": True, "level": "easy"},
+            "oddone": {"enabled": False, "start_cmd": ["الدخيل؟", "!الدخيل"], "who_starts": "everyone", "round_seconds": 30,   # 1.15.0
+                       "auto_minutes": 0, "announce": True, "level": "easy"}}
 
 
 def cmd_key(word: str) -> str:
@@ -115,6 +130,22 @@ def upgrade_games(games: dict, custom_names=()) -> bool:
                 if f in cfg and not isinstance(cfg[f], list):
                     cfg[f] = aliases(cfg[f])
                     changed = True
+    shared = games.get("shared")
+    if isinstance(shared, dict) and "list_cmd" not in shared:
+        # 1.15.0 (owner), once (list_cmd missing = first start on 1.15.0): every game also starts with «name؟» where its
+        # command is still the old default «!name», and «العاب؟» lists the games. A name already in use (one of your
+        # commands, or another game's) is never taken.
+        new = defaults()
+        taken = set(custom_names) | {a for p, fs in GAME_CMDS.items() if isinstance(games.get(p), dict)
+                                     for f in fs for a in aliases(games[p].get(f))}
+        for g in GAME_KEYS:
+            cfg = games.get(g)
+            q, bang = new[g]["start_cmd"]
+            if isinstance(cfg, dict) and aliases(cfg.get("start_cmd")) == [bang] and q not in taken:
+                cfg["start_cmd"] = [q, bang]
+                taken.add(q)
+        shared["list_cmd"] = [a for a in new["shared"]["list_cmd"] if cmd_key(a) not in taken]
+        changed = True
     return changed
 
 
@@ -342,7 +373,7 @@ class QuickRound:
         t = str(text).strip()
         if self.key == "ladder":
             return self._ladder(t)
-        if self.key == "trivia":
+        if self.key in ("trivia", "riddle", "translate", "opposite", "oddone"):     # 1.15.0: «لغز» and «ترجم» are answered like Hard «سؤال»
             return self._trivia(t, who)
         if not t or len(t) > 30 or t.startswith("!") or len(t.split()) > 3:
             return None
@@ -390,7 +421,8 @@ class QuickRound:
 
 def trivia_key(text: str) -> str:
     """«سؤال» answers compared: norm() (ال, أ/إ/آ, ة/ه, tashkeel), digits as Western, any capitals, spaces ignored («أبو ظبي» = «ابوظبي»)."""
-    return norm(str(text).translate(_AR_DIGITS)).casefold().replace(" ", "")
+    t = re.sub(r"^(the|an|a|to)\s+", "", str(text).strip().casefold())     # 1.15.0 «ترجم»: "the cat", "to eat" count too
+    return norm(t.translate(_AR_DIGITS)).casefold().replace(" ", "")
 
 
 def trivia_hint(answer: str) -> str:
@@ -475,10 +507,13 @@ def new_ladder(cfg: dict, avoid=(), clock=time.time, rng=random) -> QuickRound:
 
 
 def new_trivia(cfg: dict, avoid=(), clock=time.time, rng=random) -> QuickRound:
-    """1.14.0 «سؤال»: an easy question. level "easy": the 4 shuffled choices are shown; "hard" (default): only the question,
-    with a halfway hint (first letter + letters). Viewers write the answer itself (not a number); trivia_ar.ALSO = short forms."""
-    from .trivia_ar import QUESTIONS, ALSO
-    pool = [q for q in QUESTIONS if q[0] not in set(avoid)] or list(QUESTIONS)
+    """1.14.0 «سؤال»: a question. level "easy": the 4 shuffled choices are shown; "hard" (default): only the question,
+    with a halfway hint (first letter + letters). Viewers write the answer itself (not a number); trivia_ar.ALSO = short forms.
+    1.15.0 (owner): "questions" = how hard the questions are: easy (default), medium, hard, or mixed (all three)."""
+    from .trivia_ar import LEVELS, ALSO
+    tier = cfg.get("questions") if cfg.get("questions") in TRIVIA_TIERS else "easy"
+    qs = [q for k in ("easy", "medium", "hard") for q in LEVELS[k]] if tier == "mixed" else list(LEVELS[tier])
+    pool = [q for q in qs if q[0] not in set(avoid)] or qs
     q, right, *wrong = rng.choice(pool)
     choices = [right] + list(wrong)
     rng.shuffle(choices)
@@ -489,11 +524,92 @@ def new_trivia(cfg: dict, avoid=(), clock=time.time, rng=random) -> QuickRound:
     return r
 
 
+def new_riddle(cfg: dict, avoid=(), clock=time.time, rng=random) -> QuickRound:
+    """1.15.0 «لغز»: an easy riddle; any of its fair answers wins; a halfway hint like Hard «سؤال»."""
+    from .riddles_ar import RIDDLES
+    pool = [x for x in RIDDLES if x[0] not in avoid] or RIDDLES
+    q = rng.choice(pool)
+    r = QuickRound("riddle", q[0], q[1:], int(cfg.get("round_seconds") or 45), clock, trivia_hint(q[1]))
+    r.show_choices = False
+    return r
+
+
+def new_translate(cfg: dict, avoid=(), clock=time.time, rng=random) -> QuickRound:
+    """1.15.0 «ترجم»: a word to translate. level: easy (everyday) / hard; way: en_ar, ar_en or mixed. Every fair translation
+    wins: all the words on the other side of any line that has the shown word («رجل» -> man or foot)."""
+    from .translate_words import EASY, HARD
+    words = HARD if cfg.get("level") == "hard" else EASY
+    way = cfg.get("way") or "mixed"
+    way = rng.choice(("en_ar", "ar_en")) if way == "mixed" else way
+    side = 0 if way == "en_ar" else 1
+    pool = [w for w in words if w[side][0] not in avoid] or words
+    pick = rng.choice(pool)
+    shown = pick[side][0]
+    k = trivia_key(shown)
+    answers = list(pick[1 - side])
+    for w in EASY + HARD:                                  # the same word with another meaning, in either list
+        if w is not pick and any(trivia_key(x) == k for x in w[side]):
+            answers += [a for a in w[1 - side] if a not in answers]
+    r = QuickRound("translate", shown, answers, int(cfg.get("round_seconds") or 30), clock, trivia_hint(answers[0]))
+    r.show_choices, r.to = False, ("ar" if way == "en_ar" else "en")
+    return r
+
+
+def new_opposite(cfg: dict, avoid=(), clock=time.time, rng=random) -> QuickRound:
+    """1.15.0 «ضد»: a word; the first viewer to write its opposite wins. level easy (everyday) / hard. Either side of a
+    pair can be shown; every opposite counts, from every line that holds the shown word («قديم»: جديد or حديث)."""
+    from .opposites_ar import EASY, HARD
+    pairs = HARD if cfg.get("level") == "hard" else EASY
+    shown_all = [(p, 0) for p in pairs] + [(p, 1) for p in pairs]
+    pool = [x for x in shown_all if x[0][x[1]][0] not in avoid] or shown_all
+    pick, side = rng.choice(pool)
+    shown = pick[side][0]
+    k = trivia_key(shown)
+    answers = list(pick[1 - side])
+    for p in EASY + HARD:
+        for s in (0, 1):
+            if p is not pick and any(trivia_key(x) == k for x in p[s]):
+                answers += [a for a in p[1 - s] if a not in answers]
+    r = QuickRound("opposite", shown, answers, int(cfg.get("round_seconds") or 30), clock, trivia_hint(answers[0]))
+    r.show_choices = False
+    return r
+
+
+def new_oddone(cfg: dict, avoid=(), clock=time.time, rng=random) -> QuickRound:
+    """1.15.0 «الدخيل»: 4 words, 3 belong together; the first viewer to write the odd one wins. Like Easy «سؤال», writing
+    one of the other three means that viewer can't answer again this round (so nobody can just send all four).
+    level easy: 3 words of one group + 1 of a clearly different group; hard: the close sets in oddone_ar.HARD."""
+    from .oddone_ar import EASY, HARD, RELATED
+    if cfg.get("level") == "hard":
+        pool = [x for x in HARD if x[0] not in avoid] or HARD
+        rule, members, odds = rng.choice(pool)
+        three, odd = rng.sample(members, 3), rng.choice(odds)
+    else:
+        pool = [g for g in EASY if g not in avoid] or list(EASY)
+        rule = rng.choice(pool)
+        near = {b for a, b in RELATED if a == rule} | {a for a, b in RELATED if b == rule}
+        other = rng.choice([g for g in EASY if g != rule and g not in near])
+        three, odd = rng.sample(EASY[rule], 3), rng.choice(EASY[other])
+    choices = three + [odd]
+    rng.shuffle(choices)
+    r = QuickRound("oddone", " • ".join(choices), [odd], int(cfg.get("round_seconds") or 30), clock)
+    r.choices, r.right, r.out, r.show_choices, r.why = choices, choices.index(odd), set(), True, rule
+    return r
+
+
 def new_quick(game: str, cfg: dict, avoid=(), clock=time.time, rng=random) -> QuickRound:
     if game == "ladder":
         return new_ladder(cfg, avoid, clock, rng)
     if game == "trivia":
         return new_trivia(cfg, avoid, clock, rng)
+    if game == "riddle":
+        return new_riddle(cfg, avoid, clock, rng)
+    if game == "translate":
+        return new_translate(cfg, avoid, clock, rng)
+    if game == "opposite":
+        return new_opposite(cfg, avoid, clock, rng)
+    if game == "oddone":
+        return new_oddone(cfg, avoid, clock, rng)
     if game == "emoji":
         return new_emoji(cfg, avoid, clock, rng)
     if game == "reverse":
@@ -503,11 +619,27 @@ def new_quick(game: str, cfg: dict, avoid=(), clock=time.time, rng=random) -> Qu
 
 # ---------- wins: a total per viewer plus how many came from each game ----------
 
-def add_win(wins: dict, uid: str, name: str, game: str = "letters") -> int:
+PERIODS = ("week", "month")        # 1.15.0 (owner): weekly and monthly leaderboards next to all time
+
+
+def period_ids(now=None) -> dict:
+    """The current week (the date of its Sunday: the owner's choice) and month, on this PC's clock."""
+    import datetime as _dt
+    d = _dt.datetime.fromtimestamp(time.time() if now is None else now).date()
+    sunday = d - _dt.timedelta(days=(d.weekday() + 1) % 7)
+    return {"week": sunday.isoformat(), "month": d.strftime("%Y-%m")}
+
+
+def add_win(wins: dict, uid: str, name: str, game: str = "letters", now=None) -> int:
     e = wins.setdefault(str(uid), {"name": name, "wins": 0, "games": {}})
     e["name"], e["wins"] = name, int(e.get("wins", 0)) + 1
     g = e.setdefault("games", {})
     g[game] = int(g.get(game, 0)) + 1
+    for p, pid in period_ids(now).items():       # 1.15.0: this week / this month start again by themselves
+        sub = e.get(p) if isinstance(e.get(p), dict) and e[p].get("id") == pid else {"id": pid, "wins": 0, "games": {}}
+        sub["wins"] = int(sub.get("wins", 0)) + 1
+        sub.setdefault("games", {})[game] = int(sub["games"].get(game, 0)) + 1
+        e[p] = sub
     return e["wins"]
 
 
@@ -522,18 +654,34 @@ def upgrade_wins(wins: dict) -> bool:
     return changed
 
 
-def wins_of(e: dict, game: str | None = None) -> int:
+def wins_of(e: dict, game: str | None = None, period: str | None = None, now=None) -> int:
+    """All-time wins (all games or one); with period "week" / "month": only this week's / month's (0 once it's over)."""
     if not isinstance(e, dict):
         return 0
+    if period:
+        sub = e.get(period)
+        if not isinstance(sub, dict) or sub.get("id") != period_ids(now)[period]:
+            return 0
+        e = sub
     if game is None:
         return int(e.get("wins", 0) or 0)
     return int((e.get("games") or {}).get(game, 0) or 0)
 
 
-def top(wins: dict, n: int = 5, game: str | None = None) -> list:
-    """[(name, wins)] best first: all games together, or one game. Nobody with 0 wins."""
-    rows = [(e.get("name", "?"), wins_of(e, game)) for e in wins.values() if isinstance(e, dict)]
+def top(wins: dict, n: int = 5, game: str | None = None, period: str | None = None, now=None) -> list:
+    """[(name, wins)] best first: all games together, or one game; all time, or this week / month. Nobody with 0 wins."""
+    rows = [(e.get("name", "?"), wins_of(e, game, period, now)) for e in wins.values() if isinstance(e, dict)]
     return sorted((r for r in rows if r[1] > 0), key=lambda x: (-x[1], str(x[0]).lower()))[:n]
+
+
+_PERIOD_WORDS = {"week": {"اسبوع", "الاسبوع", "هالاسبوع", "اسبوعي", "week", "weekly"},
+                 "month": {"شهر", "الشهر", "هالشهر", "شهري", "month", "monthly"}}
+
+
+def period_named(word: str):
+    """«أسبوع» / «شهر» (or week / month) -> "week" / "month", else None."""
+    w = norm(str(word).strip().lstrip("!")).casefold()
+    return next((p for p, ws in _PERIOD_WORDS.items() if w in {norm(x).casefold() for x in ws}), None)
 
 
 def game_named(text: str):

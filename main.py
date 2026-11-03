@@ -104,6 +104,18 @@ async def main(open_browser=False):    # open_browser is ignored: the dashboard 
     state = AppState(runtimes)            # shared with the dashboard
     store = StoreRouter(state)
     state["runtimes"] = runtimes
+
+    async def _handoff(cid, new):
+        """1.15.0: a channel's login renewed while it sent for another channel: its own running bot gets the new one too."""
+        rt = runtimes.get(str(cid))
+        bot = rt.state.get("bot") if rt else None
+        if bot is not None and getattr(bot, "connected", False):
+            await bot.add_token(new["access_token"], new["refresh_token"])
+    try:
+        from core import botsender
+        botsender.HANDOFF = _handoff
+    except ImportError:          # (a cut-down app in tests)
+        pass
     store.apply_launch_defaults() if len(runtimes) == 1 else [rt.store.apply_launch_defaults() for rt in runtimes.values()]
     state["update_wake"] = asyncio.Event()
     try:   # the Windows start-up entry follows the settings (this also repairs it after an update)
@@ -131,7 +143,18 @@ async def main(open_browser=False):    # open_browser is ignored: the dashboard 
                     "add_channel": lambda: add_channel(runtimes, start_channel),
                     "switch_channel": lambda cid: switch_channel(runtimes, cid),
                     "remove_channel": lambda cid, forget=False: remove_channel(runtimes, cid, forget)}
-    await asyncio.gather(*[start_channel(rt) for rt in list(runtimes.values())])
+    for rt in list(runtimes.values()):
+        start_channel(rt)
+    # 1.15.0: wait for the channels WITHOUT gather(): removing a channel cancels its task, and with gather() that one
+    # cancel stopped the whole app (every channel and the dashboard). Channels added later are waited for too.
+    while True:
+        tasks = [rt.task for rt in list(runtimes.values()) if rt.task is not None and not rt.task.done()]
+        if not tasks:
+            break
+        done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for t in done:
+            if not t.cancelled() and t.exception() is not None:
+                log.error("A channel stopped with an error", exc_info=t.exception())
 
 
 PENDING = "pending"        # a channel being added: its Twitch login is running, its id isn't known yet
@@ -165,6 +188,16 @@ async def pick_sender(rt: Runtime, account: dict):
     state["sender_note"] = entry.get("sender_note")
     if sid == "own":
         return None
+    if sid.startswith("ch:"):          # 1.15.0: another of your channels sends (its own login; nothing signed in twice)
+        other = sid[3:]
+        chan = next((c for c in reg["channels"] if c.get("id") == other), None)
+        if chan is None or other == cid or not accounts.channel_token_file(other).exists():
+            entry.update(sender="own", sender_note={"what": "removed", "login": (chan or {}).get("login", other), "at": int(time.time())})
+            accounts.save(reg)
+            state["sender_note"] = entry["sender_note"]
+            log.warning("The channel that sent for %s is gone: its own account sends the replies now", account["login"])
+            return None
+        return botsender.get_channel(other, chan.get("login", ""))
     bot = next((b for b in reg["bots"] if b.get("id") == sid), None)
     if bot is None or not accounts.bot_token_file(sid).exists():
         # never silently stop replying: the channel's own account sends, and the app says why
@@ -292,12 +325,22 @@ async def remove_channel(runtimes: dict, cid, forget_login: bool = False) -> Non
     bot = rt.state.get("bot")
     if rt.task:
         rt.task.cancel()
+    for k in ("watchdog_task", "publist_task", "editor_task", "usage_task", "avatar_task", "mod_task"):
+        t = rt.state.get(k)          # 1.15.0: the removed channel's helpers stop too (they kept running before)
+        if isinstance(t, asyncio.Task) and not t.done():
+            t.cancel()
     if bot is not None:
         try:
             await bot.close()
         except Exception:
             pass
     reg["channels"] = [c for c in reg["channels"] if c.get("id") != cid]
+    users = [c for c in reg["channels"] if c.get("sender") == "ch:" + cid]     # 1.15.0: channels it sent for: their own account now, warned
+    for c in users:
+        c["sender"] = "own"
+        c["sender_note"] = {"what": "removed", "login": rt.state.get("account") or cid, "at": int(time.time())}
+    from core import botsender
+    botsender.SENDERS.pop("ch:" + cid, None)
     if reg.get("active") == cid:
         reg["active"] = reg["channels"][0]["id"]
     accounts.save(reg)
@@ -305,6 +348,9 @@ async def remove_channel(runtimes: dict, cid, forget_login: bool = False) -> Non
         accounts.channel_token_file(cid).unlink(missing_ok=True)
     if accounts.ACTIVE["id"] == cid:
         accounts.ACTIVE["id"] = reg["active"]
+    for c in users:
+        if c.get("id") in runtimes:
+            dashboard.restart_bot(runtimes[c["id"]].state)
     log.info("Removed the channel %s from the list (its data folder is kept)", cid)
 
 

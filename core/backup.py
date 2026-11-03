@@ -48,7 +48,7 @@ def summary(backup: dict) -> dict:
             "commands": n(p.get("commands")), "timers": n(p.get("timers")),
             "events": sum(1 for e in (p.get("events") or {}).values() if isinstance(e, dict) and e.get("enabled")) if isinstance(p.get("events"), dict) else 0,
             "greetings": n((p.get("greetings") or {}).get("users")) if isinstance(p.get("greetings"), dict) else 0,
-            "blocked": n((p.get("blocklist") or {}).get("users")) if isinstance(p.get("blocklist"), dict) else 0,
+            "blocked": n((p.get("blocklist") or {}).get("users")) + n((p.get("blocklist") or {}).get("timed")) if isinstance(p.get("blocklist"), dict) else 0,
             "games": sum(1 for k, g in games.items() if k != "shared" and isinstance(g, dict) and g.get("enabled")),
             "parts": [k for k in PARTS if k in p]}
 

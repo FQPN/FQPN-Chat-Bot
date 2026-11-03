@@ -18,7 +18,7 @@ import twitchio
 from twitchio import eventsub
 from twitchio.ext import commands
 
-from . import auth, botauth, botsay, chatstats, gamesearch, events, giveaway, greetings, logsafe, manage, minigames, moderation, notify, pinfirst, publiclist
+from . import auth, botauth, botsay, counters as counters_mod, chatstats, gamesearch, events, giveaway, greetings, logsafe, manage, minigames, moderation, notify, pinfirst, publiclist, blocks
 from .manage import CommandError
 from .store import Store
 from .stream import StreamSession
@@ -88,6 +88,20 @@ def format_duration(seconds: float) -> str:
     return f"{s}s"
 
 
+
+BOT_PARTS = ("commands", "games", "timers", "events", "greetings", "stream", "giveaways", "warnings")   # 1.15.0 (owner)
+_PART_OF = {"cmd": "commands", "game": "games", "timer": "timers", "event": "events", "greeting": "greetings",
+            "stream": "stream", "giveaway": "giveaways", "warn": "warnings"}
+
+
+def part_of(why) -> str:
+    """1.15.0: which kind of message this is (the Logs page's `why`), for "What the bot account sends"."""
+    return _PART_OF.get(str(why or "").split(":", 1)[0], "commands")
+
+
+TIMER_GAP = 60          # 1.15.0 (owner): seconds; two timer messages are never sent closer together than this
+TIMER_WINDOW = 300      # 1.15.0 (owner): like Nightbot, "chat lines" are counted over the last 5 minutes
+
 class TwitchBot(commands.Bot):
     def __init__(self, account: dict, store: Store | None = None, bot_account: dict | None = None, sender=None):
         self._fqpn_init(account, store, bot_account, sender)
@@ -107,6 +121,7 @@ class TwitchBot(commands.Bot):
         # account" in Settings > Bot); without it the bot talks as your own account, exactly as before.
         self.account = account
         self._chat_lines = 0                        # 1.14.0: chat messages seen (Timers > Wait for chat)
+        self._chat_times: deque = deque()           # 1.15.0: when each recent chat message came (last 5 minutes)
         try:                                        # 1.14.0: Dashboard > Stream stats (not for the Test chat's pretend bot)
             self.stats = chatstats.Stats(store) if getattr(self, "count_stats", True) and store is not None else None
         except Exception:
@@ -321,16 +336,19 @@ class TwitchBot(commands.Bot):
         owner = self.create_partialuser(self.owner_id)
 
         m = ANNOUNCE.match(text)
-        if self.sender is not None and await self._send_as_bot(text, m, payload, why, user, reply):
-            return
-        if self.sender is not None:
+        use_bot = self._bot_sends(why)      # 1.15.0 (owner): only the kinds of messages chosen on the Bot accounts page
+        if self.sender is not None and use_bot:
+            if await self._send_as_bot(text, m, payload, why, user, reply):
+                return
             text = (m.group(2).strip() if m else text)[:500]      # the bot account couldn't: the channel's own account sends it
             m = None
+        # with a separate bot account, a kind of message the bot account doesn't send comes from your own account
+        writer = self.owner_id if (self.separate and not use_bot) else self.bot_id
         if m:
             color = (m.group(1) or "primary").lower()
             body = m.group(2).strip()[:500]
             try:
-                await owner.send_announcement(moderator=self.bot_id, message=body, color=color)
+                await owner.send_announcement(moderator=writer, message=body, color=color)
                 self._log_bot(body, payload, why, user)
                 return
             except Exception:
@@ -340,17 +358,31 @@ class TwitchBot(commands.Bot):
         text = text[:500]
         try:
             parent = getattr(payload, "id", None) if (reply and payload is not None) else None
-            if parent:      # 1.13.0: "Reply to the sender" is on: a reply to the viewer's message
-                sent = await owner.send_message(text, sender=self.bot_id, reply_to_message_id=str(parent))
-            elif payload is not None and not self.separate:
-                sent = await payload.respond(text)
-            else:   # a separate bot account (or a message with no trigger): say who sends it
-                sent = await owner.send_message(text, sender=self.bot_id)
+            try:
+                if parent:      # 1.13.0: "Reply to the sender" is on: a reply to the viewer's message
+                    sent = await owner.send_message(text, sender=writer, reply_to_message_id=str(parent))
+                elif payload is not None and not self.separate:
+                    sent = await payload.respond(text)
+                else:   # a separate bot account (or a message with no trigger): say who sends it
+                    sent = await owner.send_message(text, sender=writer)
+            except Exception:
+                if writer == self.bot_id:
+                    raise
+                log.exception("Your own account couldn't send this message: the bot account sends it instead")
+                sent = await owner.send_message(text, sender=self.bot_id, reply_to_message_id=str(parent) if parent else None)
         except Exception as e:
             self._login_trouble(e)          # a rejected login heals itself (reconnect with the saved login)
             raise
         self._remember(text, sent)
         self._log_bot(text, payload, why, user)
+
+    def _bot_sends(self, why) -> bool:
+        """1.15.0 (owner): does the bot account send this kind of message? (Settings: bot_sends; missing = everything.)
+        The test message always comes from the bot account."""
+        if why == "test":
+            return True
+        parts = (self.store.get("settings") or {}).get("bot_sends")
+        return not isinstance(parts, list) or part_of(why) in parts
 
     async def _send_as_bot(self, text: str, m, payload, why, user, reply: bool = False) -> bool:
         """Sends through the shared bot account. False = it couldn't (the caller then sends with the channel's own account:
@@ -393,7 +425,7 @@ class TwitchBot(commands.Bot):
     async def send_test(self) -> str:
         """The dashboard's "Send test message": says hello from the account the replies come from."""
         name = self.sender.login if self.sender is not None else self.bot_account["login"]
-        await self._send(f"Hello from {name}!")
+        await self._send(f"Hello from {name}!", why="test")
         self._log_activity("manage", "test message", name)
         return name
 
@@ -406,9 +438,8 @@ class TwitchBot(commands.Bot):
     # ---------- checks ----------
 
     def _is_blocked(self, payload) -> bool:
-        block = self.store.get("blocklist")
         login = (payload.chatter.name or "").lower()
-        return login in {u.lower() for u in block.get("users", [])}     # (blocked words moved to Moderation > Bad words in 1.5.0)
+        return login in blocks.blocked_logins(self.store.get("blocklist"))     # 1.15.0: + timed blocks still running
 
     # ---------- moderation (the Moderation page) ----------
 
@@ -500,7 +531,12 @@ class TwitchBot(commands.Bot):
         if not n:
             return 0
         if bump:
-            return self._bump("name:" + n)
+            v = self._bump("name:" + n)
+            try:
+                counters_mod.note(self.store, n, "+1", "chat")     # 1.15.0: "+1 by chat · 3 min ago" on the Counters page
+            except Exception:
+                log.exception("Could not note a counter change")
+            return v
         return int((self.store.get("counters") or {}).get("name:" + n, 0))
 
     def _bump(self, key: str) -> int:
@@ -567,7 +603,7 @@ class TwitchBot(commands.Bot):
             lang="ar" if (self.store.get("ui") or {}).get("language") == "ar" else "en",
             account_created=lambda login=None: self._account_created(login, chatter),
             random_chatter=self._random_chatter,
-            followers=self._followers_cached,
+            followers=self._followers_cached, clip=self._make_clip,
             first_streak=lambda: pinfirst.streak_of(self.store.get("first_state"), str(getattr(chatter, "name", "") or user).lower()),
             first_peak=lambda: pinfirst.peak_of(self.store.get("first_state"), str(getattr(chatter, "name", "") or user).lower()),
             followed_of=self._followed_of,
@@ -784,7 +820,7 @@ class TwitchBot(commands.Bot):
 
     async def _fire_event(self, key, value, user, login="", extra=None, dedupe=None) -> None:
         """Answers one Twitch event with the best matching reply from the Events page."""
-        blocked = {u.lower() for u in self.store.get("blocklist").get("users", [])}
+        blocked = blocks.blocked_logins(self.store.get("blocklist"))
         if login and login.lower() in blocked:
             return
         if dedupe is not None:
@@ -1083,6 +1119,7 @@ class TwitchBot(commands.Bot):
         self._log_chat(payload)
         self._count_chat(payload)                      # 1.14.0: Stream stats
         self._chat_lines += 1                          # 1.14.0: timers that wait for chat
+        self._chat_times.append(time.time())           # 1.15.0: Nightbot-style chat lines (last 5 minutes)
         if self.store.get("settings").get("paused"):   # paused from the dashboard: stay silent
             return
         try:
@@ -1353,14 +1390,19 @@ class TwitchBot(commands.Bot):
         ch = payload.chatter
         user, uid, level = ch.display_name or ch.name, str(ch.id), self._level_of(ch)
         picked = None
+        if key in minigames.aliases(sh.get("list_cmd")):        # 1.15.0 «العاب؟»: the commands of the games that are on
+            if not self._on_cooldown("game:list", 15):
+                names = [minigames.aliases(c.get("start_cmd"))[0] for g, c in cfgs.items() if c.get("enabled") and minigames.aliases(c.get("start_cmd"))]
+                await self._send("🎮 الألعاب: " + " | ".join(names), payload, why="game")
+            return True
         if key in minigames.aliases(sh.get("random_cmd")):     # 1.14.0 «لعبه؟»: a random game among those this viewer may start
-            can = [g for g, c in cfgs.items() if c.get("enabled") and level >= PERMISSION_LEVELS.get(c.get("who_starts", "moderator"), 3)]
+            can = [g for g, c in cfgs.items() if c.get("enabled") and level >= PERMISSION_LEVELS.get(c.get("who_starts", "everyone"), 3)]
             if not can:
                 return True
             picked = random.choice(can)
         for game, cfg in cfgs.items():
             if (game == picked) or (picked is None and cfg.get("enabled") and key in minigames.aliases(cfg.get("start_cmd"))):
-                if level >= PERMISSION_LEVELS.get(cfg.get("who_starts", "moderator"), 3):
+                if level >= PERMISSION_LEVELS.get(cfg.get("who_starts", "everyone"), 3):
                     block = None if level >= 4 else self._round_block(sh)     # the broadcaster can always start one
                     if self.round and not self.round.over:
                         if not self._on_cooldown("game:busy", 10):
@@ -1385,24 +1427,28 @@ class TwitchBot(commands.Bot):
                     else:
                         n, parts = minigames.wins_of(hit[1]), minigames.breakdown(hit[1])
                         rank = 1 + sum(1 for v in wins.values() if isinstance(v, dict) and minigames.wins_of(v) > n)
-                        await self._send(f"🏆 ‏{hit[1].get('name')} عنده {n} فوز (المركز {rank})" + (f" ({parts})" if parts else ""), payload, why="game")
+                        await self._send(f"🏆 ‏{hit[1].get('name')} عنده {n} فوز (المركز {rank})" + self._wins_periods(hit[1]) + (f" ({parts})" if parts else ""), payload, why="game")
                     return True
                 e = wins.get(uid) or {}
                 n, parts = minigames.wins_of(e), minigames.breakdown(e)
-                await self._send((f"‏@{user} عندك {n} فوز 🏆" + (f" ({parts})" if parts else ""))
+                await self._send((f"‏@{user} عندك {n} فوز 🏆" + self._wins_periods(e) + (f" ({parts})" if parts else ""))
                                  if n else f"‏@{user} ما عندك فوز بعد، جرّب في الجولة الجاية!", payload, why="game")
             return True
         if key in minigames.aliases(sh.get("top_cmd")):
-            game = minigames.game_named(arg) if arg.strip() else None
+            words = arg.split()            # 1.15.0: «!الأوائل أسبوع» / «شهر» (and a game: «!الأوائل رتب شهر»)
+            period = next((minigames.period_named(w) for w in words if minigames.period_named(w)), None)
+            rest = " ".join(w for w in words if not minigames.period_named(w))
+            game = minigames.game_named(rest) if rest.strip() else None
             st = self.store.get("settings") or {}
             login = str((self.account or {}).get("login") or "").lower()
             if st.get("public_list") and st.get("public_leaderboard", True) is not False and publiclist.SITE and login:
                 if not self._on_cooldown("game:top:link", 10):     # 1.14.0: the leaderboard page (every game, the top 10 of each)
-                    await self._send(f"🏆 لوحة الأوائل: {publiclist.SITE.rstrip('/')}/{login}/leaderboard", payload, why="game")
+                    await self._send(f"🏆 لوحة الأوائل: {publiclist.SITE.rstrip('/')}/{login}/leaderboard" + (f"?p={period}" if period else ""), payload, why="game")
                 return True
-            if not self._on_cooldown(f"game:top:{game or 'all'}", 10):
-                best = minigames.top(self.store.get("game_wins") or {}, 5, game)
-                head = f"🏆 الأوائل في {minigames.GAME_NAMES[game]}: " if game else "🏆 الأوائل: "
+            if not self._on_cooldown(f"game:top:{game or 'all'}:{period or 'all'}", 10):
+                best = minigames.top(self.store.get("game_wins") or {}, 5, game, period)
+                when = {"week": " هالأسبوع", "month": " هالشهر"}.get(period, "")
+                head = f"🏆 الأوائل{when} في {minigames.GAME_NAMES[game]}: " if game else f"🏆 الأوائل{when}: "
                 await self._send(head + " | ".join(f"{i}. {n} ({w})" for i, (n, w) in enumerate(best, 1)) if best else "ما في فائزين بعد.", payload, why="game")
             return True
         r = self.round
@@ -1449,13 +1495,17 @@ class TwitchBot(commands.Bot):
             if recent is None:
                 recent = self._recent_quick = deque(maxlen=40)
             self.round = r = minigames.new_quick(game, cfg, recent)
-            recent.append(r.prompt if game in ("emoji", "trivia") else r.answer)
+            recent.append(getattr(r, "why", "") if game == "oddone" else r.prompt if game in ("emoji", "trivia", "riddle", "translate", "opposite") else r.answer)
             secs = int(r.ends - time.time() + 0.5)
             text = {"emoji": f"🧩 ايموجي: {r.prompt} — وش الكلمة؟ أول واحد يكتبها يفوز! ({secs} ثانية)",
                     "reverse": f"🔁 بالعكس: «{r.prompt}» — اكتبها صح! أول واحد يكتبها يفوز! ({secs} ثانية)",
                     "math": f"🧮 احسب: {r.prompt} — أول جواب صحيح يفوز! ({secs} ثانية)",
                     "ladder": f"🪜 تحدي السلم | أسرع واحد يكتب {getattr(r, 'count', 3)} كلمات تبدأ بحرف «{getattr(r, 'letter', '')}»! ({secs} ثانية)",
-                    "trivia": f"❓ سؤال: {r.prompt} " + (f"| {' • '.join(getattr(r, 'choices', []))} " if getattr(r, "show_choices", True) else "") + f"— اكتب الجواب! ({secs} ثانية)"}[game]
+                    "trivia": f"❓ سؤال: {r.prompt} " + (f"| {' • '.join(getattr(r, 'choices', []))} " if getattr(r, "show_choices", True) else "") + f"— اكتب الجواب! ({secs} ثانية)",
+                    "riddle": f"🧠 لغز: {r.prompt} — اكتب الجواب! ({secs} ثانية)",          # 1.15.0
+                    "translate": f"🔤 ترجم {'للعربي' if getattr(r, 'to', 'ar') == 'ar' else 'للإنجليزي'}: «{r.prompt}» — أول واحد يكتبها يفوز! ({secs} ثانية)",
+                    "opposite": f"🔄 ضد: «{r.prompt}» — أول واحد يكتب الضد يفوز! ({secs} ثانية)",
+                    "oddone": f"🕵️ الدخيل: {r.prompt} — وش الكلمة اللي ما تنتمي للباقي؟ أول واحد يكتبها يفوز! ({secs} ثانية)"}[game]
             await self._send(self._game_ann(cfg) + text, why="game")
             self._log_activity("game", f"start:{minigames.GAME_NAMES[game]}:{r.prompt}")
         elif game == "scramble":
@@ -1488,7 +1538,7 @@ class TwitchBot(commands.Bot):
                 r.done = True
                 self._round_ended()
                 end = (f"⏰ انتهى الوقت! ما أحد كتب {getattr(r, 'count', 3)} كلمات بحرف «{getattr(r, 'letter', '')}»." if game == "ladder"
-                       else f"⏰ انتهى الوقت! الجواب كان «{r.answer}»")
+                       else f"⏰ انتهى الوقت! الجواب كان «{r.answer}»" + (f" (الباقي: {r.why})" if getattr(r, "why", "") else ""))
                 await self._send(self._game_ann(self._game_cfg(game)) + end, why="game")
             return
         if game == "scramble" and self._game_cfg("scramble").get("hint", True):
@@ -1524,6 +1574,8 @@ class TwitchBot(commands.Bot):
         if game in minigames.QUICK_GAMES:              # 1.14.0
             self._log_activity("game", f"win:{minigames.GAME_NAMES[game]}:{word}", user)
             won = f"🎉 ‏@{user} فاز بتحدي السلم: {word}! " if game == "ladder" else f"🎉 ‏@{user} جاوب صح «{word}»! "
+            if getattr(r, "why", ""):                  # 1.15.0 «الدخيل»: what the other three have in common
+                won += f"(الباقي: {r.why}) "
             await self._send(self._game_ann(cfg) + won + tail, why="game", user=user)
             return
         if game == "scramble":
@@ -1549,7 +1601,9 @@ class TwitchBot(commands.Bot):
             out["prompt"], out["hint"] = r.prompt, (r.hint if r.hinted else "")
             if out["game"] == "ladder":
                 out["letter"], out["count"] = getattr(r, "letter", ""), getattr(r, "count", 3)
-            if out["game"] == "trivia":
+            if out["game"] == "translate":
+                out["to"] = getattr(r, "to", "ar")        # 1.15.0: which language to write it in
+            if out["game"] in ("trivia", "oddone"):
                 out["choices"] = list(getattr(r, "choices", [])) if getattr(r, "show_choices", True) else []     # (never which one is right; none on hard)
         elif out["game"] == "scramble":
             out["tiles"] = list(r.tiles)
@@ -1688,6 +1742,43 @@ class TwitchBot(commands.Bot):
             return None
         return int(total) if total is not None else None
 
+    async def _make_clip(self) -> tuple:
+        """1.15.0 $(clip): (link, None) or (None, why): "offline", "reconnect" (the login has no clips:edit yet),
+        "busy" (Twitch's limit), "failed". Twitch clips the last moments of the stream; it needs a few seconds before the
+        clip can be watched, so this waits (up to ~15 s) for it. A second $(clip) within 20 s gets the same link."""
+        recent = getattr(self, "_last_clip", None)
+        if recent and time.time() - recent[0] < 20:
+            return recent[1], None
+        if not self.is_live:
+            return None, "offline"
+        data = auth.load_token() or {}
+        if "clips:edit" not in (data.get("scopes") or []):
+            return None, "reconnect"
+        headers = {"Authorization": f"Bearer {data.get('access_token')}", "Client-Id": auth.CLIENT_ID}
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as s:
+                async with s.post("https://api.twitch.tv/helix/clips", params={"broadcaster_id": str(self.owner_id)}, headers=headers) as r:
+                    if r.status == 401:
+                        return None, "reconnect"
+                    if r.status == 429:
+                        return None, "busy"
+                    if r.status not in (200, 202):
+                        log.warning("$(clip): Twitch answered %s", r.status)
+                        return None, "failed"
+                    cid = ((await r.json()).get("data") or [{}])[0].get("id")
+                if not cid:
+                    return None, "failed"
+                for _ in range(8):                  # wait until Twitch has made it (usually a few seconds)
+                    await asyncio.sleep(2)
+                    async with s.get("https://api.twitch.tv/helix/clips", params={"id": cid}, headers=headers) as r:
+                        if r.status == 200 and (await r.json()).get("data"):
+                            break
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
+            return None, "failed"
+        link = f"https://clips.twitch.tv/{cid}"
+        self._last_clip = (time.time(), link)
+        return link, None
+
     async def event_stream_online(self, payload) -> None:
         self._live_wake.set()
 
@@ -1696,9 +1787,27 @@ class TwitchBot(commands.Bot):
 
     # ---------- timers ----------
 
+    @staticmethod
+    def _wins_periods(e: dict) -> str:
+        """1.15.0: « — هالأسبوع 3، هالشهر 12» after a viewer's all-time wins (nothing when both are 0)."""
+        w, m = minigames.wins_of(e, None, "week"), minigames.wins_of(e, None, "month")
+        return f" — هالأسبوع {w}، هالشهر {m}" if w or m else ""
+
+    def _lines_last_5min(self, now: float) -> int:
+        """1.15.0: chat messages in the last 5 minutes (Nightbot's "chat lines")."""
+        q = self._chat_times
+        while q and q[0] < now - TIMER_WINDOW:
+            q.popleft()
+        return len(q)
+
     async def _timer_loop(self) -> None:
+        """1.15.0 (owner): timers work like Nightbot's. Each timer has its own interval. When it's due, it posts only if
+        chat had at least its "chat lines" in the last 5 minutes; if not, it skips this time and waits a whole interval
+        again (it doesn't post the moment chat wakes up, so quiet chat never makes timers pile up). On top of that, two
+        timer messages are never sent within TIMER_GAP seconds of each other: a timer due too soon after another waits,
+        and the one that has waited longest goes first."""
         last: dict[str, float] = {}
-        lines_at: dict[str, int] = {}     # 1.14.0: the chat count when each timer last posted (Wait for chat)
+        last_sent = 0.0                   # when any timer last posted
         was_live = False
         while True:
             await asyncio.sleep(10)
@@ -1706,6 +1815,9 @@ class TwitchBot(commands.Bot):
                 if getattr(self, "stats", None) is not None:
                     self.stats.flush()                     # 1.14.0: Stream stats, saved at most once a minute
                 await giveaway.tick(self.store, self)      # 1.13.0: a keyword giveaway closes when its time is up
+                bl = self.store.get("blocklist")
+                if blocks.prune(bl):                       # 1.15.0: a timed block that ended leaves the list
+                    self.store.save("blocklist", bl)
                 if self.is_live != was_live:
                     last.clear()  # restart timers' clocks on live/offline change
                     was_live = self.is_live
@@ -1715,22 +1827,28 @@ class TwitchBot(commands.Bot):
                 if self.store.get("settings").get("only_when_live", True) and not self.is_live:
                     continue
                 now = time.time()
+                lines = self._lines_last_5min(now)
+                due = []
                 for t in self.store.get("timers"):
                     if not t.get("enabled", True):
                         continue
                     key = t["name"]
                     if key not in last:
                         last[key] = now
-                        lines_at[key] = self._chat_lines
                         continue
-                    need = int(t.get("min_lines") or 0)
-                    if need and self._chat_lines - lines_at.get(key, self._chat_lines) < need:
-                        continue                               # due, but chat has been quiet: wait for N new messages
-                    if now - last[key] >= t["interval_minutes"] * 60:
-                        ctx = self._ctx(self.account["login"], counter_key=f"timer:{key}")
-                        await self._send(await expand(t["message"], ctx), why="timer:" + key, user="")   # (shown in the Bot tab)
-                        last[key] = now
-                        lines_at[key] = self._chat_lines
+                    late = now - last[key] - float(t.get("interval_minutes") or 0) * 60
+                    if late < 0:
+                        continue
+                    if lines < int(t.get("min_lines") or 0):
+                        last[key] = now                    # chat too quiet: skip this time, like Nightbot
+                        continue
+                    due.append((late, key, t))
+                if not due or now - last_sent < TIMER_GAP:
+                    continue                               # nothing due, or a timer was just sent: the due ones wait
+                _, key, t = max(due, key=lambda d: d[0])   # one timer at a time: the one waiting longest
+                ctx = self._ctx(self.account["login"], counter_key=f"timer:{key}")
+                await self._send(await expand(t["message"], ctx), why="timer:" + key, user="")   # (shown in the Bot tab)
+                last[key] = last_sent = now
             except asyncio.CancelledError:
                 raise
             except Exception:

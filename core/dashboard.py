@@ -17,7 +17,7 @@ from pathlib import Path
 import aiohttp
 from aiohttp import web
 
-from . import accounts, auth, botauth, desktop, editor, events, greetings, manage, minigames, moderation, notify, pinfirst, publiclist, support, updater
+from . import accounts, auth, botauth, counters as counters_mod, desktop, editor, events, greetings, manage, minigames, moderation, notify, pinfirst, publiclist, support, updater, blocks
 from .store import EmptySaveRefused, Store
 
 log = logging.getLogger("twitchbot.dashboard")
@@ -148,7 +148,9 @@ async def _register_bot(state) -> None:
         state["bot_add"] = {"status": "error", "message": "This app runs a single channel."}
         return
     if str(acc["user_id"]) in [c["id"] for c in reg["channels"]]:
-        state["bot_add"] = {"status": "error", "message": f"{acc['login']} is one of your channels, not a bot account. Sign in with the bot account (a private window helps)."}
+        # 1.15.0: no need to add it: a channel can already send for your other channels (Who sends the replies)
+        state["bot_add"] = {"status": "error", "code": "is_channel", "login": acc["login"],
+                            "message": f"{acc['login']} is one of your channels, so it doesn't need adding: choose it in \"Who sends the replies\" for your other channel. To add a different account, sign in with it (a private window helps)."}
         return
     bid = str(acc["user_id"])
     accounts.bot_token_file(bid).parent.mkdir(parents=True, exist_ok=True)
@@ -201,6 +203,9 @@ def channels_info(state):
         if entry is not None:          # 1.12.0: who sends comes from the shared bot list
             sid = entry.get("sender") or "own"
             blogin = next((b.get("login", "") for b in reg.get("bots", []) if b.get("id") == sid), "") if sid != "own" else ""
+            if sid.startswith("ch:"):          # 1.15.0: another of your channels sends
+                ort = runtimes.get(sid[3:])
+                blogin = (ort.state.get("account") if ort else "") or next((c.get("login", "") for c in reg["channels"] if c.get("id") == sid[3:]), "")
             sender, sender_ok = blogin, not (bot is not None and getattr(bot, "sender_problem", ""))
         else:
             separate = bool(rt.store.get("settings").get("separate_bot")) if cid != "pending" else False
@@ -224,7 +229,9 @@ def bots_info(state):
         return (rt.state.get("account") if rt else "") or c.get("login", "")
     chans = [{"id": c["id"], "login": login_of(c), "sender": c.get("sender") or "own", "note": c.get("sender_note")} for c in reg["channels"]]
     bots = [{"id": b["id"], "login": b.get("login", ""), "channels": [c["id"] for c in chans if c["sender"] == b["id"]]} for b in reg.get("bots", [])]
-    return {"active": str(accounts.ACTIVE["id"]), "channels": chans, "bots": bots}
+    # 1.15.0: your channels used as the sender of your other channels (they're not bot accounts: no Remove, no sign-in)
+    chsend = [{"id": "ch:" + c["id"], "login": c["login"], "channels": [x["id"] for x in chans if x["sender"] == "ch:" + c["id"]]} for c in chans]
+    return {"active": str(accounts.ACTIVE["id"]), "channels": chans, "bots": bots, "chsend": [c for c in chsend if c["channels"]]}
 
 
 def game_command_clash(games, commands):
@@ -350,7 +357,20 @@ def _bool(v, what: str) -> bool:
         raise ValidationError(f"{what} must be on or off.")
     return v
 
-
+
+
+BOT_PARTS = ("commands", "games", "timers", "events", "greetings", "stream", "giveaways", "warnings")   # (core/bot.py)
+
+
+def _bot_sends(v):
+    """1.15.0 (owner): the kinds of messages the bot account sends; missing = all of them (as before)."""
+    if v is None:
+        return list(BOT_PARTS)
+    if not isinstance(v, list) or any(x not in BOT_PARTS for x in v):
+        raise ValidationError("Choose what the bot account sends from the list.")
+    return [p for p in BOT_PARTS if p in v]
+
+
 TIMER_MIN_LINES = (0, 2, 5, 10, 20, 50)        # 1.14.0: a timer waits for this many new chat messages (0 = never waits)
 
 
@@ -549,6 +569,21 @@ def validate(section: str, data, prefix: str = "!"):
                 if x and x.lower() not in (c.lower() for c in clean):
                     clean.append(x)
             out[key] = clean
+        # 1.15.0: timed blocks {user, from, until}; ended ones are dropped; a name is never both permanent and timed
+        timed = data.get("timed", [])
+        if not isinstance(timed, list) or len(timed) > 1000:
+            raise ValidationError("Blocked users must be a list.")
+        now, seen, keep = time.time(), {u.lower() for u in out["users"]}, []
+        for t in timed:
+            if not isinstance(t, dict):
+                raise ValidationError("A timed block is invalid.")
+            user = _text(t.get("user", ""), "Blocked user", 100, required=False)
+            until = float(_number(t.get("until", 0), "Block end", 0, 10 ** 11))
+            start = float(_number(t.get("from", until), "Block start", 0, 10 ** 11))
+            if user and until > now and user.lower() not in seen and until - min(start, until) <= blocks.MAX_AMOUNT * 3600 + 60:
+                keep.append({"user": user, "from": min(start, until), "until": until})
+                seen.add(user.lower())
+        out["timed"] = keep
         return out
 
     if section == "settings":
@@ -576,6 +611,7 @@ def validate(section: str, data, prefix: str = "!"):
             "commands_url": url,
             "disabled_builtins": sorted(set(off)),
             "separate_bot": _bool(data.get("separate_bot", False), "Use a separate bot account"),
+            "bot_sends": _bot_sends(data.get("bot_sends")),       # 1.15.0 (owner): what the bot account sends
             "public_list": _bool(data.get("public_list", False), "Public command list"),
             "public_leaderboard": _bool(data.get("public_leaderboard", True), "Games leaderboard on the public page"),
             "public_examples": _bool(data.get("public_examples", True), "Show what each command says on the public page"),
@@ -636,7 +672,7 @@ def validate(section: str, data, prefix: str = "!"):
                     seen[v] = True
                 found[part][k] = names
         cmds, scmds = found["letters"], found["scramble"]
-        if c.get("who_starts", "moderator") not in minigames.WHO:
+        if c.get("who_starts", "everyone") not in minigames.WHO:
             raise ValidationError("Choose who can start a round.")
         cats = [x for x in (c.get("categories") or []) if x in minigames.CATEGORIES]
         if not cats:
@@ -650,7 +686,7 @@ def validate(section: str, data, prefix: str = "!"):
             if not isinstance(raw, list) or len(raw) > 2000:
                 raise ValidationError("A word list is invalid.")
             words[cat] = list(dict.fromkeys(w for w in (_text(x, "Word", 40, required=False).strip() for x in raw) if w))
-        if sc.get("who_starts", "moderator") not in minigames.WHO:
+        if sc.get("who_starts", "everyone") not in minigames.WHO:
             raise ValidationError("Choose who can start a round.")
         raw = sc.get("words", [])
         if not isinstance(raw, list) or len(raw) > 2000:
@@ -698,10 +734,27 @@ def validate(section: str, data, prefix: str = "!"):
                 if q.get("level", "normal") not in minigames.MATH_LEVELS:
                     raise ValidationError("Choose how hard the sums are.")
                 out["level"] = q.get("level", "normal")
+            if g == "oddone":                    # 1.15.0 «الدخيل»: clearly different groups / close ones
+                if q.get("level", "easy") not in minigames.ODDONE_LEVELS:
+                    raise ValidationError("Choose how hard the rounds are.")
+                out["level"] = q.get("level", "easy")
+            if g == "opposite":                  # 1.15.0 «ضد»: everyday / harder words
+                if q.get("level", "easy") not in minigames.OPPOSITE_LEVELS:
+                    raise ValidationError("Choose how hard the words are.")
+                out["level"] = q.get("level", "easy")
+            if g == "translate":                 # 1.15.0 «ترجم»: everyday / less common words, and which way
+                if q.get("level", "easy") not in minigames.TRANSLATE_LEVELS:
+                    raise ValidationError("Choose how hard the words are.")
+                if q.get("way", "mixed") not in minigames.TRANSLATE_WAYS:
+                    raise ValidationError("Choose which way to translate.")
+                out["level"], out["way"] = q.get("level", "easy"), q.get("way", "mixed")
             if g == "trivia":                    # 1.14.0 «سؤال»: easy = the choices are shown, hard = only the question
                 if q.get("level", "hard") not in minigames.TRIVIA_LEVELS:
                     raise ValidationError("Choose how hard the questions are.")
                 out["level"] = q.get("level", "hard")
+                if q.get("questions", "easy") not in minigames.TRIVIA_TIERS:      # 1.15.0 (owner): how hard the questions are
+                    raise ValidationError("Choose how hard the questions are.")
+                out["questions"] = q.get("questions", "easy")
             if g == "emoji":
                 raw = q.get("puzzles", []) or []
                 if not isinstance(raw, list) or len(raw) > 1000:
@@ -722,12 +775,12 @@ def validate(section: str, data, prefix: str = "!"):
                     puzzles.append({"e": e, "a": ans})
                 out["puzzles"] = puzzles
             quick[g] = out
-        return {**quick, "letters": dict(cmds, enabled=_bool(c.get("enabled", False), "Game switch"), who_starts=c.get("who_starts", "moderator"),
+        return {**quick, "letters": dict(cmds, enabled=_bool(c.get("enabled", False), "Game switch"), who_starts=c.get("who_starts", "everyone"),
                                 round_seconds=int(_number(c.get("round_seconds", 60), "Round time", 15, 600)),
                                 auto_minutes=int(_number(c.get("auto_minutes", 0), "Automatic rounds", 0, 240)),
                                 categories=cats, letters=letters, words=words,
                                 announce=_bool(c.get("announce", True), "Announcements")),
-                "scramble": dict(scmds, enabled=_bool(sc.get("enabled", False), "Game switch"), who_starts=sc.get("who_starts", "moderator"),
+                "scramble": dict(scmds, enabled=_bool(sc.get("enabled", False), "Game switch"), who_starts=sc.get("who_starts", "everyone"),
                                  round_seconds=int(_number(sc.get("round_seconds", 45), "Round time", 15, 600)),
                                  hint=_bool(sc.get("hint", True), "Hint"),
                                  auto_minutes=int(_number(sc.get("auto_minutes", 0), "Automatic rounds", 0, 240)),
@@ -752,6 +805,11 @@ def validate(section: str, data, prefix: str = "!"):
                 raise ValidationError("The wins list is invalid.")
             out[str(uid)[:30]] = {"name": _text(e.get("name", "?"), "Name", 40, required=False) or "?", "wins": int(_number(e.get("wins", 0), "Wins", 0, 10 ** 9)),
                                   "games": {k: int(_number(g[k], "Wins", 0, 10 ** 9)) for k in minigames.GAME_KEYS if k in g}}
+            for p in minigames.PERIODS:      # 1.15.0: this week / this month are kept when the page saves the list
+                sub = e.get(p)
+                if isinstance(sub, dict) and isinstance(sub.get("games"), dict):
+                    out[str(uid)[:30]][p] = {"id": _text(sub.get("id", ""), "Period", 10, required=False), "wins": int(_number(sub.get("wins", 0), "Wins", 0, 10 ** 9)),
+                                             "games": {k: int(_number(sub["games"][k], "Wins", 0, 10 ** 9)) for k in minigames.GAME_KEYS if k in sub["games"]}}
         return out
 
     if section == "moderation":
@@ -914,6 +972,7 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             "login": {k: login.get(k) for k in ("status", "code", "uri", "message")},
             "problem": auth.last_problem,
             "event_problems": dict(getattr(bot, "event_problems", {}) or {}) if bot else {},
+            "counters": counters_mod.view(store),        # 1.15.0 (owner): Counters (Dashboard card, Commands > Custom > Counters)
             "avatar": state.get("avatar") if account else None,
             "lost": bool(state.get("lost")),
             "health": health_info(state),
@@ -957,6 +1016,12 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
                     s._mods.clear()
                     s.problem = ""
                 b["status"] = {cid: await s.status(cid) for cid in b["channels"]}
+            for b in info.get("chsend") or []:      # 1.15.0: a channel sending for another
+                s = botsender.get_channel(b["id"][3:], b["login"])
+                if request.query.get("fresh"):
+                    s._mods.clear()
+                    s.problem = ""
+                b["status"] = {cid: await s.status(cid) for cid in b["channels"]}
         return web.json_response(info)
 
     async def bots_action(request):
@@ -975,7 +1040,8 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
         entry = next((c for c in reg["channels"] if c["id"] == cid), None)
         if action == "sender":
             sid = str(data.get("sender") or "own")
-            if sid != "own" and sid not in [b["id"] for b in reg["bots"]]:
+            others = ["ch:" + c["id"] for c in reg["channels"] if c["id"] != cid]      # 1.15.0: another of your channels
+            if sid != "own" and sid not in [b["id"] for b in reg["bots"]] and sid not in others:
                 return web.json_response({"error": "Unknown bot account."}, status=400)
             entry["sender"] = sid
             entry.pop("sender_note", None)
@@ -1197,6 +1263,23 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
         st, bot = _giveaway_target(request.query.get("practice") == "1")
         await G.tick(st, bot)
         return web.json_response(G.view(st, G.load(st), bot, request.query.get("secret") == "1"))
+
+    async def counter_action(request):
+        """1.15.0 (owner): the Counters buttons: create (and its commands), set, add (+1 / -1), reset, resetall, rename, delete."""
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        body = body if isinstance(body, dict) else {}
+        def check_commands(cmds):
+            return validate("commands", cmds)
+        def clash(cmds):
+            return game_command_clash(store.get("games"), cmds)
+        try:
+            made = counters_mod.act(store, request.match_info["action"], body, check_commands, clash)
+        except (counters_mod.CounterError, ValidationError, manage.CommandError) as e:
+            return web.json_response({"error": str(e)}, status=400)
+        return web.json_response({"counters": counters_mod.view(store), "made": made or []})
 
     async def giveaway_action(request):
         """1.13.0 Giveaways: settings, start, close, draw (and reroll), remove an entry, clear."""
@@ -1496,6 +1579,7 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
     app.router.add_get("/api/giveaway", giveaway_view)      # 1.13.0: Giveaways
     app.router.add_post("/api/titlebar", titlebar_set)      # 1.13.0: the window's top bar in the app's colors
     app.router.add_post("/api/giveaway/{action}", giveaway_action)
+    app.router.add_post("/api/counters/{action}", counter_action)      # 1.15.0 (owner)
     app.router.add_post("/api/channels/{action}", channel_action)
     app.router.add_post("/api/editor/{action}", editor_action)
     app.router.add_get("/api/bots", bots_get)

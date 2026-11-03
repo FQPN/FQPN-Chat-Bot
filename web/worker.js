@@ -24,8 +24,8 @@ const MAX_NAME = 60;
 const MAX_BODY = 256 * 1024;   // bytes (1.13.0: 64 -> 256 KB, each command can carry a short example)
 const MAX_EX = 100;             // 1.13.0: an example reply, at most this many characters
 const BI_KEYS = ["commands", "title", "game", "app", "addcom", "editcom", "delcom"];
-const GAME_ROWS = { letters: ["start", "approve"], scramble: ["start"], emoji: ["start"], reverse: ["start"], math: ["start"], ladder: ["start"], trivia: ["start"], shared: ["wins", "top", "random"] };
-const LB_KEYS = ["l", "u", "e", "r", "m", "s", "q"];          // 1.14.0: حروف, رتب, ايموجي, عكس, احسب
+const GAME_ROWS = { letters: ["start", "approve"], scramble: ["start"], emoji: ["start"], reverse: ["start"], math: ["start"], ladder: ["start"], trivia: ["start"], riddle: ["start"], translate: ["start"], opposite: ["start"], oddone: ["start"], shared: ["wins", "top", "random", "list"] };
+const LB_KEYS = ["l", "u", "e", "r", "m", "s", "q", "g", "t", "o", "d"];      // 1.15.0: + الدخيل      // 1.15.0: + لغز, ترجم, ضد          // 1.14.0: حروف, رتب, ايموجي, عكس, احسب
 const MIN_GAP = 5;             // seconds between two saves of the same channel
 const PERMS = ["everyone", "subscriber", "vip", "moderator", "broadcaster"];
 const LOGIN_RE = /^[a-z0-9_]{1,25}$/;
@@ -266,8 +266,15 @@ function cleanLeaderboard(lb) {
     if (parts) LB_KEYS.forEach((k) => { out[k] = n(r[k]); });
     return out;
   }).filter((r) => r && r.w > 0);
-  const out = { all: rows(lb.all, true) };
-  LB_KEYS.forEach((k) => { out[k] = rows(lb[k], false); });
+  const board = (b) => {
+    const o = { all: rows(b.all, true) };
+    LB_KEYS.forEach((k) => { o[k] = rows(b[k], false); });
+    return o;
+  };
+  const out = board(lb);
+  ["week", "month"].forEach((p) => {        // 1.15.0: this week / this month (same shape), when the app sends them
+    if (lb[p] && typeof lb[p] === "object" && !Array.isArray(lb[p])) out[p] = board(lb[p]);
+  });
   return out;
 }
 
@@ -355,8 +362,10 @@ async function saveSeen(req, env) {
   await setup(env.DB);
   const now = Math.floor(Date.now() / 1000);
   const banned = !!(await env.DB.prepare("SELECT 1 FROM bans WHERE user_id = ?").bind(who.userId).first());
-  const row = await env.DB.prepare("SELECT last_seen FROM seen WHERE user_id = ?").bind(who.userId).first();
-  if (row && now - row.last_seen < SEEN_GAP) return json({ ok: true, counted: false, banned }, 429, { "Retry-After": String(SEEN_GAP) });
+  const row = await env.DB.prepare("SELECT last_seen, version FROM seen WHERE user_id = ?").bind(who.userId).first();
+  // 1.15.0: a NEW version is always saved at once (an update shows on the developers' Users page right away);
+  // the same version is still counted at most once an hour
+  if (row && now - row.last_seen < SEEN_GAP && row.version === version) return json({ ok: true, counted: false, banned }, 429, { "Retry-After": String(SEEN_GAP) });
   const p = await profile(who);
   await env.DB.prepare("INSERT INTO seen (user_id, login, display, version, first_seen, last_seen) VALUES (?, ?, ?, ?, ?, ?) " +
                        "ON CONFLICT(user_id) DO UPDATE SET login = excluded.login, display = excluded.display, version = excluded.version, last_seen = excluded.last_seen")
@@ -838,11 +847,11 @@ const TEXT = {
   en: {
     commands: "Commands", count: "{n} commands", count1: "1 command", count2: "2 commands", count_few: "{n} commands", search: "Search commands", none: "No commands match your search.",
     empty: "This channel has no public commands yet.", copy: "Click a command to copy it.", copied: "Copied {c}",
-    g_builtin: "Built-in commands", g_games: "Mini games", bd_commands: "Links to this page with every command.", bd_title: "Shows the stream title. Moderators change it by writing a new title after it.", bd_game: "Shows the game. Moderators change it by writing a game name after it.", bd_app: "Says which app runs this chat bot.", bd_addcom: "Moderators add a new command from chat.", bd_editcom: "Moderators change a command's reply from chat.", bd_delcom: "Moderators delete a command from chat.", gd_letters_start: "Starts a Letters round: be the first to write a word from the category that starts with the given letter.", gd_letters_approve: "Moderators accept a word the bot didn't know, and that viewer wins the round.", gd_scramble_start: "Starts a word scramble: the first to write the word in the right order wins.", gd_shared_wins: "Shows how many rounds you've won.", gd_shared_top: "Sends the link to the games leaderboard.", gd_emoji_start: "Starts «ايموجي»: guess the word from the emojis; the first right answer wins.", gd_reverse_start: "Starts «عكس»: a word written backwards; the first to write it the right way wins.", gd_math_start: "Starts «احسب»: a quick sum; the first right answer wins.", gd_ladder_start: "Starts «سلم»: the fastest to write a few words starting with a letter wins.", gd_trivia_start: "Starts «سؤال»: an easy question with 4 choices; the first right answer wins.", gd_shared_random: "Starts a round of a random game.", bi_who: "Built in to FQPN's Chat Bot · {w} can use it", g_everyone: "Everyone", g_subscriber: "Subscribers", g_vip: "VIPs", g_moderator: "Moderators", g_broadcaster: "Broadcaster",
+    g_builtin: "Built-in commands", g_games: "Mini games", bd_commands: "Links to this page with every command.", bd_title: "Shows the stream title. Moderators change it by writing a new title after it.", bd_game: "Shows the game. Moderators change it by writing a game name after it.", bd_app: "Says which app runs this chat bot.", bd_addcom: "Moderators add a new command from chat.", bd_editcom: "Moderators change a command's reply from chat.", bd_delcom: "Moderators delete a command from chat.", gd_letters_start: "Starts a Letters round: be the first to write a word from the category that starts with the given letter.", gd_letters_approve: "Moderators accept a word the bot didn't know, and that viewer wins the round.", gd_scramble_start: "Starts a word scramble: the first to write the word in the right order wins.", gd_shared_wins: "Shows how many rounds you've won.", gd_shared_top: "Sends the link to the games leaderboard.", gd_emoji_start: "Starts «ايموجي»: guess the word from the emojis; the first right answer wins.", gd_reverse_start: "Starts «عكس»: a word written backwards; the first to write it the right way wins.", gd_math_start: "Starts «احسب»: a quick sum; the first right answer wins.", gd_ladder_start: "Starts «سلم»: the fastest to write a few words starting with a letter wins.", gd_trivia_start: "Starts «سؤال»: an easy question; the first viewer to write the right answer wins.", gd_riddle_start: "Starts «لغز»: an easy riddle; the first viewer to write the answer wins.", gd_translate_start: "Starts «ترجم»: a word to translate; the first viewer to write it in the other language wins.", gd_opposite_start: "Starts «ضد»: a word; the first viewer to write its opposite wins.", gd_oddone_start: "Starts «الدخيل»: 4 words; the first viewer to write the one that doesn't belong wins.", gd_shared_random: "Starts a round of a random game.", gd_shared_list: "Lists the commands of the games that are on.", bi_who: "Built in to FQPN's Chat Bot · {w} can use it", g_everyone: "Everyone", g_subscriber: "Subscribers", g_vip: "VIPs", g_moderator: "Moderators", g_broadcaster: "Broadcaster",
     updated: "Updated {t}", made: "Made with FQPN's Chat Bot", lang: "العربية",
     home_t: "Public command lists", home_d: "Streamers who use FQPN's Chat Bot can share their chat commands here. Open a link like {u} to see a channel's list.",
     miss_t: "No list here", miss_d: "There is no public command list for {c}. The streamer can switch it on in FQPN's Chat Bot, on the Commands page.",
-    lb_tab: "Games leaderboard", lb_all: "All games", wins: "{n} wins", win1: "1 win", lb_empty: "No wins yet.",
+    lb_tab: "Games leaderboard", lb_all: "All games", lb_p_all: "All time", lb_p_week: "This week", lb_p_month: "This month", wins: "{n} wins", win1: "1 win", lb_empty: "No wins yet.",
     players1: "1 player", players2: "2 players", players_few: "{n} players", players: "{n} players",
     ed_t: "Edit commands", ed_gone_t: "This editor link has ended", ed_gone_d: "It expired, was cancelled, or a new one replaced it. Ask the streamer for a new link and password.",
     ed_in_t: "Sign in to edit", ed_in_d: "The streamer gave you this link and a password. Your name is shown to the streamer next to each change.",
@@ -861,13 +870,13 @@ const TEXT = {
     dl: "Download for Windows", dl_users: "streamers use it", dl_meta: "Version {v} · {d} · {s} MB", dl_down: "Get the newest version from GitHub", dl_req: "Windows 10 or 11 · installs for your user, no administrator needed",
     dl_all: "All versions and what changed",
     f_t: "What it does",
-    f1_t: "Commands", f1_d: "With aliases, user levels, cooldowns and variables like $(user), $(followage), $(weather city) and $(accountage).",
+    f1_t: "Commands", f1_d: "With aliases, user levels, cooldowns and variables like $(user), $(followage), $(weather city) and $(accountage), and counters (deaths, wins…) you can change in one click.",
     f2_t: "Timers", f2_d: "Messages on a schedule while you're live, like a reminder to follow or to join your Discord.",
     f3_t: "Twitch events", f3_d: "Replies for follows, subs, gift subs, raids, hype trains, bits, watch streaks and donations, with running totals.",
     f4_t: "Greetings", f4_d: "A hello for the people you choose, once per stream, in your own words.",
     f5_t: "Blocklist", f5_d: "People the bot ignores: their commands get no answer.",
     f6_t: "Moderation", f6_d: "Filters for bad words in Arabic and English, links, caps, emotes, symbols and spam, and a log of what was done.",
-    f7_t: "Mini games", f7_d: "Five games: «حروف», «رتب», «ايموجي», «عكس» and «احسب», with «لعبه؟» for a random one, and leaderboards.",
+    f7_t: "Mini games", f7_d: "Eleven games, like «حروف», «سؤال» (easy, medium or hard questions), «الدخيل» and «ترجم», with «لعبه؟» for a random one, «العاب؟» for the list, and weekly, monthly and all-time leaderboards.",
     f8_t: "Test chat", f8_d: "Try every command, game and event reply as any viewer, without Twitch. With ready-made recipes.",
     f9_t: "Giveaways", f9_d: "Draw an active chatter, let viewers join with a keyword, or guess a number. Subscriber luck and rerolls.",
     f10_t: "Public command list", f10_d: "One link to a page with all your commands, an example of what each says, and the games leaderboard.",
@@ -904,11 +913,11 @@ const TEXT = {
   ar: {
     commands: "الأوامر", count: "{n} أمر", count1: "أمر واحد", count2: "أمران", count_few: "{n} أوامر", search: "ابحث في الأوامر", none: "لا توجد أوامر تطابق بحثك.",
     empty: "لا توجد أوامر عامة لهذه القناة بعد.", copy: "اضغط على أمر لنسخه.", copied: "تم نسخ {c}",
-    g_builtin: "الأوامر المدمجة", g_games: "الألعاب", bd_commands: "رابط لهذه الصفحة بكل الأوامر.", bd_title: "يعرض عنوان البث. يغيّره المشرفون بكتابة عنوان جديد بعده.", bd_game: "يعرض اللعبة. يغيّرها المشرفون بكتابة اسم لعبة بعده.", bd_app: "يقول أي برنامج يشغّل هذا البوت.", bd_addcom: "يضيف المشرفون أمرًا جديدًا من الدردشة.", bd_editcom: "يغيّر المشرفون رد أمر من الدردشة.", bd_delcom: "يحذف المشرفون أمرًا من الدردشة.", gd_letters_start: "يبدأ جولة «حروف»: أول من يكتب كلمة من الفئة تبدأ بالحرف المعروض يفوز.", gd_letters_approve: "يقبل المشرفون كلمة لم يعرفها البوت، ويفوز ذلك المشاهد بالجولة.", gd_scramble_start: "يبدأ لعبة «رتّب»: أول من يكتب الكلمة بالترتيب الصحيح يفوز.", gd_shared_wins: "يعرض كم جولة فزت بها.", gd_shared_top: "يرسل رابط لوحة أوائل الألعاب.", gd_emoji_start: "يبدأ «ايموجي»: خمّن الكلمة من الإيموجي؛ أول جواب صحيح يفوز.", gd_reverse_start: "يبدأ «عكس»: كلمة مكتوبة بالعكس؛ أول من يكتبها صح يفوز.", gd_math_start: "يبدأ «احسب»: عملية حسابية سريعة؛ أول جواب صحيح يفوز.", gd_ladder_start: "يبدأ «سلم»: أسرع من يكتب عدة كلمات تبدأ بحرف يفوز.", gd_trivia_start: "يبدأ «سؤال»: سؤال سهل بأربعة خيارات؛ أول جواب صحيح يفوز.", gd_shared_random: "يبدأ جولة من لعبة عشوائية.", bi_who: "مدمج في FQPN's Chat Bot · يستخدمه: {w}", g_everyone: "الجميع", g_subscriber: "المشتركون", g_vip: "VIP", g_moderator: "المشرفون", g_broadcaster: "صاحب القناة",
+    g_builtin: "الأوامر المدمجة", g_games: "الألعاب", bd_commands: "رابط لهذه الصفحة بكل الأوامر.", bd_title: "يعرض عنوان البث. يغيّره المشرفون بكتابة عنوان جديد بعده.", bd_game: "يعرض اللعبة. يغيّرها المشرفون بكتابة اسم لعبة بعده.", bd_app: "يقول أي برنامج يشغّل هذا البوت.", bd_addcom: "يضيف المشرفون أمرًا جديدًا من الدردشة.", bd_editcom: "يغيّر المشرفون رد أمر من الدردشة.", bd_delcom: "يحذف المشرفون أمرًا من الدردشة.", gd_letters_start: "يبدأ جولة «حروف»: أول من يكتب كلمة من الفئة تبدأ بالحرف المعروض يفوز.", gd_letters_approve: "يقبل المشرفون كلمة لم يعرفها البوت، ويفوز ذلك المشاهد بالجولة.", gd_scramble_start: "يبدأ لعبة «رتّب»: أول من يكتب الكلمة بالترتيب الصحيح يفوز.", gd_shared_wins: "يعرض كم جولة فزت بها.", gd_shared_top: "يرسل رابط لوحة أوائل الألعاب.", gd_emoji_start: "يبدأ «ايموجي»: خمّن الكلمة من الإيموجي؛ أول جواب صحيح يفوز.", gd_reverse_start: "يبدأ «عكس»: كلمة مكتوبة بالعكس؛ أول من يكتبها صح يفوز.", gd_math_start: "يبدأ «احسب»: عملية حسابية سريعة؛ أول جواب صحيح يفوز.", gd_ladder_start: "يبدأ «سلم»: أسرع من يكتب عدة كلمات تبدأ بحرف يفوز.", gd_trivia_start: "يبدأ «سؤال»: سؤال سهل؛ أول مشاهد يكتب الجواب الصحيح يفوز.", gd_riddle_start: "يبدأ «لغز»: لغز سهل؛ أول مشاهد يكتب الجواب يفوز.", gd_translate_start: "يبدأ «ترجم»: كلمة للترجمة؛ أول مشاهد يكتبها باللغة الأخرى يفوز.", gd_opposite_start: "يبدأ «ضد»: كلمة؛ أول مشاهد يكتب ضدها يفوز.", gd_oddone_start: "يبدأ «الدخيل»: 4 كلمات؛ أول مشاهد يكتب الكلمة اللي ما تنتمي للباقي يفوز.", gd_shared_random: "يبدأ جولة من لعبة عشوائية.", gd_shared_list: "يعرض أوامر الألعاب المفعّلة.", bi_who: "مدمج في FQPN's Chat Bot · يستخدمه: {w}", g_everyone: "الجميع", g_subscriber: "المشتركون", g_vip: "VIP", g_moderator: "المشرفون", g_broadcaster: "صاحب القناة",
     updated: "آخر تحديث {t}", made: "صُنعت باستخدام FQPN's Chat Bot", lang: "English",
     home_t: "قوائم الأوامر العامة", home_d: "يمكن لصنّاع المحتوى الذين يستخدمون FQPN's Chat Bot مشاركة أوامر الشات هنا. افتح رابطًا مثل {u} لرؤية قائمة القناة.",
     miss_t: "لا توجد قائمة هنا", miss_d: "لا توجد قائمة أوامر عامة لـ {c}. يمكن لصاحب القناة تفعيلها في FQPN's Chat Bot من صفحة الأوامر.",
-    lb_tab: "لوحة صدارة الألعاب", lb_all: "كل الألعاب", wins: "{n} فوز", win1: "فوز واحد", lb_empty: "لا توجد انتصارات بعد.",
+    lb_tab: "لوحة صدارة الألعاب", lb_all: "كل الألعاب", lb_p_all: "من البداية", lb_p_week: "هالأسبوع", lb_p_month: "هالشهر", wins: "{n} فوز", win1: "فوز واحد", lb_empty: "لا توجد انتصارات بعد.",
     players1: "لاعب واحد", players2: "لاعبان", players_few: "{n} لاعبين", players: "{n} لاعبًا",
     ed_t: "تعديل الأوامر", ed_gone_t: "انتهى رابط التعديل هذا", ed_gone_d: "انتهت مدته، أو أُلغي، أو استُبدل برابط جديد. اطلب من صاحب القناة رابطًا وكلمة مرور جديدين.",
     ed_in_t: "سجّل الدخول للتعديل", ed_in_d: "أعطاك صاحب القناة هذا الرابط وكلمة مرور. يظهر اسمك لصاحب القناة بجانب كل تعديل.",
@@ -926,13 +935,13 @@ const TEXT = {
     dl: "تحميل لويندوز", dl_users: "ستريمر يستخدمونه", dl_meta: "الإصدار {v} · {d} · {s} ميغابايت", dl_down: "احصل على أحدث إصدار من GitHub", dl_req: "ويندوز 10 أو 11 · يُثبَّت لحسابك فقط، بدون صلاحيات المسؤول",
     dl_all: "كل الإصدارات وما تغيّر فيها",
     f_t: "ماذا يفعل",
-    f1_t: "الأوامر", f1_d: "بأسماء بديلة ومستويات للمستخدمين وفترات انتظار ومتغيرات مثل \\u2066$(user)\\u2069 و\\u2066$(followage)\\u2069 و\\u2066$(weather city)\\u2069 و\\u2066$(accountage)\\u2069.",
+    f1_t: "الأوامر", f1_d: "بأسماء بديلة ومستويات للمستخدمين وفترات انتظار ومتغيرات مثل \\u2066$(user)\\u2069 و\\u2066$(followage)\\u2069 و\\u2066$(weather city)\\u2069 و\\u2066$(accountage)\\u2069، وعدّادات (الموتات، الانتصارات…) تعدّلها بضغطة.",
     f2_t: "المؤقتات", f2_d: "رسائل بجدول زمني أثناء البث، مثل تذكير بالمتابعة أو بالانضمام للديسكورد.",
     f3_t: "أحداث تويتش", f3_d: "ردود على المتابعة والاشتراكات والإهداءات والغارات وقطار الحماس والـ Bits وسلاسل المشاهدة والتبرعات، مع المجموع.",
     f4_t: "التحيات", f4_d: "ترحيب بمن تختارهم، مرة في كل بث، بكلماتك.",
     f5_t: "قائمة الحظر", f5_d: "أشخاص يتجاهلهم البوت: لا رد على أوامرهم.",
     f6_t: "الإشراف", f6_d: "فلاتر للكلمات السيئة بالعربية والإنجليزية والروابط والأحرف الكبيرة والإيموجي والرموز والسبام، وسجل لما حدث.",
-    f7_t: "الألعاب", f7_d: "خمس ألعاب: «حروف» و«رتب» و«ايموجي» و«عكس» و«احسب»، و«لعبه؟» للعبة عشوائية، مع لوحة الأوائل.",
+    f7_t: "الألعاب", f7_d: "إحدى عشرة لعبة مثل «حروف» و«سؤال» (أسئلة سهلة أو متوسطة أو صعبة) و«الدخيل» و«ترجم»، و«لعبه؟» للعبة عشوائية، و«العاب؟» لقائمتها، مع لوحات الأوائل للأسبوع والشهر ومن البداية.",
     f8_t: "تجربة الدردشة", f8_d: "جرّب كل أمر ولعبة ورد حدث كأي مشاهد، بدون تويتش. مع وصفات أوامر جاهزة.",
     f9_t: "السحوبات", f9_d: "اسحب أحد المتفاعلين، أو دع المشاهدين يشاركون بكلمة، أو يخمّنون رقمًا. حظ للمشتركين وإعادة السحب.",
     f10_t: "قائمة الأوامر العامة", f10_d: "رابط واحد لصفحة فيها كل أوامرك، ومثال على ما يقوله كل أمر، ولوحة أوائل الألعاب.",
@@ -1044,7 +1053,7 @@ ${view.leaderboard ? `<nav class="tabs" id="tabs"><button type="button" class="t
 <p class="hint" data-t="copy">${esc(TEXT.en.copy)}</p>
 <div id="groups"></div>
 <p class="empty" id="none" hidden></p></div>
-${view.leaderboard ? `<div id="pane-lb" hidden><div class="subtabs"><button type="button" class="sub-tab on" data-sub="all" data-t="lb_all">${esc(TEXT.en.lb_all)}</button><button type="button" class="sub-tab" data-sub="l">حروف</button><button type="button" class="sub-tab" data-sub="u">رتب</button><button type="button" class="sub-tab" data-sub="e">ايموجي</button><button type="button" class="sub-tab" data-sub="r">عكس</button><button type="button" class="sub-tab" data-sub="m">احسب</button><button type="button" class="sub-tab" data-sub="s">سلم</button><button type="button" class="sub-tab" data-sub="q">سؤال</button></div><div class="lb" id="lbrows"></div></div>` : ""}
+${view.leaderboard ? `<div id="pane-lb" hidden><div class="subtabs pertabs"><button type="button" class="per-tab on" data-per="" data-t="lb_p_all">${esc(TEXT.en.lb_p_all)}</button><button type="button" class="per-tab" data-per="week" data-t="lb_p_week">${esc(TEXT.en.lb_p_week)}</button><button type="button" class="per-tab" data-per="month" data-t="lb_p_month">${esc(TEXT.en.lb_p_month)}</button></div><div class="subtabs"><button type="button" class="sub-tab on" data-sub="all" data-t="lb_all">${esc(TEXT.en.lb_all)}</button><button type="button" class="sub-tab" data-sub="l">حروف</button><button type="button" class="sub-tab" data-sub="u">رتب</button><button type="button" class="sub-tab" data-sub="e">ايموجي</button><button type="button" class="sub-tab" data-sub="r">عكس</button><button type="button" class="sub-tab" data-sub="m">احسب</button><button type="button" class="sub-tab" data-sub="s">سلم</button><button type="button" class="sub-tab" data-sub="q">سؤال</button><button type="button" class="sub-tab" data-sub="g">لغز</button><button type="button" class="sub-tab" data-sub="t">ترجم</button><button type="button" class="sub-tab" data-sub="o">ضد</button><button type="button" class="sub-tab" data-sub="d">الدخيل</button></div><div class="lb" id="lbrows"></div></div>` : ""}
 <footer class="foot"><span id="updated"></span><span data-t="made">${esc(TEXT.en.made)}</span></footer>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>`;
 }
@@ -1197,6 +1206,7 @@ table.cmp{width:100%;border-collapse:collapse;font-size:15px;min-width:680px}
 .sub-tab{border:1px solid var(--line);background:var(--chip);color:var(--soft);padding:7px 14px;border-radius:8px;font:500 15px 'Outfit','Tajawal',sans-serif;cursor:pointer}
 .sub-tab:hover,.sub-tab:focus-visible{border-color:var(--red2);outline:none}
 .sub-tab.on{border-color:var(--red2);color:var(--text);background:color-mix(in srgb,var(--red2) 15%,transparent)}
+.per-tab{border:1px solid var(--line);background:transparent;color:var(--soft);padding:8px 18px;border-radius:999px;font:600 15px 'Outfit','Tajawal',sans-serif;cursor:pointer}.per-tab:hover,.per-tab:focus-visible{border-color:var(--red2);outline:none}.per-tab.on{background:var(--red2);border-color:var(--red2);color:#fff}
 .lb{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
 .lbrow{display:flex;align-items:center;gap:14px;padding:12px 18px;border-bottom:1px solid var(--line);border-inline-start:3px solid transparent}
 .lbrow:last-child{border-bottom:0}
@@ -1225,7 +1235,7 @@ function toast(msg){var b=$("toast");if(!b)return;b.textContent=msg;b.classList.
 function copy(txt){function done(){toast(t("copied",{c:txt}))}
   try{navigator.clipboard.writeText(txt).then(done,function(){fallback()})}catch(e){fallback()}
   function fallback(){var a=document.createElement("textarea");a.value=txt;a.setAttribute("readonly","");a.style.position="fixed";a.style.opacity="0";document.body.appendChild(a);a.select();try{document.execCommand("copy");done()}catch(e){}a.remove()}}
-var cur="cmds",shownPlayers=0,sub="all";
+var cur="cmds",shownPlayers=0,sub="all",per=(function(){try{var p=new URLSearchParams(location.search).get("p");return p==="week"||p==="month"?p:""}catch(e){return ""}})();
 function ownCount(){return D.commands.filter(function(c){return !c.builtin&&!c.game}).length}
 function setCount(){
   if(!$("count")||!D)return;
@@ -1233,14 +1243,15 @@ function setCount(){
   $("count").textContent=k===1?t(p+"1"):k===2?t(p+"2"):(m>=3&&m<=10)?t(p+"_few",{n:k}):t(p,{n:k})}
 function drawLb(){
   var box=$("lbrows");if(!box||!D||!D.leaderboard)return;box.textContent="";
-  var rows=(D.leaderboard[sub]||[]).filter(function(r){return r&&r.w>0}).slice(0,10);
+  var board=per?(D.leaderboard[per]||{}):D.leaderboard;     // 1.15.0: all time / this week / this month
+  var rows=(board[sub]||[]).filter(function(r){return r&&r.w>0}).slice(0,10);
   shownPlayers=rows.length;setCount();
   if(!rows.length){var e=document.createElement("p");e.className="empty";e.textContent=t("lb_empty");box.appendChild(e);return}
   rows.forEach(function(r,i){
     var row=document.createElement("div");row.className="lbrow";
     var rk=document.createElement("span");rk.className="rk";rk.textContent=String(i+1);
     var nm=document.createElement("div");nm.className="nm";var b=document.createElement("bdi");b.textContent=r.n;nm.appendChild(b);
-    if(sub==="all"){var s=document.createElement("small");s.textContent=[["l","حروف"],["u","رتب"],["e","ايموجي"],["r","عكس"],["m","احسب"],["s","سلم"],["q","سؤال"]].filter(function(g){return r[g[0]]}).map(function(g){return g[1]+" "+r[g[0]]}).join(" · ");nm.appendChild(s)}
+    if(sub==="all"){var s=document.createElement("small");s.textContent=[["l","حروف"],["u","رتب"],["e","ايموجي"],["r","عكس"],["m","احسب"],["s","سلم"],["q","سؤال"],["g","لغز"],["t","ترجم"],["o","ضد"],["d","الدخيل"]].filter(function(g){return r[g[0]]}).map(function(g){return g[1]+" "+r[g[0]]}).join(" · ");nm.appendChild(s)}
     var w=document.createElement("span");w.className="wn";w.textContent=r.w===1?t("win1"):t("wins",{n:r.w});
     row.appendChild(rk);row.appendChild(nm);row.appendChild(w);box.appendChild(row)})}
 function showTab(tab){
@@ -1284,6 +1295,7 @@ document.querySelectorAll("img.av").forEach(function(im){function swap(){var m=d
 if($("tabs")){
   document.querySelectorAll(".tab").forEach(function(x){x.addEventListener("click",function(){showTab(x.getAttribute("data-tab"))})});
   document.querySelectorAll(".sub-tab").forEach(function(x){x.addEventListener("click",function(){sub=x.getAttribute("data-sub");document.querySelectorAll(".sub-tab").forEach(function(y){y.classList.toggle("on",y===x)});drawLb()})});
+  document.querySelectorAll(".per-tab").forEach(function(x){x.classList.toggle("on",x.getAttribute("data-per")===per);x.addEventListener("click",function(){per=x.getAttribute("data-per");document.querySelectorAll(".per-tab").forEach(function(y){y.classList.toggle("on",y===x)});drawLb()})});
   if(D&&D.tab==="lb")showTab("lb");
 }
 apply();

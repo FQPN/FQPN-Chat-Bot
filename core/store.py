@@ -23,7 +23,7 @@ GUARDED = {
     "commands": lambda d: len(d) if isinstance(d, dict) else 0,
     "timers": lambda d: len(d) if isinstance(d, list) else 0,
     "greetings": lambda d: len((d or {}).get("users") or []) if isinstance(d, dict) else 0,
-    "blocklist": lambda d: len((d or {}).get("users") or []) if isinstance(d, dict) else 0,
+    "blocklist": lambda d: len((d or {}).get("users") or []) if isinstance(d, dict) else 0,      # (1.15.0: timed blocks end on their own, so they never count here)
 }
 
 
@@ -79,9 +79,10 @@ DEFAULTS = {
             "message": "Don't forget to follow!",
             "interval_minutes": 20,
             "enabled": False,
+            "min_lines": 2,
         }
     ],
-    "blocklist": {"users": [], "words": []},
+    "blocklist": {"users": [], "words": [], "timed": []},      # 1.15.0: timed = [{user, from, until}]
     "settings": {
         "only_when_live": True,
         "paused": False,
@@ -90,6 +91,8 @@ DEFAULTS = {
         "commands_url": "",
         "disabled_builtins": [],   # built-in commands switched off in Commands > Built-in
         "separate_bot": False,     # the bot talks from its own Twitch account (Settings > Bot > Chat account)
+        # 1.15.0 (owner): which kinds of messages that bot account sends (the rest come from your own account)
+        "bot_sends": ["commands", "games", "timers", "events", "greetings", "stream", "giveaways", "warnings"],
         "public_examples": True,      # 1.13.0: the public page shows a short example of each command's reply
         "public_leaderboard": True,   # 1.13.0: the games leaderboard on the public page too (viewers' names + wins)
         "public_list": True,       # keep a public copy of the command list on the website (Commands > Public list). On for NEW
@@ -149,6 +152,7 @@ DEFAULTS = {
     "greetings": {"enabled": True, "users": []},   # people to greet, each with one or more messages
     "greeted": {"session": "", "users": [], "last": {}},   # who was already greeted during the current stream
     "counters": {},
+    "counter_meta": {},                     # 1.15.0 (owner): each counter's last change, for the Counters page
     "chat_stats": {},                       # 1.14.0: Dashboard > Stream stats (core/chatstats.py), kept by the app
 }
 
@@ -182,6 +186,8 @@ class Store:
         self._migrate_blocked_words()
         self._migrate_games()
         self._migrate_publist_on()
+        self._migrate_timer_lines()
+        self._migrate_games_everyone()
         # the activity shown on the Logs page, saved so it survives a restart
         self.activity = ActivityLog(self.dir / "activity.jsonl", days_fn=lambda: self.get("prefs").get("log_days", 30))
 
@@ -251,6 +257,47 @@ class Store:
             self.save("publist_state", ps)
         except Exception:
             log.exception("Could not switch the public command list on")
+
+    def _migrate_games_everyone(self) -> None:
+        """1.15.0, once per channel (the owner's choice): every mini game can be started by everyone. Marked in
+        publist_state (like on_114), so a streamer who sets a game back to moderators afterwards keeps it that way."""
+        try:
+            ps = dict(self.get("publist_state") or {})
+            if ps.get("games_everyone_115"):
+                return
+            games = copy.deepcopy(self.get("games"))
+            changed = False
+            for k in minigames.GAME_KEYS:
+                g = games.get(k) if isinstance(games, dict) else None
+                if isinstance(g, dict) and g.get("who_starts") != "everyone":
+                    g["who_starts"] = "everyone"
+                    changed = True
+            if changed:
+                self.save("games", games)
+            ps["games_everyone_115"] = True
+            self.save("publist_state", ps)
+        except Exception:
+            log.exception("Could not let everyone start the mini games")
+
+    def _migrate_timer_lines(self) -> None:
+        """1.15.0, once per channel: every timer with Chat lines off gets 2 (the new default, the owner's choice).
+        Marked in publist_state (like on_114), so a streamer who sets one back to off afterwards keeps it off."""
+        try:
+            ps = dict(self.get("publist_state") or {})
+            if ps.get("timer_lines_115"):
+                return
+            timers = copy.deepcopy(self.get("timers"))
+            changed = False
+            for t in timers if isinstance(timers, list) else []:
+                if isinstance(t, dict) and not t.get("min_lines"):
+                    t["min_lines"] = 2
+                    changed = True
+            if changed:
+                self.save("timers", timers)
+            ps["timer_lines_115"] = True
+            self.save("publist_state", ps)
+        except Exception:
+            log.exception("Could not set the timers' chat lines to 2")
 
     def _migrate_games(self) -> None:
         """1.9.0 added «رتب»: a game missing from games.json gets its default settings (switched off), and saved wins

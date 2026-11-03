@@ -323,6 +323,7 @@ class Context:
     account_created: Callable[[str | None], Awaitable[datetime | None]] | None = None   # (a login, or None = the viewer)
     random_chatter: Callable[[], str] | None = None      # someone who wrote in chat lately
     followers: Callable[[], Awaitable[int | None]] | None = None
+    clip: Callable[[], Awaitable[tuple]] | None = None        # 1.15.0 $(clip): (link, None) or (None, why)
     first_streak: Callable[[], int] | None = None         # how many streams in a row this viewer was first (Pin first message)
     first_peak: Callable[[], int] | None = None           # 1.14.0: this viewer's best streak ever ($(firststreakpeak))
     followed_of: Callable | None = None                   # 1.14.0: $(followage name): (account exists, followed at | None)
@@ -454,6 +455,19 @@ async def expand(template: str, ctx: Context) -> str:
             return follow_age(when, lang=ctx.lang)
         if key == "random.chatter":
             return (ctx.random_chatter() if ctx.random_chatter else "") or ctx.user
+        if key == "clip":                  # 1.15.0 (owner): makes a Twitch clip of the last moments and gives its link
+            try:
+                link, why = await ctx.clip() if ctx.clip else (None, "failed")
+            except Exception:
+                log.exception("$(clip) failed")
+                link, why = None, "failed"
+            if link:
+                return link
+            ar = ctx.lang == "ar"
+            return {"offline": "(الكليب يشتغل وقت البث بس)" if ar else "(clips only work while you're live)",
+                    "reconnect": "(الكليب يحتاج إعادة ربط تويتش مرة وحدة من قائمة الحساب)" if ar else "(clips need Twitch reconnected once: account menu)",
+                    "busy": "(تويتش يقول: كليبات كثير، جرّب بعد شوي)" if ar else "(Twitch says: too many clips, try again soon)"}.get(
+                why, "(ما قدرت أسوي الكليب)" if ar else "(the clip couldn't be made)")
         if key == "followers":
             try:
                 n = await ctx.followers() if ctx.followers else None
