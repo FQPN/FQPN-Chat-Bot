@@ -176,7 +176,7 @@ def apply(store, change: dict):
         clash = dashboard.game_command_clash(store.get("games"), clean)
         if clash:
             return False, clash
-        store.save("commands", clean)
+        store.save("commands", clean, by=_by(change))
     except Exception as e:                    # ValidationError (the reason), or the empty-list guard
         return False, str(e)
     try:
@@ -184,6 +184,12 @@ def apply(store, change: dict):
     except Exception:
         pass
     return True, ""
+
+
+def _by(change: dict) -> str:
+    """1.16.0 Command history: who changed it through the editor link."""
+    who = " ".join(str(change.get("editor") or "").split())[:30]
+    return f"{who} (editor link)" if who else "editor link"
 
 
 def apply_put(store, change: dict):
@@ -210,7 +216,7 @@ def apply_put(store, change: dict):
             clash = dashboard.game_command_clash(clean if section == "games" else store.get("games"), clean if section == "commands" else store.get("commands"))
             if clash:
                 return False, clash
-        store.save(section, clean)
+        store.save(section, clean, **({"by": _by(change)} if section == "commands" else {}))
     except Exception as e:
         return False, str(e)
     try:

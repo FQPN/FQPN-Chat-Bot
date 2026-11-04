@@ -30,10 +30,37 @@ def _key(name: str) -> str:
 
 
 def note(store, name: str, how: str, by: str) -> None:
-    """Remembers a counter's last change: how = "+1" / "-1" / "set" / "reset" / "new", by = "chat" / "you"."""
+    """Remembers a counter's last change: how = "+1" / "-1" / "set" / "reset" / "new", by = "chat" / "you", or who reset
+    it from chat (1.16.0: "sami (mod)")."""
     meta = dict(store.get("counter_meta") or {})
     meta[name] = {"at": int(time.time()), "how": how, "by": by}
     store.save("counter_meta", meta)
+
+
+_PLAIN = re.compile(r"\$\(count\s*\)", re.I)
+
+
+def reset_from_chat(store, owner: str, cmd: dict, by: str) -> list:
+    """1.16.0 (owner): "!deaths reset" from a mod: every counter in this command's reply goes back to 0.
+    Returns the counters reset (a plain $(count), the command's own counter, is "#"); [] = the reply has no counter."""
+    resp = str((cmd or {}).get("response") or "")
+    names = []
+    for _, arg in _USE.findall(resp):
+        n = norm(arg)
+        if n and n not in names:
+            names.append(n)
+    plain = bool(_PLAIN.search(resp))
+    if not names and not plain:
+        return []
+    counters = dict(store.get("counters") or {})
+    for n in names:
+        counters[_key(n)] = 0
+    if plain:
+        counters[f"cmd:{owner}"] = 0
+    store.save("counters", counters)
+    for n in names:
+        note(store, n, "reset", by)
+    return names + (["#"] if plain else [])
 
 
 def uses(commands: dict) -> dict:

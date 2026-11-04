@@ -1170,10 +1170,39 @@ class TwitchBot(commands.Bot):
         if ask and "app" not in (self.store.get("settings").get("disabled_builtins") or []) and not self._on_cooldown("builtin:app", 60):
             await self._send(self._bt(f"Chatbot app: {publiclist.SITE}"), payload, why="cmd:" + text)
 
+    @staticmethod
+    def _who(user: str, level: int) -> str:
+        """1.16.0: how a chat change is signed on the page: "sami (mod)", "fqpn_ (streamer)"."""
+        return f"{user} ({'streamer' if level >= 4 else 'mod' if level >= 3 else 'chat'})"
+
+    async def _chat_reset(self, payload, owner, cmd, rest, user, level) -> bool:
+        """1.16.0 (owner): "!deaths reset" from a mod puts the command's counters back to 0. False = not a reset (the
+        command answers as usual: a viewer typing it, the switch off, or a command with no counter)."""
+        if str(rest or "").strip().casefold() != "reset":
+            return False
+        st = self.store.get("settings") or {}
+        if st.get("chat_reset", True) is False:
+            return False
+        need = 4 if st.get("chat_reset_who") == "broadcaster" else 3
+        if level < need:
+            return False
+        names = counters_mod.reset_from_chat(self.store, owner, cmd, self._who(user, level))
+        if not names:
+            return False
+        shown = [n if n != "#" else owner for n in names]
+        self._log_activity("manage", f"Counter reset: {', '.join(shown)} ({owner} reset)", user)
+        await self._send(self._bt(f"🔄 {', '.join(shown)} {'is' if len(shown) == 1 else 'are'} back to 0"), payload)
+        return True
+
     async def _custom(self, payload, owner, rest, user, level) -> None:
         cmd = self.store.get("commands").get(owner)
         if not cmd or not cmd.get("enabled", True):
             return
+        try:
+            if await self._chat_reset(payload, owner, cmd, rest, user, level):
+                return      # (before the cooldown and the command's own user level: a mod's reset always works)
+        except Exception:
+            log.exception("Counter reset from chat failed")
         if level < PERMISSION_LEVELS.get(manage.effective_permission(cmd), 0):
             return          # (a shortcut always needs a moderator or the broadcaster)
         if self._on_cooldown(f"cmd:{owner}", cmd.get("cooldown", 0)):
@@ -1672,7 +1701,7 @@ class TwitchBot(commands.Bot):
         except CommandError as e:
             await self._send(self._bt(f"@{user} {e}"), payload)
             return
-        self.store.save("commands", work)
+        self.store.save("commands", work, by=self._who(user, level))      # 1.16.0: "sami (mod)" in Command history
         self._log_activity("manage", msg, user)
         await self._send(self._bt(f"@{user} {msg}"), payload)
 

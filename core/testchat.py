@@ -64,7 +64,7 @@ class SandboxStore:
             return data
         return copy.deepcopy(self.mem[name] if name in self.mem else self.real.get(name))
 
-    def save(self, name, data, allow_empty=False):
+    def save(self, name, data, allow_empty=False, by="you"):
         if name == "commands":
             real = self.real.get(name) or {}
             data = {k: v for k, v in (data or {}).items() if not (self.temp and k in self.temp)}

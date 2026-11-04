@@ -98,6 +98,8 @@ DEFAULTS = {
         "public_list": True,       # keep a public copy of the command list on the website (Commands > Public list). On for NEW
                                    # installs since 1.10.0; existing settings files keep their value (missing = off)
         "public_hidden": [],       # command names left off the public list (kept here so the commands themselves don't change)
+        "chat_reset": True,        # 1.16.0 (owner): mods can reset a command's counters from chat ("!deaths reset")
+        "chat_reset_who": "moderator",   # who can: "moderator" (mods and the streamer) or "broadcaster" (the streamer only)
     },
     "prefs": {   # how the installed app behaves (Settings > App, Notifications, Logs and data)
         "startup": False,          # start with Windows
@@ -153,6 +155,7 @@ DEFAULTS = {
     "greeted": {"session": "", "users": [], "last": {}},   # who was already greeted during the current stream
     "counters": {},
     "counter_meta": {},                     # 1.15.0 (owner): each counter's last change, for the Counters page
+    "command_history": [],                  # 1.16.0 (owner): every change to a command, for History and Undo (core/cmdhistory.py)
     "chat_stats": {},                       # 1.14.0: Dashboard > Stream stats (core/chatstats.py), kept by the app
 }
 
@@ -360,7 +363,7 @@ class Store:
                 new[full] = c
                 if f"cmd:{name}" in counters:
                     counters[f"cmd:{full}"] = counters.pop(f"cmd:{name}")
-            self.save("commands", new)
+            self.save("commands", new, by="")
             self.save("counters", counters)
         self.save("settings", settings)
 
@@ -390,14 +393,33 @@ class Store:
         self._cache[name] = (mtime, data)
         return data
 
-    def save(self, name: str, data, allow_empty: bool = False) -> None:
+    def save(self, name: str, data, allow_empty: bool = False, by: str = "you") -> None:
+        """by (commands only, 1.16.0): who made the change, for Command history ("you", "sami (mod)", ...; "" = not kept)."""
         count = GUARDED.get(name)
         if count is not None and not allow_empty and count(data) == 0:
             status, old = safefile.read(self._path(name))
             if status == "ok" and count(old) >= EMPTY_GUARD_MIN:
                 log.error("Refused to save an empty %s over %d entries", name, count(old))
                 raise EmptySaveRefused(f"Refused to replace {count(old)} saved {name} with an empty list.")
+        before = None
+        if name == "commands" and by:
+            status, before = safefile.read(self._path(name))
+            before = before if status == "ok" and isinstance(before, dict) else None
         safefile.write(self._path(name), data)
+        if before is not None:
+            try:
+                from . import cmdhistory
+                cmdhistory.record(self, before, data, by)
+            except Exception:
+                log.exception("Could not keep the command history")
+        self._finish_save(name)
+
+    def save_raw(self, name: str, data) -> None:
+        """A save with no guard and no history (the history file itself)."""
+        safefile.write(self._path(name), data)
+        self._finish_save(name)
+
+    def _finish_save(self, name: str) -> None:
         self.problems.pop(name, None) if self.problems.get(name, {}).get("what") == "damaged" else None
         self._cache.pop(name, None)
         self.rev = getattr(self, "rev", 0) + 1

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.16.0
+
+- Command history: every change to a command is kept: from the app, from mods in chat (!cmadd, !cmedit, !cmdel), the editor link or a backup restore, with who did it and when. Commands > History (or History in a command's edit window) shows what changed (before and after) and undoes it; a deleted command comes back with Bring back. The last 300 changes are kept.
+- Undo: right after you save or delete a command, an Undo button shows at the bottom for 8 seconds.
+- Counters: mods can reset counters from chat with the command + reset, like !deaths reset. It works with any command whose reply uses a counter ($(count name), $(getcount name) or $(count)), whatever its name or language, and resets every counter in that reply. Viewers who type it get the normal reply; the cooldown never blocks a mod's reset; it shows in Logs. In Commands > Counters: a switch (on by default) and who can reset (moderators and the streamer, or the streamer only); each counter shows its reset command, and Last change says who reset it ("reset by sami (mod)").
+- Tutorial: 2 more steps (History, Reset from chat).
+- Fewer antivirus false alarms: the program is no longer compressed with UPX, it has Windows version info (Properties > Details: FQPN, FQPN's Chat Bot, the version, copyright), and the GitHub build compiles its own PyInstaller bootloader instead of the shared ready-made one. The version comes from one place: the release tag.
+- The program is now FQPNsChatBot.exe (it was FQPN'sChatBot.exe: an apostrophe in a program's name can trip up scripts and shortcuts). Updating removes the old one, makes the Start menu shortcut again and points an existing desktop shortcut and "Start with Windows" at the new name. A shortcut pinned to the taskbar by hand needs pinning again once.
+
   ## 1.15.0
 
 - Four new mini games, so there are 11: «الدخيل» (odd one out: 4 words, 3 belong together; write the one that doesn't. Easy = clearly different groups, Hard = close ones; writing one of the other three locks you out of that round, and the winner's message says what the other three have in common), «ضد» (write the opposite word: about 130 pairs, Easy = everyday words, Hard = harder ones; every fair opposite counts), «لغز» (about 90 easy Arabic riddles, every fair answer counts, a hint halfway, 45 seconds) and «ترجم» (translate a word: Easy or Hard, the direction is random every round, or always English → Arabic or Arabic → English; every fair translation counts). Each has a hint halfway and its own leaderboard tab on the commands page.

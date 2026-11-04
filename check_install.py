@@ -47,7 +47,8 @@ NEW_IN = {
     "core/updater.py": ["NUDGE_GAP", "If-None-Match", "def nudge", "def announce"],
     "core/publiclist.py": ["class Syncer", "SITE =", "def build", "effective_permission", "def game_rows", "def example"],
     "core/dashboard.py": ['"prefs"', "updater", "/api/update/check", "/api/show", "disabled_builtins", "bind_first_free", "/api/botaccount/connect", "restart_bot", "/api/donations/", "tourDone", "gsDone", "/api/restart", "health_info", "The stream messages are invalid", "publist_info", "/api/publist/sync", "unknown reply type", "/api/update/nudge", "wnSeen", "section == \"moderation\"", "/api/dev/users", "/api/dev/ban", "bot.game_view()", "support_send", "channels_info", "bots_info", "def _pin_command", "/api/test/{action}", "/api/giveaway/{action}", "/api/titlebar"],
-    "core/counters.py": ["def act", "def view", "class CounterError"],      # 1.15.0: Counters
+    "core/counters.py": ["def act", "def view", "class CounterError", "def reset_from_chat"],      # 1.15.0: Counters (1.16.0: reset from chat)
+    "core/cmdhistory.py": ["def record", "def undo", "MAX_ENTRIES"],        # 1.16.0: Command history and undo
     "core/oddone_ar.py": ["RELATED", "HARD ="],                            # 1.15.0: «الدخيل»
     "core/desktop.py": ["quit_app", "show_window"],
     "core/dashboard.html": ["data-pref", "spane-app", "updbtn", "toggleBuiltin", "transform-origin:15px 7px", 'class="sep"', "BNAME", "upop_title", "bac-cards", "botBanner", "dcards", "navActive", "ngrp", "startTour", "tourBtn", "v-greetings", "v-botaccount", "v-donations", "renderAccountMenu", "healthBanner", "renderStream", "renderPublist", "plmodal", "st_msg_on", "applyType", "mtype", "nudgeUpdate", "tr20_t", "usenote", "stmaster", "renderModeration", "mfmodal", "renderUsers", "appoff", "logtabs", "modRow", "botRow", "devgrp", "uspill", "renderMinigames", "mgmodal", "hl_heal_login", "tr22_t", "wnmodal", "wnCheck", "cmdSort", "cpager", "mgtabs", "mgLive", "v-support", "supSend", "chsw", "bamulti", "WNTOUR", "pinblock", "mreplyrow", "VGRP", "v-testchat", "TCREC", "v-giveaways", "gwChain"],
@@ -61,7 +62,7 @@ OLD_IN = {"core/dashboard.html": ["animation:tick", "transform-origin:0.75rem"],
 ROOT_FILES = ["launcher.py", "main.py", "check_install.py", "installer.iss", "requirements.txt", "README.md", "CHANGELOG.md",
               "RELEASING.md", "TwitchChatBot.spec", "icon.ico", "run.bat", "update.bat", "build.bat"]
 CORE_FILES = ["auth.py", "bot.py", "dashboard.py", "dashboard.html", "store.py", "manage.py", "variables.py", "greetings.py",
-              "events.py", "version.py", "activity.py", "notify.py", "desktop.py", "updater.py", "winpos.py", "support.py", "accounts.py", "safefile.py", "botsender.py", "editor.py", "pinfirst.py", "world.py", "testchat.py", "giveaway.py", "titlebar.py", "netfix.py", "gamewords_easy.py", "backup.py", "perfmon.py", "chatstats.py", "trivia_ar.py", "riddles_ar.py", "translate_words.py", "opposites_ar.py", "blocks.py", "botsay.py", "gamesearch.py", "oddone_ar.py", "counters.py"]
+              "events.py", "version.py", "activity.py", "notify.py", "desktop.py", "updater.py", "winpos.py", "support.py", "accounts.py", "safefile.py", "botsender.py", "editor.py", "pinfirst.py", "world.py", "testchat.py", "giveaway.py", "titlebar.py", "netfix.py", "gamewords_easy.py", "backup.py", "perfmon.py", "chatstats.py", "trivia_ar.py", "riddles_ar.py", "translate_words.py", "opposites_ar.py", "blocks.py", "botsay.py", "gamesearch.py", "oddone_ar.py", "counters.py", "cmdhistory.py"]
 
 
 def ok(text):

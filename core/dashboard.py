@@ -17,7 +17,7 @@ from pathlib import Path
 import aiohttp
 from aiohttp import web
 
-from . import accounts, auth, botauth, counters as counters_mod, desktop, editor, events, greetings, manage, minigames, moderation, notify, pinfirst, publiclist, support, updater, blocks
+from . import accounts, auth, botauth, cmdhistory, counters as counters_mod, desktop, editor, events, greetings, manage, minigames, moderation, notify, pinfirst, publiclist, support, updater, blocks
 from .store import EmptySaveRefused, Store
 
 log = logging.getLogger("twitchbot.dashboard")
@@ -616,6 +616,8 @@ def validate(section: str, data, prefix: str = "!"):
             "public_leaderboard": _bool(data.get("public_leaderboard", True), "Games leaderboard on the public page"),
             "public_examples": _bool(data.get("public_examples", True), "Show what each command says on the public page"),
             "public_hidden": hidden_clean,
+            "chat_reset": _bool(data.get("chat_reset", True), "Mods can reset counters from chat"),     # 1.16.0 (owner)
+            "chat_reset_who": "broadcaster" if data.get("chat_reset_who") == "broadcaster" else "moderator",
         }
 
     if section == "stream":
@@ -1281,6 +1283,33 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             return web.json_response({"error": str(e)}, status=400)
         return web.json_response({"counters": counters_mod.view(store), "made": made or []})
 
+    async def history_view(request):
+        """1.16.0 (owner): Command history: every change to a command, newest first (?name= for one command)."""
+        return web.json_response({"history": cmdhistory.view(store, request.query.get("name", ""))})
+
+    async def history_undo(request):
+        """1.16.0 (owner): undo one change from the history (id), or the newest change of a command (name: the page's
+        Undo button right after a save or a delete)."""
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        body = body if isinstance(body, dict) else {}
+        eid = body.get("id")
+        if eid is None and body.get("name"):
+            e = cmdhistory.last_for(store, str(body.get("name")))
+            eid = e.get("id") if e else None
+        try:
+            name = cmdhistory.undo(store, eid, lambda c: validate("commands", c),
+                                   lambda c: game_command_clash(store.get("games"), c))
+        except (cmdhistory.UndoError, ValidationError, manage.CommandError) as e:
+            return web.json_response({"error": str(e)}, status=400)
+        except EmptySaveRefused as e:
+            return web.json_response({"error": str(e)}, status=400)
+        if state.get("publist_wake") is not None:
+            state["publist_wake"].set()
+        return web.json_response({"ok": True, "name": name, "commands": store.get("commands")})
+
     async def giveaway_action(request):
         """1.13.0 Giveaways: settings, start, close, draw (and reroll), remove an entry, clear."""
         from . import giveaway as G
@@ -1580,6 +1609,8 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
     app.router.add_post("/api/titlebar", titlebar_set)      # 1.13.0: the window's top bar in the app's colors
     app.router.add_post("/api/giveaway/{action}", giveaway_action)
     app.router.add_post("/api/counters/{action}", counter_action)      # 1.15.0 (owner)
+    app.router.add_get("/api/history", history_view)                   # 1.16.0 (owner): Command history and undo
+    app.router.add_post("/api/history/undo", history_undo)
     app.router.add_post("/api/channels/{action}", channel_action)
     app.router.add_post("/api/editor/{action}", editor_action)
     app.router.add_get("/api/bots", bots_get)

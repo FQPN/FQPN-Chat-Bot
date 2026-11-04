@@ -38,6 +38,8 @@ AR = [
     (r"(@\S+ )?Nothing to change\. Give a new response or options\.", r"\1لا يوجد ما يتغير. اكتب ردًا جديدًا أو خيارات."),
     (r"(@\S+ )?Usage: !cmdel name", r"\1الطريقة: !cmdel الاسم"),
     (r"(@\S+ )?(\S+) is a mini game command\. Choose another name\.", r"\1«\2» أمر لعبة. اختر اسمًا آخر."),
+    (r"🔄 (.+) is back to 0", r"🔄 \1 رجع 0"),                    # 1.16.0: "!deaths reset" from a mod
+    (r"🔄 (.+) are back to 0", r"🔄 \1 رجعت 0"),
 ]
 _AR = [(re.compile(p + r"\Z", re.S), r) for p, r in AR]
 

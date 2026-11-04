@@ -9,7 +9,7 @@ You never build the installer by hand. GitHub builds it for you on a Windows mac
    git tag v1.0.1
    git push origin v1.0.1
    ```
-4. Open the **Actions** tab of your repository. A run called **Build installer** starts. It takes about 5 minutes.
+4. Open the **Actions** tab of your repository. A run called **Build installer** starts. It takes about 7 minutes (it compiles its own PyInstaller bootloader first, which means fewer antivirus false alarms). If that compile ever fails, the run still finishes with the normal bootloader and shows a yellow warning.
 5. When it turns green, open **Releases**: the new `FQPN-Chat-Bot-Setup-1.0.1.exe` is there for everyone to download.
 
 To try a build without publishing a version, open **Actions → Build installer → Run workflow**.

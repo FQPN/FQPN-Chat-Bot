@@ -101,7 +101,7 @@ def restore(store, backup: dict, validate, apply_side_effects=None) -> dict:
             else:
                 data = validate(name, raw)
             old = store.get(name)
-            store.save(name, data, allow_empty=True)
+            store.save(name, data, allow_empty=True, **({"by": "backup restore"} if name == "commands" else {}))
             if apply_side_effects:
                 apply_side_effects(name, old, data)
             done.append(name)

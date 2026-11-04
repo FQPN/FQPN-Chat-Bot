@@ -19,6 +19,8 @@ jobs:
         with:
           python-version: "3.13"
 
+      # The version comes from ONE place: the tag (v1.16.0). It goes into core/version.py (the app and the exe's
+      # Properties read it from there) and into Setup.exe. NUMBER is the same version as four plain numbers (1.16.0.0).
       - name: Work out the version number
         shell: bash
         run: |
@@ -27,14 +29,35 @@ jobs:
           else
             echo "VERSION=0.0.0-test" >> "$GITHUB_ENV"
           fi
+          V="${GITHUB_REF_NAME#v}"; [[ "$GITHUB_REF" == refs/tags/v* ]] || V="0.0.0"
+          IFS=. read -r A B C _ <<< "${V%%-*}"
+          echo "NUMBER=$((10#${A:-0})).$((10#${B:-0})).$((10#${C:-0})).0" >> "$GITHUB_ENV"
 
       # The app reads its own version from this file to know when a newer release exists.
       - name: Put the version number into the app
         shell: bash
         run: printf 'VERSION = "%s"\n' "$VERSION" > core/version.py
 
-      - name: Install the bot's libraries and PyInstaller
-        run: pip install -r requirements.txt pyinstaller
+      - name: Install the bot's libraries
+        run: pip install -r requirements.txt
+
+      # Fewer antivirus false alarms: PyInstaller's "starter" (bootloader) is compiled here, on this build machine,
+      # instead of using the ready-made one that every PyInstaller program in the world shares (antivirus programs
+      # sometimes flag that one because of other people's programs). The machine already has the C compiler it needs.
+      - name: Install PyInstaller with its own freshly built bootloader
+        id: bootloader
+        continue-on-error: true
+        shell: cmd
+        env:
+          PYINSTALLER_COMPILE_BOOTLOADER: "1"
+        run: pip install --no-binary pyinstaller pyinstaller==6.22.3
+
+      # If compiling the bootloader failed, the build still works with the normal PyInstaller (and says so).
+      - name: Fall back to the normal PyInstaller
+        if: steps.bootloader.outcome == 'failure'
+        run: |
+          echo "::warning::The bootloader could not be compiled: this build uses PyInstaller's ready-made one."
+          pip install --force-reinstall pyinstaller==6.22.3
 
       - name: Build the program folder
         run: pyinstaller TwitchChatBot.spec --noconfirm
@@ -44,7 +67,7 @@ jobs:
 
       - name: Build Setup.exe
         shell: cmd
-        run: '"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=%VERSION% installer.iss'
+        run: '"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=%VERSION% /DAppNumber=%NUMBER% installer.iss'
 
       # Microsoft Store package: only built once the three Store values exist as repository variables
       # (Settings > Secrets and variables > Actions > Variables). See MICROSOFT-STORE.md.
