@@ -147,6 +147,12 @@ DEFAULTS = {
             {"min": 100, "response": "{user} JUST DROPPED {bits} BITS! \U0001f525 (( {total} Bits so far ))"},
             {"min": 500, "response": "{user} WITH {bits} BITS!!! \U0001f6a8 (( {total} Bits in total ))"},
             {"min": 1000, "response": "{bits} BITS?! {user}, THAT'S ABSOLUTE MADNESS! \U0001f525\U0001f525\U0001f525 (( {total} Bits so far ))"}]},
+        "falkorie_level": {"enabled": True, "tiers": [   # 1.17.1: when the Falkorie bot says someone reached a new level ({level})
+            {"min": 1, "response": "Huge level {level}, {user}"},
+            {"min": 10, "response": "Level {level} already, {user}? Huge"}]},
+        "falkorie_streak": {"enabled": True, "tiers": [  # 1.17.1: when the Falkorie bot shows someone's streak (also its !streak answer)
+            {"min": 1, "response": "{streak} in a row, {user}! Thank you for being here"},
+            {"min": 50, "response": "{streak} STREAMS IN A ROW?! {user} never misses one"}]},
         "donation": {"enabled": False, "tiers": [      # replies by amount (in the donation's own currency); {total} = all they gave in it
             {"min": 0, "response": "Thank you {user} for the {amount} {currency} donation! \u2764\ufe0f (( {total} {currency} in total ))"},
             {"min": 50, "response": "WOW! {user} donated {amount} {currency}! You are amazing! \U0001f525 (( {total} {currency} in total ))"}]},
@@ -163,7 +169,7 @@ DEFAULTS = {
 
 # 1.13.0: the event replies as they came before {total} existed. A reply list still EXACTLY like this was never touched by
 # the user, so it gets the new texts; anything the user changed stays as they wrote it.
-OLD_EVENT_TEXTS = {"subscription": [{"min": 1, "response": "THANK YOU FOR THE SUB, {user}! 🔥"}], "gift_sub": [{"min": 1, "response": "{user} gifted a sub! THANK YOU! ❤️"}, {"min": 5, "response": "{gifts} SUBS?! THANK YOU {user}! 🔥"}, {"min": 10, "response": "{gifts} GIFTED SUBS FROM {user}!!! 🔥🔥"}, {"min": 25, "response": "{user} JUST GIFTED {gifts} SUBS!!! ABSOLUTE LEGEND! 🚨🔥"}], "bits": [{"min": 1, "response": "Thanks for the Bits, {user}! ❤️"}, {"min": 100, "response": "{user} JUST DROPPED {bits} BITS! 🔥"}, {"min": 500, "response": "{user} WITH {bits} BITS!!! 🚨"}, {"min": 1000, "response": "{user} JUST DROPPED {bits} BITS!!! ABSOLUTE MADNESS! 🔥🔥🔥"}], "donation": [{"min": 0, "response": "Thank you {user} for the {amount} {currency} donation! ❤️"}, {"min": 50, "response": "WOW! {user} donated {amount} {currency}! You are amazing! 🔥"}]}
+OLD_EVENT_TEXTS = {"subscription": [{"min": 1, "response": "THANK YOU FOR THE SUB, {user}! 🔥"}], "gift_sub": [{"min": 1, "response": "{user} gifted a sub! THANK YOU! ❤️"}, {"min": 5, "response": "{gifts} SUBS?! THANK YOU {user}! 🔥"}, {"min": 10, "response": "{gifts} GIFTED SUBS FROM {user}!!! 🔥🔥"}, {"min": 25, "response": "{user} JUST GIFTED {gifts} SUBS!!! ABSOLUTE LEGEND! 🚨🔥"}], "bits": [{"min": 1, "response": "Thanks for the Bits, {user}! ❤️"}, {"min": 100, "response": "{user} JUST DROPPED {bits} BITS! 🔥"}, {"min": 500, "response": "{user} WITH {bits} BITS!!! 🚨"}, {"min": 1000, "response": "{user} JUST DROPPED {bits} BITS!!! ABSOLUTE MADNESS! 🔥🔥🔥"}], "donation": [{"min": 0, "response": "Thank you {user} for the {amount} {currency} donation! ❤️"}, {"min": 50, "response": "WOW! {user} donated {amount} {currency}! You are amazing! 🔥"}], "falkorie_level": [{"min": 1, "response": "GG {user}! Level {level} unlocked"}, {"min": 10, "response": "LEVEL {level}?! {user} is a real one"}]}
 
 
 class Store:

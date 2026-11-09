@@ -867,13 +867,14 @@ class TwitchBot(commands.Bot):
         ctx = self._ctx(user, "", counter_key=f"event:{key}")
         ctx.login = login or user
         ctx.extra = dict(extra or {})
-        if key == "watch_streak":
+        if key in ("watch_streak", "falkorie_streak"):
             ctx.streak = value
         label = key.replace("_", " ")
         if key == "donation":
             self._log_activity("event", f"donation {ctx.extra.get('amount', value)} {ctx.extra.get('currency', '')}".strip(), user)
         else:
             self._log_activity("event", f"{label} {value}" if value else label, user)
+        template = events.at_user(template, user, login)          # 1.17.1: {user} tags the viewer (@name)
         await self._send(await expand(template, ctx), why="event:" + key, user=user)
 
     def _notify_event(self, key, user, value, extra) -> None:
@@ -1138,6 +1139,14 @@ class TwitchBot(commands.Bot):
             return
         if (self.separate or self.sender is not None) and str(getattr(payload.chatter, "id", "")) == self.writer_id:
             return      # whatever the bot account writes is never treated as a command
+        try:            # 1.17.1: the Falkorie bot says someone reached a level or shows their streak: an Events reply
+            f = events.falkorie(getattr(payload.chatter, "name", ""), clean_chat(payload.text))
+            if f:
+                key, who, n = f
+                await self._fire_event(key, n, who.lstrip("@"), who.lstrip("@").lower(),
+                                       {"level": n} if key == "falkorie_level" else {"streak": n}, dedupe=f"{key}:{who.lower()}:{n}")
+        except Exception:
+            log.exception("Falkorie reply failed")
         try:
             if await self._moderate(payload):
                 return      # removed by a Moderation filter: nothing else answers it

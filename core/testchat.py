@@ -23,7 +23,7 @@ from .bot import ANNOUNCE, TwitchBot
 log = logging.getLogger("twitchbot.testchat")
 ROLES = ("viewer", "subscriber", "vip", "moderator", "broadcaster")
 MAX_LINES = 200
-EVENT_KEYS = ("follow", "watch_streak", "subscription", "gift_sub", "raid", "hype_train", "bits", "donation")
+EVENT_KEYS = ("follow", "watch_streak", "subscription", "gift_sub", "raid", "hype_train", "bits", "donation", "falkorie_level", "falkorie_streak")
 _ids = itertools.count(1)
 
 
@@ -182,6 +182,8 @@ class SimBot(TwitchBot):
             await self._fire_event("hype_train", whole, self.account["login"], "", {"level": whole})
         elif key == "bits":
             await self._fire_event("bits", whole, user, login, {"bits": whole, "message": "", "total": self._add_total("bits", login, whole)})
+        elif key in ("falkorie_level", "falkorie_streak"):      # 1.17.1: as if Falkorie wrote it in chat
+            await self._fire_event(key, whole, user, login, {"level": whole} if key == "falkorie_level" else {"streak": whole})
         elif key == "donation":
             await self.on_donation({"service": "test", "id": None, "user": user, "amount": round(n, 2), "currency": (currency or "USD").upper()[:8],
                                     "message": "", "test": False})
