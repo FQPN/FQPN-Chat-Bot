@@ -83,8 +83,82 @@ def view(store) -> list:
     meta = store.get("counter_meta") or {}
     used = uses(store.get("commands") or {})
     names = {k[5:] for k in counters if k.startswith("name:")} | set(used)
+    shown = set(_shown(store))
     return [{"name": n, "value": max(0, int(counters.get(_key(n), 0))), "used": [list(u) for u in used.get(n, [])],
-             "last": meta.get(n)} for n in sorted(names)]
+             "last": meta.get(n), "stream": n in shown} for n in sorted(names)]
+
+
+# ---------- 1.17.0: counters on stream (an OBS Browser Source: core/overlays.py) ----------
+MAX_ON_STREAM = 8
+
+
+def _shown(store) -> list:
+    show = (store.get("counter_overlay") or {}).get("show") or []
+    return [norm(x) for x in show if isinstance(x, str) and norm(x)][:MAX_ON_STREAM]
+
+
+def _set_shown(store, names: list) -> None:
+    store.save("counter_overlay", dict(store.get("counter_overlay") or {}, show=list(dict.fromkeys(names))[:MAX_ON_STREAM]))
+
+
+def positions(store) -> dict:
+    """1.17.0 (Overlays page): where each overlay sits on the screen and how big it is: {"c:deaths": [x, y, size]} with x and
+    y in % of the width / height (its top-left corner) and size 0.5 to 3 (1 = normal). An overlay with no place sits in the
+    top-left corner with the others."""
+    out = {}
+    for k, v in ((store.get("counter_overlay") or {}).get("pos") or {}).items():
+        try:
+            x, y = float(v[0]), float(v[1])
+            size = float(v[2]) if len(v) > 2 and v[2] is not None else 1.0
+        except (TypeError, ValueError, IndexError):
+            continue
+        out[str(k)[:70]] = [round(min(100.0, max(0.0, x)), 2), round(min(100.0, max(0.0, y)), 2), round(min(3.0, max(0.5, size)), 2)]
+    return out
+
+
+def set_position(store, key: str, x, y, size=1.0) -> None:
+    pos = positions(store)
+    key = str(key or "")[:70]
+    if not key:
+        return
+    if x is None:
+        pos.pop(key, None)
+    else:
+        pos[key] = [x, y, size]
+    store.save("counter_overlay", dict(store.get("counter_overlay") or {}, pos=pos))
+    store.save("counter_overlay", dict(store.get("counter_overlay") or {}, pos=positions(store)))     # (rounded, kept on screen)
+
+
+def order(store) -> list:
+    """1.17.0: the overlays in the order they were switched on ("first" = First in chat, "c:<name>" = a counter): the ones
+    without a place stack in this order, so a new one goes at the bottom. (Before this was kept: First in chat first.)"""
+    saved = [k for k in ((store.get("counter_overlay") or {}).get("order") or []) if isinstance(k, str)]
+    want = (["first"] if first_on(store) else []) + ["c:" + n for n in _shown(store)]
+    out = [k for k in saved if k in want]
+    return out + [k for k in want if k not in out]
+
+
+def _set_order(store, keys: list) -> None:
+    store.save("counter_overlay", dict(store.get("counter_overlay") or {}, order=list(dict.fromkeys(keys))[:MAX_ON_STREAM + 1]))
+
+
+def first_on(store) -> bool:
+    return (store.get("counter_overlay") or {}).get("first", True) is not False
+
+
+def set_first(store, on: bool) -> None:
+    keys = [k for k in order(store) if k != "first"]
+    store.save("counter_overlay", dict(store.get("counter_overlay") or {}, first=bool(on)))
+    _set_order(store, keys + (["first"] if on else []))          # switched on now: at the bottom
+
+
+def overlay(store, only: str = "") -> list:
+    """What the overlay shows: [{name, value}] for the counters switched on (in the order they were switched on), or the
+    ones named in ?only=deaths,wins (a separate Browser Source per counter)."""
+    counters = store.get("counters") or {}
+    want = [norm(x) for x in str(only or "").split(",") if norm(x)] or _shown(store)
+    have = {v["name"] for v in view(store)}
+    return [{"name": n, "value": max(0, int(counters.get(_key(n), 0)))} for n in want if n in have][:MAX_ON_STREAM]
 
 
 def _value(v) -> int:
@@ -129,6 +203,20 @@ def act(store, action: str, body: dict, validate_commands=None, clash=None) -> N
             meta[n] = {"at": int(time.time()), "how": "reset", "by": "you"}
         store.save("counter_meta", meta)
         return
+    if action == "first":                  # 1.17.0: First in chat on the overlay, or not
+        set_first(store, body.get("show"))
+        return
+    if action == "pos":                    # 1.17.0: an overlay dragged on the Overlays page's preview
+        try:
+            x, y = float(body.get("x")), float(body.get("y"))
+            size = float(body.get("k") or 1)
+        except (TypeError, ValueError):
+            raise CounterError("That place isn't on the screen.")
+        set_position(store, body.get("key"), x, y, size)
+        return
+    if action == "pos_reset":              # 1.17.0: all of them back to the top-left corner
+        store.save("counter_overlay", dict(store.get("counter_overlay") or {}, pos={}))
+        return
     if not name:
         raise CounterError("Give the counter a name: letters, numbers or _ (like deaths).")
     if action == "create":
@@ -144,6 +232,17 @@ def act(store, action: str, body: dict, validate_commands=None, clash=None) -> N
         return made
     if not _exists(store, name):
         raise CounterError(f"The counter {name} isn't there anymore.")
+    if action == "stream":                 # 1.17.0: show it on stream (OBS) or not
+        shown = [n for n in _shown(store) if n != name]
+        keys = [k for k in order(store) if k != "c:" + name]
+        if body.get("show"):
+            if len(shown) >= MAX_ON_STREAM:
+                raise CounterError(f"Up to {MAX_ON_STREAM} counters can be on stream at once.")
+            shown.append(name)
+            keys.append("c:" + name)                                # switched on now: at the bottom
+        _set_shown(store, shown)
+        _set_order(store, keys)
+        return
     if action == "set":
         _set(store, name, _value(body.get("value")), "set")
     elif action == "add":
@@ -169,6 +268,10 @@ def act(store, action: str, body: dict, validate_commands=None, clash=None) -> N
         meta = dict(store.get("counter_meta") or {})
         meta.pop(name, None)
         store.save("counter_meta", meta)
+        if name in _shown(store):
+            _set_shown(store, [n for n in _shown(store) if n != name])
+        if "c:" + name in positions(store):
+            set_position(store, "c:" + name, None, None)
     elif action == "rename":
         new = norm(body.get("new"))
         if not new:
@@ -197,6 +300,14 @@ def act(store, action: str, body: dict, validate_commands=None, clash=None) -> N
         if name in meta:
             meta[new] = meta.pop(name)
         store.save("counter_meta", meta)
+        if name in _shown(store):           # it stays on stream under its new name (and in its place)
+            _set_shown(store, [new if n == name else n for n in _shown(store)])
+        _set_order(store, ["c:" + new if k == "c:" + name else k for k in order(store)])
+        pos = positions(store)
+        if "c:" + name in pos:
+            x, y, size = pos["c:" + name]
+            set_position(store, "c:" + name, None, None)
+            set_position(store, "c:" + new, x, y, size)
     else:
         raise CounterError("Unknown action.")
 

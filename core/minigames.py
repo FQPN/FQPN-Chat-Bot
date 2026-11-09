@@ -695,6 +695,27 @@ def breakdown(e: dict) -> str:
     return "، ".join(f"{GAME_NAMES[k]} {wins_of(e, k)}" for k in GAME_KEYS if wins_of(e, k))
 
 
+def set_wins(wins: dict, uid: str, name: str, games: dict) -> dict:
+    """1.17.0 (owner): the streamer sets a viewer's all-time wins by hand (for one whose wins were lost). games: {game: n}.
+    This week / month can't be more than the new numbers. All 0 = off the leaderboard."""
+    uid = str(uid)
+    g = {k: max(0, min(10 ** 6, int(games.get(k, 0) or 0))) for k in GAME_KEYS if k in games}
+    g = {k: n for k, n in g.items() if n}
+    if not g:
+        wins.pop(uid, None)
+        return wins
+    e = dict(wins.get(uid) or {})
+    e.update(name=name or e.get("name") or "?", wins=sum(g.values()), games=g)
+    for p in PERIODS:
+        sub = e.get(p)
+        if isinstance(sub, dict) and isinstance(sub.get("games"), dict):
+            pg = {k: min(int(n or 0), g.get(k, 0)) for k, n in sub["games"].items()}
+            pg = {k: n for k, n in pg.items() if n}
+            e[p] = dict(sub, games=pg, wins=sum(pg.values()))
+    wins[uid] = e
+    return wins
+
+
 def reset_game(wins: dict, game: str) -> dict:
     """The leaderboard without one game's wins (totals go down; people left with nothing are removed)."""
     out = {}

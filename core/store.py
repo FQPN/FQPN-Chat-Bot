@@ -155,6 +155,7 @@ DEFAULTS = {
     "greeted": {"session": "", "users": [], "last": {}},   # who was already greeted during the current stream
     "counters": {},
     "counter_meta": {},                     # 1.15.0 (owner): each counter's last change, for the Counters page
+    "counter_overlay": {"show": [], "first": True, "pos": {}},   # 1.17.0: on stream (OBS: /overlay): these counters, First in chat, and where each one sits
     "command_history": [],                  # 1.16.0 (owner): every change to a command, for History and Undo (core/cmdhistory.py)
     "chat_stats": {},                       # 1.14.0: Dashboard > Stream stats (core/chatstats.py), kept by the app
 }

@@ -429,6 +429,35 @@ class TwitchBot(commands.Bot):
         self._log_activity("manage", "test message", name)
         return name
 
+    def is_command(self, text: str) -> bool:
+        """1.17.0 (voice «قول»): would this message run one of the bot's commands if you typed it?"""
+        text = clean_chat(text)
+        if text.startswith(manage.BUILTIN_PREFIX) and manage.BY_TYPED.get(text[len(manage.BUILTIN_PREFIX):].partition(" ")[0].lower()):
+            return True
+        if manage.match_command(self.store.get("commands"), text):
+            return True
+        key = minigames.cmd_key(text.partition(" ")[0])                  # a mini game's command: «!حروف», «حروف؟», «!فوز»
+        for g, fields in minigames.GAME_CMDS.items():
+            cfg = self._game_cfg(g)
+            if any(key in minigames.aliases(cfg.get(f)) for f in fields):
+                return True
+        return False
+
+    async def say_as_you(self, text: str) -> None:
+        """1.17.0 (voice «قول !when»): sends from your own account and, unlike the bot's replies, isn't remembered as the
+        bot's own message, so it comes back like something you typed and the command runs (the reply itself is still
+        the bot's own, so nothing loops)."""
+        text = text.strip()[:500]
+        if not text:
+            return
+        owner = self.create_partialuser(self.owner_id)
+        try:
+            await owner.send_message(text, sender=self.owner_id)
+        except Exception as e:
+            self._login_trouble(e)
+            raise
+        self._log_bot(text, None, "voice", "")
+
     def _is_own_echo(self, payload) -> bool:
         if payload.id in self._sent_ids:
             return True
@@ -1191,7 +1220,7 @@ class TwitchBot(commands.Bot):
             return False
         shown = [n if n != "#" else owner for n in names]
         self._log_activity("manage", f"Counter reset: {', '.join(shown)} ({owner} reset)", user)
-        await self._send(self._bt(f"🔄 {', '.join(shown)} {'is' if len(shown) == 1 else 'are'} back to 0"), payload)
+        await self._send(self._bt(f"{', '.join(shown)} {'is' if len(shown) == 1 else 'are'} back to 0"), payload)
         return True
 
     async def _custom(self, payload, owner, rest, user, level) -> None:
@@ -1250,7 +1279,7 @@ class TwitchBot(commands.Bot):
             st = self.store.get("settings")
             login = str((getattr(self, "account", None) or {}).get("login") or "").lower()
             if st.get("public_list") and publiclist.SITE and login:      # 1.14.0: the public command list's link
-                await self._send(self._bt(f"📋 Commands: {publiclist.SITE.rstrip('/')}/{login}"), payload)
+                await self._send(self._bt(f"Commands: {publiclist.SITE.rstrip('/')}/{login}"), payload)
                 return
             url = (st.get("commands_url") or "").strip()
             if url:
@@ -1363,6 +1392,25 @@ class TwitchBot(commands.Bot):
         if key != "shared" and (games.get("shared") or {}).get("enabled", True) is False:
             cfg["enabled"] = False        # 1.14.0: All games switched off: none can start (each keeps its own setting)
         return cfg
+
+    async def avatar_of(self, login: str) -> str:
+        """1.17.0 (the First in chat overlay): a viewer's Twitch profile picture URL ("" if none). Cached 1 hour."""
+        key = "av:" + str(login or "").lower()
+        hit = self._acct_cache.get(key)
+        if hit and time.time() < hit[0]:
+            return hit[1]
+        url = ""
+        try:
+            users = await self.fetch_users(logins=[key[3:]])
+            pic = getattr(users[0], "profile_image", None) if users else None
+            url = str(getattr(pic, "url", pic) or "") if pic else ""
+        except Exception:
+            log.exception("Overlay: the profile picture of %s", login)
+        url = url if url.startswith("https://") else ""
+        if len(self._acct_cache) > 500:
+            self._acct_cache.clear()
+        self._acct_cache[key] = (time.time() + 3600, url)
+        return url
 
     def _stream_id(self):
         """Which stream this is (the stream messages' session: a short drop or an app restart is still the same stream)."""

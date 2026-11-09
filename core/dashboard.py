@@ -411,6 +411,56 @@ def _pin_command(name: str, c: dict) -> dict:
             "reply_on": _bool(c.get("reply_on", False), "Reply when pinned")}
 
 
+def _voice_brief():
+    try:
+        from .voice import VOICE
+        v = VOICE.view()
+        return {"engine": v["engine"], "pending": v["pending"]}
+    except Exception:
+        return None
+
+
+def _voice_prefs(data: dict) -> dict:
+    """1.17.0 (beta): Settings > Voice. Anything unknown falls back to the default (off)."""
+    from . import voice
+    d = voice.DEFAULTS
+    key = str(data.get("voice_key", d["voice_key"]) or d["voice_key"])
+    acts = data.get("voice_acts", d["voice_acts"])
+    return {
+        "voice": _bool(data.get("voice", False), "Voice commands"),
+        "voice_key": key if key in voice.VK else d["voice_key"],
+        "voice_mic": _text(data.get("voice_mic", ""), "Microphone", 200, required=False),
+        "voice_lang": data.get("voice_lang") if data.get("voice_lang") in ("both", "ar", "en") else "both",
+        "voice_acts": [a for a in voice.ACTIONS if isinstance(acts, list) and a in acts],
+        "voice_ask_all": _bool(data.get("voice_ask_all", False), "Ask before safe actions too"),
+        "voice_beep": _bool(data.get("voice_beep", True), "Sound when it heard you"),
+        "voice_overlay": _bool(data.get("voice_overlay", True), "Show a mic on screen"),
+        "voice_corner": data.get("voice_corner") if data.get("voice_corner") in ("tl", "tr", "bl", "br") else "tr",
+        "voice_model": data.get("voice_model") if data.get("voice_model") in ("small", "turbo", "best") else "small",
+        "voice_gpu": _bool(data.get("voice_gpu", False), "Use the graphics card"),
+        "voice_style": data.get("voice_style") if data.get("voice_style") in ("capsule", "orb", "wave", "card") else "orb",
+        "labs_voice": _bool(data.get("labs_voice", bool(data.get("voice", False))), "Labs: Voice commands"),   # (had Voice on: kept)
+        "hotkeys_on": _bool(data.get("hotkeys_on", False), "Hotkeys"),
+        "hotkeys": _hotkeys(data.get("hotkeys")),
+        "hotkeys_sound": _bool(data.get("hotkeys_sound", True), "Hotkeys: sound"),
+    }
+
+
+def _hotkeys(raw) -> list:
+    """1.17.0 (owner): Voice > Hotkeys. Keys that can't be watched, unknown actions and repeats are left out."""
+    from . import voice
+    out, seen = [], set()
+    for h in raw if isinstance(raw, list) else []:
+        if not isinstance(h, dict) or len(out) >= voice.HOT_MAX:
+            continue
+        key, act = str(h.get("key") or "")[:40], h.get("act")
+        if voice.hot_combo(key) is None or act not in voice.HOT_ACTS or key in seen:
+            continue
+        seen.add(key)
+        out.append({"key": key, "act": act, "arg": str(h.get("arg") or "").replace("\r", " ").replace("\n", " ")[:450]})
+    return out
+
+
 def validate(section: str, data, prefix: str = "!"):
     if section == "commands":
         if not isinstance(data, dict):
@@ -885,6 +935,7 @@ def validate(section: str, data, prefix: str = "!"):
             "notify_sound": _bool(data.get("notify_sound", False), "Play a sound"),
             "log_days": days,
             "log_chat": _bool(data.get("log_chat", False), "Log chat messages"),
+            **_voice_prefs(data),                       # 1.17.0 (beta): Settings > Voice
         }
 
     if section == "ui":
@@ -975,6 +1026,11 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             "problem": auth.last_problem,
             "event_problems": dict(getattr(bot, "event_problems", {}) or {}) if bot else {},
             "counters": counters_mod.view(store),        # 1.15.0 (owner): Counters (Dashboard card, Commands > Custom > Counters)
+            "overlay_first": counters_mod.first_on(store),   # 1.17.0: First in chat on the overlay
+            "overlay_order": counters_mod.order(store),       # 1.17.0: the order they were switched on (new ones at the bottom)
+            "overlay_has_first": any(isinstance(c, dict) and c.get("action") == "pinfirst" and c.get("enabled", True) is not False
+                                     for c in (store.get("commands") or {}).values()),
+            "voice": _voice_brief(),                      # 1.17.0 (beta): a voice question waiting for yes / no
             "avatar": state.get("avatar") if account else None,
             "lost": bool(state.get("lost")),
             "health": health_info(state),
@@ -1283,6 +1339,88 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             return web.json_response({"error": str(e)}, status=400)
         return web.json_response({"counters": counters_mod.view(store), "made": made or []})
 
+    async def sound_file(request):
+        from . import sounds
+        kind = request.match_info["kind"].removesuffix(".wav")
+        if kind not in sounds.SOUNDS:
+            return web.json_response({"error": "Not found."}, status=404)
+        return web.Response(body=sounds.wav(kind), content_type="audio/wav", headers={"Cache-Control": "max-age=3600"})
+
+    async def game_wins_set(request):
+        """1.17.0 (owner): Mini games > Leaderboard: change a viewer's wins, or add one (by their Twitch name), by hand."""
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        body = body if isinstance(body, dict) else {}
+        games = body.get("games")
+        if not isinstance(games, dict):
+            return web.json_response({"error": "The wins are invalid."}, status=400)
+        try:
+            games = {k: int(_number(games[k], "Wins", 0, 10 ** 6)) for k in minigames.GAME_KEYS if k in games}
+        except ValidationError as e:
+            return web.json_response({"error": str(e)}, status=400)
+        wins = store.get("game_wins") or {}
+        uid, name = str(body.get("uid") or "")[:30], ""
+        if uid and uid not in wins:
+            return web.json_response({"error": "That viewer isn't on the leaderboard anymore."}, status=400)
+        if not uid:
+            login = str(body.get("login") or "").strip().lstrip("@").lower()[:25]
+            if not re.fullmatch(r"[a-z0-9_]{2,25}", login):
+                return web.json_response({"error": "Type their Twitch name (letters, numbers and _)."}, status=400)
+            same = next((k for k, e in wins.items() if isinstance(e, dict) and str(e.get("name", "")).lower() == login), None)
+            if same:
+                uid = same
+            else:
+                bot = state.get("bot")
+                if bot is None:
+                    return web.json_response({"error": "Connect the bot first, so it can find that Twitch account."}, status=400)
+                try:
+                    users = await bot.fetch_users(logins=[login])
+                except Exception:
+                    users = []
+                if not users:
+                    return web.json_response({"error": f"No Twitch account is called {login}."}, status=400)
+                uid, name = str(users[0].id), str(getattr(users[0], "display_name", "") or users[0].name or login)
+        wins = minigames.set_wins(dict(wins), uid, name, games)
+        store.save("game_wins", wins)
+        return web.json_response({"game_wins": wins, "uid": uid})
+
+    async def overlay_page(request):
+        """1.17.0: the overlay for OBS (a Browser Source: http://127.0.0.1:<port>/overlay): counters + First in chat."""
+        from . import overlays
+        return web.Response(text=overlays.OVERLAY_HTML, content_type="text/html", headers={"Cache-Control": "no-store"})
+
+    async def overlay_data(request):
+        """1.17.0: what the overlay shows (it asks about once a second)."""
+        from . import overlays, pinfirst
+        rows = counters_mod.overlay(store, request.query.get("only", "")[:300])
+        lang = "ar" if (store.get("ui") or {}).get("language") == "ar" else "en"
+        first = None
+        cmds = pinfirst.pin_commands(store.get("commands") or {})
+        if counters_mod.first_on(store) and cmds:
+            name, cmd = cmds[0]
+            words = [w for w in (cmd.get("words") or [])][:3]
+            st = (store.get("first_state") or {}).get(name) or {}
+            bot = state.get("bot")
+            sid = bot._stream_id() if bot is not None else None
+            first = {"words": words, "won": False}
+            if sid and st.get("stream") == sid and st.get("winner"):
+                pic = ""
+                try:
+                    pic = await bot.avatar_of(st["winner"])
+                except Exception:
+                    pass
+                first = {"words": words, "won": True, "user": st.get("user") or st["winner"], "login": st["winner"],
+                         "streak": int(st.get("streak") or 0), "avatar": pic}
+        pos = counters_mod.positions(store)
+        if first:
+            first["pos"] = pos.get("first")
+        return web.json_response({"counters": [dict(r, icon=overlays.icon_for(r["name"]), pos=pos.get("c:" + r["name"])) for r in rows],
+                                  "first": first, "lang": lang, "has_first_cmd": bool(cmds), "order": counters_mod.order(store),
+                                  "accent": str((store.get("ui") or {}).get("accent") or "#9a1118"),
+                                  "v": overlays.VERSION})
+
     async def history_view(request):
         """1.16.0 (owner): Command history: every change to a command, newest first (?name= for one command)."""
         return web.json_response({"history": cmdhistory.view(store, request.query.get("name", ""))})
@@ -1295,6 +1433,13 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
         except Exception:
             body = {}
         body = body if isinstance(body, dict) else {}
+        if body.get("batch"):          # 1.17.0: "Undo the whole import"
+            try:
+                n = cmdhistory.undo_batch(store, body.get("id"), lambda c: validate("commands", c),
+                                          lambda c: game_command_clash(store.get("games"), c))
+            except (cmdhistory.UndoError, ValidationError, manage.CommandError, EmptySaveRefused) as e:
+                return web.json_response({"error": str(e)}, status=400)
+            return web.json_response({"ok": True, "name": "", "count": n, "commands": store.get("commands")})
         eid = body.get("id")
         if eid is None and body.get("name"):
             e = cmdhistory.last_for(store, str(body.get("name")))
@@ -1309,6 +1454,124 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
         if state.get("publist_wake") is not None:
             state["publist_wake"].set()
         return web.json_response({"ok": True, "name": name, "commands": store.get("commands")})
+
+    async def nightbot_action(request):
+        """1.17.0 (owner): Commands > Import from Nightbot. read: the preview rows; import: add the ticked ones."""
+        from . import nightbot
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        body = body if isinstance(body, dict) else {}
+        action = request.match_info["action"]
+        if action == "read":
+            try:
+                got = await nightbot.fetch(str(body.get("channel") or ""))
+            except nightbot.NightbotError as e:
+                return web.json_response({"error": str(e)}, status=400)
+            return web.json_response({"channel": got["channel"], "login": got["login"],
+                                      "rows": nightbot.preview(got, store.get("commands") or {}), "timers": None})
+        if action == "read_se_key":           # StreamElements with the streamer's own key: commands (all) + timers
+            from . import streamelements
+            try:
+                got = await streamelements.fetch_with_key(str(body.get("key") or ""))
+            except nightbot.NightbotError as e:
+                return web.json_response({"error": str(e)}, status=400)
+            return web.json_response({"channel": got["channel"], "login": got["login"], "source": "se",
+                                      "rows": streamelements.preview(got, store.get("commands") or {}),
+                                      "timers": streamelements.preview_timers(got, store.get("timers") or [])})
+        if action == "read_se":               # StreamElements' public commands page (same Import window)
+            from . import streamelements
+            try:
+                got = await streamelements.fetch(str(body.get("channel") or ""))
+            except nightbot.NightbotError as e:
+                return web.json_response({"error": str(e)}, status=400)
+            return web.json_response({"channel": got["channel"], "login": got["login"], "source": "se",
+                                      "rows": streamelements.preview(got, store.get("commands") or {}), "timers": None})
+        if action == "connect":               # "Sign in with Nightbot": open fqpnbot.com/nightbot/start in the browser
+            import webbrowser
+            link = nightbot.start_signin()
+            await asyncio.to_thread(webbrowser.open, link)
+            return web.json_response({"ok": True, "link": link})
+        if action == "check":
+            try:
+                got = await nightbot.check_signin()
+            except nightbot.NightbotError as e:
+                return web.json_response({"error": str(e)}, status=400)
+            if got is None:
+                return web.json_response({"waiting": True})
+            return web.json_response({"channel": got["channel"], "login": got["login"],
+                                      "rows": nightbot.preview(got, store.get("commands") or {}),
+                                      "timers": nightbot.preview_timers(got, store.get("timers") or [])})
+        if action == "cancel":
+            nightbot.PENDING.clear()
+            return web.json_response({"ok": True})
+        if action == "import":
+            rows = [r for r in (body.get("rows") or []) if isinstance(r, dict)][:500]
+            cmds, done = nightbot.apply(store.get("commands") or {}, rows)
+            try:
+                cmds = validate("commands", cmds)
+            except ValidationError as e:
+                return web.json_response({"error": str(e)}, status=400)
+            clash = game_command_clash(store.get("games"), cmds)
+            if clash:
+                return web.json_response({"error": clash}, status=400)
+            trows = [r for r in (body.get("timers") or []) if isinstance(r, dict)][:200]
+            timers = None
+            if trows:
+                tl, done["timers"] = nightbot.apply_timers(store.get("timers") or [], trows)
+                try:
+                    timers = validate("timers", tl)
+                except ValidationError as e:
+                    return web.json_response({"error": str(e)}, status=400)
+            store.save("commands", cmds, allow_empty=True, by="StreamElements import" if body.get("source") == "se" else "Nightbot import")
+            if timers is not None:
+                store.save("timers", timers)
+            counts = {f"cmd:{r.get('name')}": int(r.get("count") or 0) for r in rows if int(r.get("count") or 0) > 0
+                      and r.get("name") in cmds and (r.get("choice") or "new") in ("new", "replace")}
+            if counts:                         # Nightbot's $(count) numbers come along
+                ctr = dict(store.get("counters") or {})
+                ctr.update(counts)
+                store.save("counters", ctr)
+            if state.get("publist_wake") is not None:
+                state["publist_wake"].set()
+            return web.json_response({"done": done, "commands": store.get("commands"), "timers": store.get("timers")})
+        raise web.HTTPNotFound()
+
+    async def voice_view(request):
+        """1.17.0 (beta): Settings > Voice: the download, the speech engine, the last thing heard, a waiting question."""
+        from .voice import VOICE
+        out = VOICE.view()
+        if request.query.get("mics") == "1":
+            out["mics"] = await asyncio.get_running_loop().run_in_executor(None, VOICE.mics)
+        return web.json_response(out)
+
+    async def voice_action(request):
+        from .voice import VOICE
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        body = body if isinstance(body, dict) else {}
+        action = request.match_info["action"]
+        loop = asyncio.get_running_loop()
+        if action == "download":
+            VOICE.download()
+        elif action == "cancel":
+            VOICE.cancel()
+        elif action == "remove":
+            await loop.run_in_executor(None, VOICE.remove)
+        elif action == "test":
+            return web.json_response(await loop.run_in_executor(None, VOICE.test))
+        elif action == "preview":
+            VOICE.preview()
+        elif action == "answer":
+            res = VOICE.answer(str(body.get("id") or ""), {"act": "no"} if body.get("no") else {"act": "yes", "login": body.get("login")})
+            if res.get("error"):
+                return web.json_response(res, status=400)
+        else:
+            raise web.HTTPNotFound()
+        return web.json_response(VOICE.view())
 
     async def giveaway_action(request):
         """1.13.0 Giveaways: settings, start, close, draw (and reroll), remove an entry, clear."""
@@ -1608,9 +1871,17 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
     app.router.add_get("/api/giveaway", giveaway_view)      # 1.13.0: Giveaways
     app.router.add_post("/api/titlebar", titlebar_set)      # 1.13.0: the window's top bar in the app's colors
     app.router.add_post("/api/giveaway/{action}", giveaway_action)
+    app.router.add_post("/api/game_wins/set", game_wins_set)      # 1.17.0 (owner)
     app.router.add_post("/api/counters/{action}", counter_action)      # 1.15.0 (owner)
+    app.router.add_get("/overlay", overlay_page)                       # 1.17.0: on stream (OBS Browser Source)
+    app.router.add_get("/overlay/counters", overlay_page)              #   (the first name it had while testing)
+    app.router.add_get("/api/overlay", overlay_data)
     app.router.add_get("/api/history", history_view)                   # 1.16.0 (owner): Command history and undo
     app.router.add_post("/api/history/undo", history_undo)
+    app.router.add_post("/api/nightbot/{action}", nightbot_action)     # 1.17.0 (owner): Import from Nightbot
+    app.router.add_get("/api/voice", voice_view)
+    app.router.add_get("/api/sound/{kind}", sound_file)                # 1.17.0: the voice / hotkey sounds, to hear them in the app                       # 1.17.0 (beta): Voice commands
+    app.router.add_post("/api/voice/{action}", voice_action)
     app.router.add_post("/api/channels/{action}", channel_action)
     app.router.add_post("/api/editor/{action}", editor_action)
     app.router.add_get("/api/bots", bots_get)

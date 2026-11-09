@@ -84,3 +84,26 @@ the worker and the database.
 ## What it stores
 For each channel: the Twitch login and user ID, display name, profile picture link, the command names with who can use
 them, and when it was saved. It never stores the Twitch token: it only uses it to ask Twitch whose channel it is.
+
+
+## 1.17.0: "Sign in with Nightbot" (Commands → Import from Nightbot)
+The app's Import from Nightbot has two ways. "Just type the channel" works without any setup. "Sign in with Nightbot"
+(which also brings the timers and mod-only commands) needs a Nightbot app, because Nightbot's sign-in uses a secret key
+that may only live on this website, never inside the app. You do this once:
+
+1. Sign in on <https://nightbot.tv> with your Twitch account, then open <https://nightbot.tv/account/applications>.
+2. **New App** → Name: `FQPN's Chat Bot` → Redirect URI: `https://fqpnbot.com/nightbot/callback` (exactly like this) → **Submit**.
+3. Click the app's **edit** button → **New Secret**. Copy the **Client ID** and the **Client Secret**.
+4. Cloudflare → this worker → **Settings → Variables and Secrets → Add**:
+   - Type **Text**, name `NIGHTBOT_CLIENT_ID`, value = the Client ID.
+   - Type **Secret**, name `NIGHTBOT_CLIENT_SECRET`, value = the Client Secret.
+   → **Deploy**.
+5. Paste the new `worker.js` into the worker (Edit code → paste → Deploy), as with every website update.
+
+Never put the Client Secret anywhere else (not in the app, not on GitHub, not in a chat). If it ever leaks: Nightbot →
+the app → **New Secret**, and replace `NIGHTBOT_CLIENT_SECRET` in Cloudflare.
+
+How it works: the app opens `fqpnbot.com/nightbot/start` in the browser with a long random code; after the streamer says
+yes on Nightbot, the website swaps Nightbot's answer for a key and keeps it for at most 10 minutes (in the table
+`nightbot_auth`, only the hash of the code); the app picks it up once, reads the commands and timers, and gives the key
+back to Nightbot. Nothing is kept.

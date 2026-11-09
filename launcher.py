@@ -196,6 +196,34 @@ def read_prefs(home: Path) -> dict:
     return prefs
 
 
+_CTRL_HANDLER = None      # kept alive: Windows calls it later, and a freed callback would crash the app
+
+
+def ctrl_c_quits(shell) -> None:
+    """1.15.0 (owner): running from a terminal (VS Code), Ctrl+C closes the app, also while it sits in the tray.
+    The window's loop is Windows' own, so Python never sees Ctrl+C there; Windows tells this handler instead (on its
+    own thread), and it quits the way the tray's Quit does. Without a terminal (the installed app) it does nothing."""
+    global _CTRL_HANDLER
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
+        def handler(kind):
+            if kind in (0, 1, 2):          # Ctrl+C, Ctrl+Break, the terminal closing
+                print("Closing FQPN's Chat Bot...")
+                threading.Thread(target=shell.quit, daemon=True).start()
+                return True
+            return False
+
+        if ctypes.windll.kernel32.SetConsoleCtrlHandler(handler, True):
+            _CTRL_HANDLER = handler
+    except Exception:
+        log.exception("Ctrl+C won't close the app from the terminal")
+
+
 def tray_importable() -> bool:
     try:
         import pystray  # noqa: F401
@@ -443,6 +471,7 @@ def run() -> None:
         if moved is not None:
             moved += shell.moved_handler()                # 1.9.1: dragged partly above the screen -> fixed when you let go
         desktop.show_window = shell.show              # a second launch asks this copy to show its window
+        ctrl_c_quits(shell)
         def _titlebar(bg, fg, dark):                  # 1.13.0: the top bar in the app's colors (Windows paints it)
             from core import titlebar
             threading.Thread(target=titlebar.apply, args=(WINDOW_TITLE, bg, fg, dark), daemon=True).start()
@@ -459,6 +488,11 @@ def run() -> None:
                       gui="edgechromium" if sys.platform == "win32" else None)
         # Window closed for real -> stop the tray, install a waiting update, and end the program.
         shell.shutdown()
+        try:                                  # 1.17.0 (beta): the speech engine of Voice commands stops with the app
+            from core.voice import VOICE
+            VOICE.shutdown()
+        except Exception:
+            pass
         clear_port(home)
         install_pending_update(home)
         logging.shutdown()

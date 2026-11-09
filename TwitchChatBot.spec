@@ -45,6 +45,8 @@ hidden = (collect_submodules("twitchio") + collect_submodules("aiohttp")
 datas = [("core/dashboard.html", "core")] + collect_data_files("twitchio") + collect_data_files("webview")
 hidden += collect_submodules("pystray")   # the tray icon (its Windows part is loaded by name at run time)
 datas += [("icon.ico", ".")]              # the logo shown in the dashboard and in the tray
+hidden += ["sounddevice", "arabic_reshaper"]      # 1.17.0 (beta) Voice commands: the microphone, Arabic on the corner mic
+datas += collect_data_files("arabic_reshaper") + collect_data_files("_sounddevice_data")
 
 a = Analysis(
     ["launcher.py"],

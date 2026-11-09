@@ -150,3 +150,20 @@ def last_for(store, name: str):
         if name in (e.get("name"), e.get("old")):
             return e
     return None
+
+
+def undo_batch(store, entry_id, validate=None, clash=None) -> int:
+    """Undoes every change saved together with this one (an import): newest first. Returns how many."""
+    hist = store.get("command_history") or []
+    e = next((h for h in hist if str(h.get("id")) == str(entry_id)), None)
+    if e is None:
+        raise UndoError("That change isn't in the history anymore.")
+    same = [h for h in hist if h.get("at") == e.get("at") and h.get("by") == e.get("by")]
+    n = 0
+    for h in reversed(same):
+        try:
+            undo(store, h["id"], validate, clash, by="you (undo import)")
+            n += 1
+        except UndoError:
+            pass
+    return n

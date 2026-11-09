@@ -135,8 +135,10 @@ async function handle(req, env) {
   if (path.startsWith("/api/editor/")) {          // 1.13.0: the editor link
     return ["/api/editor/link", "/api/editor/page", "/api/editor/data", "/api/editor/changes", "/api/editor/ack"].includes(path) ? editorOwner(req, env, url) : editorGuest(req, env, url);
   }
+  if (path === "/nightbot/start" || path === "/nightbot/callback" || path === "/api/nightbot/token") return nightbot(req, env, url);   // 1.17.0
   if (req.method !== "GET" && req.method !== "HEAD") return json({ error: "Method not allowed." }, 405, { Allow: "GET" });
   if (path === "/") return page(homeBody(url.origin, await latest(), await userCount(env)), "FQPN's Chat Bot · Twitch moderation chat bot", 200, 600);
+  if (path === "/variables" || path === "/variables/") return page(varsBody(), "Variables · FQPN's Chat Bot: Twitch bot variables in Arabic and English", 200, 600, { vars: 1 });   // 1.17.0
   if (path === "/download/windows" || path === "/download") {
     const l = await latest();                      // the newest installer, or the releases page when GitHub can't be reached
     return new Response(null, { status: 302, headers: { Location: l ? l.url : RELEASES + "/latest", "Cache-Control": "no-store" } });
@@ -791,6 +793,56 @@ async function devBan(req, env) {
 
 // ----------------------------------------------------------------------------------------------- answers
 
+/* ===== 1.17.0 (owner): "Sign in with Nightbot" for the app's Import from Nightbot =====
+   Nightbot's sign-in needs a secret key that must never be inside the app, so this website does the one step that
+   needs it. The app makes a long random code (state), opens /nightbot/start?state=… in the browser, and asks
+   /api/nightbot/token?state=… every 2 seconds. After the streamer says yes on Nightbot, /nightbot/callback swaps
+   Nightbot's code for a key (read-only use: commands and timers) and keeps it for the app for at most 10 minutes;
+   the app gets it once, then it's deleted here. Only the hash of the state is stored.
+   Setup: NIGHTBOT_CLIENT_ID (Text) and NIGHTBOT_CLIENT_SECRET (Secret) in the worker's Variables and Secrets. */
+async function nightbot(req, env, url) {
+  const db = env.DB, now = Math.floor(Date.now() / 1000), path = url.pathname;
+  await db.prepare("CREATE TABLE IF NOT EXISTS nightbot_auth (state_hash TEXT PRIMARY KEY, token TEXT, error TEXT, created INTEGER NOT NULL)").run();
+  await db.prepare("DELETE FROM nightbot_auth WHERE created < ?").bind(now - 600).run();
+  const redirect = url.origin + "/nightbot/callback";
+  const state = String(url.searchParams.get("state") || "");
+  const okState = /^[A-Za-z0-9_-]{32,128}$/.test(state);
+  const say = (en, ar, status = 200) => page(`<section class="hero"><h1>${esc(en)}</h1><p class="lead" dir="rtl" lang="ar">${esc(ar)}</p></section>`, "Nightbot · FQPN's Chat Bot", status, 0);
+  if (path === "/nightbot/start") {
+    if (!env.NIGHTBOT_CLIENT_ID || !env.NIGHTBOT_CLIENT_SECRET) return say("Sign in with Nightbot isn't set up on this website yet.", "تسجيل الدخول بنايت بوت غير مفعّل في الموقع بعد.", 503);
+    if (!okState) return say("This link isn't complete. Start again from the app.", "الرابط ناقص. ابدأ من جديد من البرنامج.", 400);
+    const q = new URLSearchParams({ response_type: "code", client_id: env.NIGHTBOT_CLIENT_ID, redirect_uri: redirect, scope: "commands timers", state });
+    return new Response(null, { status: 302, headers: { Location: "https://api.nightbot.tv/oauth2/authorize?" + q.toString(), "Cache-Control": "no-store" } });
+  }
+  if (path === "/nightbot/callback") {
+    if (!okState) return say("This link isn't complete. Start again from the app.", "الرابط ناقص. ابدأ من جديد من البرنامج.", 400);
+    const h = await sha256hex("nb:" + state);
+    const code = url.searchParams.get("code");
+    if (!code) {
+      await db.prepare("INSERT OR REPLACE INTO nightbot_auth (state_hash, token, error, created) VALUES (?, NULL, ?, ?)").bind(h, "denied", now).run();
+      return say("Nightbot wasn't connected. You can close this tab.", "ما انربط نايت بوت. تقدر تقفل هذي الصفحة.");
+    }
+    const r = await fetch("https://api.nightbot.tv/oauth2/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ client_id: env.NIGHTBOT_CLIENT_ID, client_secret: env.NIGHTBOT_CLIENT_SECRET, grant_type: "authorization_code", redirect_uri: redirect, code }) });
+    const data = r.ok ? await r.json().catch(() => ({})) : {};
+    if (!data.access_token) {
+      await db.prepare("INSERT OR REPLACE INTO nightbot_auth (state_hash, token, error, created) VALUES (?, NULL, ?, ?)").bind(h, "nightbot " + r.status, now).run();
+      return say("Nightbot didn't accept the sign-in. Try again from the app.", "نايت بوت ما قبل تسجيل الدخول. حاول مرة ثانية من البرنامج.", 502);
+    }
+    await db.prepare("INSERT OR REPLACE INTO nightbot_auth (state_hash, token, error, created) VALUES (?, ?, NULL, ?)").bind(h, data.access_token, now).run();
+    return say("Nightbot is connected ✓ Go back to the app: your commands are loading.", "انربط نايت بوت ✓ ارجع للبرنامج: أوامرك تتحمّل الحين.");
+  }
+  // /api/nightbot/token: the app asks for the key (once)
+  if (req.method !== "GET") return json({ error: "Method not allowed." }, 405, { Allow: "GET" });
+  if (!env.NIGHTBOT_CLIENT_ID || !env.NIGHTBOT_CLIENT_SECRET) return json({ status: "error", error: "not_setup" });   // the app says so at once
+  if (!okState) return json({ error: "Bad state." }, 400);
+  const h = await sha256hex("nb:" + state);
+  const row = await db.prepare("SELECT token, error FROM nightbot_auth WHERE state_hash = ?").bind(h).first();
+  if (!row) return json({ status: "waiting" });
+  await db.prepare("DELETE FROM nightbot_auth WHERE state_hash = ?").bind(h).run();
+  return row.token ? json({ status: "ok", token: row.token }) : json({ status: "error", error: row.error || "denied" });
+}
+
 function json(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), {
     status,
@@ -876,12 +928,26 @@ const TEXT = {
     f4_t: "Greetings", f4_d: "A hello for the people you choose, once per stream, in your own words.",
     f5_t: "Blocklist", f5_d: "People the bot ignores: their commands get no answer.",
     f6_t: "Moderation", f6_d: "Filters for bad words in Arabic and English, links, caps, emotes, symbols and spam, and a log of what was done.",
-    f7_t: "Mini games", f7_d: "Eleven games, like «حروف», «سؤال» (easy, medium or hard questions), «الدخيل» and «ترجم», with «لعبه؟» for a random one, «العاب؟» for the list, and weekly, monthly and all-time leaderboards.",
+    f7_t: "Mini games", f7_d: "Eleven games, like «\u2068حروف\u2069», «\u2068سؤال\u2069» (easy, medium or hard questions), «\u2068الدخيل\u2069» and «\u2068ترجم\u2069», with «\u2068لعبه؟\u2069» for a random one, «\u2068العاب؟\u2069» for the list, and weekly, monthly and all-time leaderboards.",
     f8_t: "Test chat", f8_d: "Try every command, game and event reply as any viewer, without Twitch. With ready-made recipes.",
     f9_t: "Giveaways", f9_d: "Draw an active chatter, let viewers join with a keyword, or guess a number. Subscriber luck and rerolls.",
     f10_t: "Public command list", f10_d: "One link to a page with all your commands, an example of what each says, and the games leaderboard.",
     f11_t: "Editor link", f11_d: "Let someone you trust edit your commands from the website, with a link and a one-time password.",
     f12_t: "English and Arabic", f12_d: "The whole app in both languages, right to left in Arabic, in dark and light.",
+    f13_t: "Import from Nightbot or StreamElements", f13_d: "Bring your commands and timers over in one click: sign in with Nightbot, paste your StreamElements key, or just type the channel. You choose what comes in, and one click undoes it all.",
+    f14_t: "Voice commands", f14_d: "Hold a key and say it, in Arabic, English or both: \"timeout FQPN 10 minutes\", «\u2068ابدأ حروف\u2069», \"say GG exclamation mark\". Runs on your PC, only while you hold the key, and «\u2068كنسل\u2069» or \"cancel\" takes it back.",
+    beta: "Beta",
+    v_title: "Variables", v_lead: "Put these in any command reply. The bot swaps each one for the real value when someone uses the command.", v_count: "{n} variables",
+    v_try: "Try it", v_note: "Sample values, not real data. A variable it doesn't know stays as you typed it.", v_search: "Search variables (follow, weather, طقس…)", v_copy: "Click a variable to copy it.",
+    v_none: "No variable matches your search.", v_ex: "Example", v_chat: "In chat", v_new: "New", v_event: "Only in event replies", v_home: "Home",
+    v_try_ex: "Welcome $(user)! We've been live for $(uptime). $(weather Riyadh)",
+    vg_viewer: "Viewer", vg_stream: "Stream", vg_followers: "Followers", vg_first: "First in chat", vg_world: "World", vg_event: "Event replies", vg_adv: "Advanced",
+    v_cta_t: "{n} variables for your commands", v_cta_d: "See what each one does, with an example, and try your own reply before you save it.", v_cta_go: "See all variables",
+    f15_t: "Hotkeys", f15_d: "One key, even in the middle of a game: +1 to your deaths counter, send !discord, start a mini game. Combos like Ctrl + Shift + F5 or Mouse 4 + Q work too.",
+    lab_t: "Labs", lab_s: "New features you can try before they're finished. Switch them on in the app, under Settings → Labs. They can change, or be removed in a future update.",
+    lab_v1: "Works in Arabic and English", lab_v2: "Runs on your PC: your voice never leaves it", lab_v3: "Free speech engine, about 200 MB, downloaded the first time",
+    lab_how: "How to try it", lab_s1: "Update to 1.17.0 or newer", lab_s2: "Open Settings → Labs", lab_s3: "Switch on Voice commands",
+    lab_st: "Status: in testing since 1.17.0", lab_soon: "More soon", lab_soon_d: "New beta features show up here and in the app first.",
     s_t: "Install in a minute",
     s1: "Download the installer above.",
     s2: "Run it. If Windows shows “Windows protected your PC”, click More info, then Run anyway.",
@@ -935,7 +1001,7 @@ const TEXT = {
     dl: "تحميل لويندوز", dl_users: "ستريمر يستخدمونه", dl_meta: "الإصدار {v} · {d} · {s} ميغابايت", dl_down: "احصل على أحدث إصدار من GitHub", dl_req: "ويندوز 10 أو 11 · يُثبَّت لحسابك فقط، بدون صلاحيات المسؤول",
     dl_all: "كل الإصدارات وما تغيّر فيها",
     f_t: "ماذا يفعل",
-    f1_t: "الأوامر", f1_d: "بأسماء بديلة ومستويات للمستخدمين وفترات انتظار ومتغيرات مثل \\u2066$(user)\\u2069 و\\u2066$(followage)\\u2069 و\\u2066$(weather city)\\u2069 و\\u2066$(accountage)\\u2069، وعدّادات (الموتات، الانتصارات…) تعدّلها بضغطة.",
+    f1_t: "الأوامر", f1_d: "بأسماء بديلة ومستويات للمستخدمين وفترات انتظار ومتغيرات مثل \u2066$\u2060(user)\u2069 و\u2066$\u2060(followage)\u2069 و\u2066$\u2060(weather city)\u2069 و\u2066$\u2060(accountage)\u2069، وعدّادات (الموتات، الانتصارات…) تعدّلها بضغطة.",
     f2_t: "المؤقتات", f2_d: "رسائل بجدول زمني أثناء البث، مثل تذكير بالمتابعة أو بالانضمام للديسكورد.",
     f3_t: "أحداث تويتش", f3_d: "ردود على المتابعة والاشتراكات والإهداءات والغارات وقطار الحماس والـ Bits وسلاسل المشاهدة والتبرعات، مع المجموع.",
     f4_t: "التحيات", f4_d: "ترحيب بمن تختارهم، مرة في كل بث، بكلماتك.",
@@ -947,6 +1013,20 @@ const TEXT = {
     f10_t: "قائمة الأوامر العامة", f10_d: "رابط واحد لصفحة فيها كل أوامرك، ومثال على ما يقوله كل أمر، ولوحة أوائل الألعاب.",
     f11_t: "رابط التعديل", f11_d: "اسمح لشخص تثق به بتعديل أوامرك من الموقع، برابط وكلمة مرور لمرة واحدة.",
     f12_t: "العربية والإنجليزية", f12_d: "التطبيق كله باللغتين، من اليمين لليسار بالعربية، بالوضع الداكن والفاتح.",
+    f13_t: "استيراد من نايت بوت أو StreamElements", f13_d: "انقل أوامرك ومؤقتاتك بضغطة: سجّل دخول بنايت بوت، أو الصق مفتاح StreamElements، أو اكتب اسم القناة بس. أنت تختار وش ينضاف، وضغطة وحدة تتراجع عن كل شي.",
+    f14_t: "أوامر الصوت", f14_d: "اضغط زر وقلها، بالعربي أو الإنجليزي أو خلط: «تايم اوت فقبن عشر دقايق»، «ابدأ حروف»، «قول هلا والله تعجب». يشتغل على جهازك، بس وأنت ضاغط الزر، و«كنسل» يتراجع عنه.",
+    beta: "تجريبي",
+    v_title: "المتغيرات", v_lead: "حطها في رد أي أمر. البوت يبدّل كل وحدة بالقيمة الحقيقية لما أحد يستخدم الأمر.", v_count: "{n} متغير",
+    v_try: "جرّبها", v_note: "قيم للتجربة، مو بيانات حقيقية. المتغير اللي ما يعرفه يبقى مثل ما كتبته.", v_search: "دوّر على متغير (طقس، follow، weather…)", v_copy: "اضغط على المتغير عشان تنسخه.",
+    v_none: "ما فيه متغير يطابق بحثك.", v_ex: "مثال", v_chat: "في الشات", v_new: "جديد", v_event: "في ردود الأحداث بس", v_home: "الرئيسية",
+    v_try_ex: "هلا $(user)! صار لنا $(uptime) على البث. $(weather الرياض)",
+    vg_viewer: "المشاهد", vg_stream: "البث", vg_followers: "المتابعين", vg_first: "أول واحد في الشات", vg_world: "العالم", vg_event: "ردود الأحداث", vg_adv: "متقدم",
+    v_cta_t: "{n} متغير لأوامرك", v_cta_d: "شوف وش تسوي كل وحدة مع مثال، وجرّب ردك قبل ما تحفظه.", v_cta_go: "شوف كل المتغيرات",
+    f15_t: "اختصارات الكيبورد", f15_d: "زر واحد، حتى وأنت في نص اللعبة: +1 لعداد الموتات، يرسل !discord، يبدأ لعبة. وتقدر تسوي كومبو مثل \u2066Ctrl + Shift + F5\u2069 أو \u2066Mouse 4 + Q\u2069.",
+    lab_t: "المختبر", lab_s: "ميزات جديدة تقدر تجربها قبل ما تكتمل. شغّلها من التطبيق، في الإعدادات ← المختبر. ممكن تتغير، أو تنشال في تحديث جاي.",
+    lab_v1: "يفهم عربي وإنجليزي", lab_v2: "يشتغل على جهازك: صوتك ما يطلع منه", lab_v3: "محرك كلام مجاني، حوالي 200 ميقا، ينزل أول مرة",
+    lab_how: "كيف تجربه", lab_s1: "حدّث إلى 1.17.0 أو أحدث", lab_s2: "افتح الإعدادات ← المختبر", lab_s3: "شغّل الأوامر الصوتية",
+    lab_st: "الحالة: تحت التجربة من 1.17.0", lab_soon: "قريب أكثر", lab_soon_d: "الميزات التجريبية الجديدة تطلع هنا وفي التطبيق أول.",
     s_t: "التثبيت في دقيقة",
     s1: "حمّل المثبّت من الأعلى.",
     s2: "شغّله. إذا ظهرت رسالة «Windows protected your PC» فاضغط More info ثم Run anyway.",
@@ -985,10 +1065,14 @@ const ICONS = {   // small line icons for the feature cards (inline SVG: nothing
   f6: '<path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
   f7: '<rect x="2.5" y="7" width="19" height="11" rx="5"/><path d="M7.5 10.5v4M5.5 12.5h4M15.5 11.5h.01M17.5 13.5h.01"/>',
   f8: '<path d="M4 5h16v11H9l-5 4z"/><path d="m10 8.5 4 2-4 2z"/>',
-  f9: '<rect x="3.5" y="9" width="17" height="11.5" rx="1.5"/><path d="M2.5 9h19v-3h-19zM12 6v14.5"/>',
+  f9: '<rect x="3.5" y="9" width="17" height="11.5" rx="1.5"/><path d="M2.5 9h19v-3h-19zM12 6v14.5"/><path d="M12 6c-1.5-3.5-5.5-3.5-5.5-1S10 6 12 6zM12 6c1.5-3.5 5.5-3.5 5.5-1S14 6 12 6z"/>',      // the same gift (with its bow) as the app's Giveaways
   f10: '<path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/>',
   f11: '<path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/>',
   f12: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 3.7 5.7 3.7 9s-1.2 6.3-3.7 9c-2.5-2.7-3.7-5.7-3.7-9S9.5 5.7 12 3z"/>',
+  f13: '<path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>',
+  f14: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
+  f15: '<rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/>',
+  lab: '<path d="M9 3h6M10 3v6L4.5 18.5A2 2 0 0 0 6.2 21.5h11.6a2 2 0 0 0 1.7-3L14 9V3"/><path d="M7 15h10"/>',
 };
 const T = (k) => esc(TEXT.en[k]);
 const BOTS = ["Nightbot", "StreamElements", "WizeBot"];     // the comparison's columns (names only: nothing loaded from them)
@@ -1014,17 +1098,25 @@ function homeBody(origin, rel, users = 0) {
     esc(TEXT.en.dl_meta.replace("{v}", rel.version).replace("{d}", new Date(rel.date * 1000).toISOString().slice(0, 10)).replace("{s}", (rel.size / 1048576).toFixed(1)))}</p>`
     : `<p class="dlmeta" data-t="dl_down">${T("dl_down")}</p>`;
   const icon = (k) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[k]}</svg>`;
-  const feats = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((n) => `<div class="feat">${icon("f" + n)}<h3 data-t="f${n}_t">${T("f" + n + "_t")}</h3><p data-t="f${n}_d">${T("f" + n + "_d")}</p></div>`).join("");
+  const feats = [1, 13, 2, 3, 4, 5, 6, 7, 15, 8, 9, 10, 11, 12].map((n) => `<div class="feat">${icon("f" + n)}<h3><span data-t="f${n}_t">${T("f" + n + "_t")}</span></h3><p data-t="f${n}_d">${T("f" + n + "_d")}</p></div>`).join("");
+  // 1.17.0: Labs: beta features (off in the app until switched on in Settings → Labs). Voice commands is the first.
+  const labs = `<section id="labs"><h2 class="lbhead">${icon("lab")}<span data-t="lab_t">${T("lab_t")}</span></h2><p class="lead small" data-t="lab_s">${T("lab_s")}</p>
+<div class="lbgrid"><div class="lbcard main"><div class="lbtop"><span class="lbic">${icon("f14")}</span><h3><span data-t="f14_t">${T("f14_t")}</span> <span class="beta" data-t="beta">${T("beta")}</span></h3></div>
+<p data-t="f14_d">${T("f14_d")}</p><ul class="lbpts">${[1, 2, 3].map((n) => `<li data-t="lab_v${n}">${T("lab_v" + n)}</li>`).join("")}</ul><p class="lbst" data-t="lab_st">${T("lab_st")}</p></div>
+<div class="lbcard"><h3 data-t="lab_how">${T("lab_how")}</h3><ol class="lbsteps">${[1, 2, 3].map((n) => `<li><span class="num" aria-hidden="true">${n}</span><span data-t="lab_s${n}">${T("lab_s" + n)}</span></li>`).join("")}</ol>
+<div class="lbsoon"><b data-t="lab_soon">${T("lab_soon")}</b><p data-t="lab_soon_d">${T("lab_soon_d")}</p></div></div></div></section>`;
   const steps = [1, 2, 3, 4].map((n) => `<li><span class="num" aria-hidden="true">${n}</span><span data-t="s${n}">${T("s" + n)}</span></li>`).join("");
   const faq = [1, 2, 3, 4, 5, 6].map((n) => `<details><summary data-t="q${n}">${T("q" + n)}</summary><p data-t="a${n}">${T("a" + n)}</p></details>`).join("");
-  return `<header class="top"><div class="who"><img class="logo" src="${LOGO}" alt="" width="48" height="48"><div><b class="brand">FQPN's Chat Bot</b></div></div>${langBtn()}</header>
+  return `<header class="top"><div class="who"><img class="logo" src="${LOGO}" alt="" width="48" height="48"><div><b class="brand">FQPN's Chat Bot</b></div></div><div class="topr"><a class="vbtn" href="/variables"><span class="vbi" aria-hidden="true">$( )</span><span data-t="v_title">${T("v_title")}</span></a>${langBtn()}</div></header>
 <section class="hero">
 <h1 data-t="h_title">${T("h_title")}</h1>
 <p class="lead" data-t="h_lead">${T("h_lead")}</p>
 <div class="dlbox"><div class="dlrow"><a class="dl" id="dl" href="/download/windows"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M4 20h16"/></svg><span data-t="dl">${T("dl")}</span></a>${users >= 2 ? `<span class="dlusers"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M15.5 4.8a3.5 3.5 0 0 1 0 6.4M18 14.8c1.9.8 3.1 2.6 3.5 5.2"/></svg><b>${users}</b> <span data-t="dl_users">${T("dl_users")}</span></span>` : ""}</div>
 ${meta}<p class="req" data-t="dl_req">${T("dl_req")}</p><p class="req"><a href="${esc(rel ? rel.notes : RELEASES)}" rel="noopener" data-t="dl_all">${T("dl_all")}</a></p></div>
 </section>
-<section><h2 data-t="f_t">${T("f_t")}</h2><div class="feats">${feats}</div></section>
+<section><h2 data-t="f_t">${T("f_t")}</h2><div class="feats">${feats}</div>
+<a class="vcta" href="/variables"><span><b data-t="v_cta_t" data-n="${VARS.length}">${esc(TEXT.en.v_cta_t.replace("{n}", VARS.length))}</b><span data-t="v_cta_d">${T("v_cta_d")}</span></span><span class="vgo"><span data-t="v_cta_go">${T("v_cta_go")}</span> <span class="arr" aria-hidden="true">→</span></span></a></section>
+${labs}
 <section><h2 data-t="c_t">${T("c_t")}</h2><p class="lead small" data-t="c_lead">${T("c_lead")}</p>
 <div class="cmpwrap"><table class="cmp"><thead><tr><th></th><th class="us" data-t="c_us">${T("c_us")}</th>${BOTS.map((b) => `<th>${b}</th>`).join("")}</tr></thead><tbody>${
   [1, 2, 10, 11, 7, 9, 8, 5, 6].map((n) => `<tr${n === 6 ? ' class="con"' : ""}><th scope="row" data-t="c${n}">${T("c" + n)}</th>${cell(TEXT.en["c" + n + "a"], "c" + n + "a", true)}${
@@ -1036,6 +1128,77 @@ ${meta}<p class="req" data-t="dl_req">${T("dl_req")}</p><p class="req"><a href="
 <section><h2 data-t="q_t">${T("q_t")}</h2><div class="faq">${faq}</div></section>
 <section><h2 data-t="l_t">${T("l_t")}</h2><p class="lead small" data-t="home_d" data-u="${esc(origin)}/fqpn_">${esc(TEXT.en.home_d.replace("{u}", origin + "/fqpn_"))}</p></section>
 <footer class="foot"><span><span data-t="by">${T("by")}</span> <a href="https://www.twitch.tv/fqpn_" rel="noopener">FQPN_</a> &amp; <a href="https://www.twitch.tv/1asoom" rel="noopener">1asoom</a></span></footer>`;
+}
+
+// 1.17.0: the Variables page (/variables): every variable of the app with one line about it, an example command and what
+// chat would show (with sample values, never anyone's data), a "Try it" box and a search. The list is the app's (the
+// command editor's variable buttons): when a variable is added to the app, add it here too.
+const VAR_GROUPS = ["viewer", "stream", "followers", "first", "world", "event", "adv"];
+const VARS = [["$(user)", "viewer", "The name of the viewer who used the command.", "اسم المشاهد اللي استخدم الأمر.", "!hi", "!hi", "Hi $(user)! Welcome to the stream", "هلا $(user)! حيّاك في البث", ""], ["$(touser)", "viewer", "The name written after the command, or the viewer if there isn't one.", "الاسم المكتوب بعد الأمر، أو المشاهد نفسه لو ما فيه.", "!hug @sam_99", "!hug @sam_99", "$(user) hugs $(touser)", "$(user) يحضن $(touser)", ""], ["$(query)", "viewer", "Everything the viewer typed after the command.", "كل اللي كتبه المشاهد بعد الأمر.", "!say hello chat", "!say hello chat", "$(user) says: $(query)", "$(user) يقول: $(query)", ""], ["$(querystring)", "viewer", "The same text, made safe to put inside a link.", "نفس النص، بس آمن تحطه داخل رابط.", "!google twitch bot", "!google twitch bot", "https://google.com/search?q=$(querystring)", "https://google.com/search?q=$(querystring)", ""], ["$(count)", "viewer", "How many times this command has been used.", "كم مرة انستخدم هالأمر.", "!hydrate", "!hydrate", "Drink water! Reminder number $(count)", "اشرب موية! التذكير رقم $(count)", ""], ["$(count name)", "viewer", "Adds 1 to a named counter and shows it.", "يزيد عدّاد له اسم 1 ويعرضه.", "!death", "!death", "FQPN died again: $(count deaths) deaths", "فقبن مات مرة ثانية: $(count deaths) موتة", "new"], ["$(getcount name)", "viewer", "Shows a named counter without adding to it.", "يعرض عدّاد له اسم بدون ما يزيده.", "!deaths", "!deaths", "Deaths so far: $(getcount deaths)", "عدد الموتات لين الحين: $(getcount deaths)", "new"], ["$(accountage)", "viewer", "How old the viewer's Twitch account is.", "عمر حساب المشاهد في تويتش.", "!age", "!age", "$(user)'s account is $(accountage) old", "عمر حساب $(user): $(accountage)", "new"], ["$(random.chatter)", "viewer", "A random viewer who chatted in the last 30 minutes.", "مشاهد عشوائي كتب في الشات آخر 30 دقيقة.", "!pick", "!pick", "The winner is $(random.chatter)!", "الفائز هو $(random.chatter)!", "new"], ["$(channel)", "stream", "Your channel name.", "اسم قناتك.", "!channel", "!channel", "You're watching $(channel)", "أنت تتابع $(channel)", ""], ["$(game)", "stream", "The game or category you're streaming now.", "اللعبة أو التصنيف اللي تبثه الحين.", "!game", "!game", "Now playing: $(game)", "نلعب الحين: $(game)", ""], ["$(title)", "stream", "Your current stream title.", "عنوان بثك الحالي.", "!title", "!title", "Title: $(title)", "العنوان: $(title)", ""], ["$(uptime)", "stream", "How long you've been live.", "كم صار لك وأنت تبث.", "!uptime", "!uptime", "Live for $(uptime)", "صار لنا $(uptime) على البث", ""], ["$(viewers)", "stream", "How many people are watching right now.", "كم واحد يشاهد الحين.", "!viewers", "!viewers", "$(viewers) people are watching", "فيه $(viewers) يشاهدون الحين", ""], ["$(clip)", "stream", "Makes a clip of the last moments and gives its link.", "يسوي كليب لآخر لحظات ويعطي رابطه.", "!clip", "!clip", "Clip saved: $(clip)", "انحفظ الكليب: $(clip)", "new"], ["$(followers)", "followers", "How many followers your channel has.", "كم متابع عند قناتك.", "!followers", "!followers", "We're $(followers) followers strong!", "صرنا $(followers) متابع!", "new"], ["$(follow)", "followers", "A sentence saying if the viewer follows you.", "جملة تقول إذا المشاهد يتابعك أو لا.", "!follow", "!follow", "$(user) $(follow)", "$(user) $(follow)", ""], ["$(followdate)", "followers", "The date the viewer started following you.", "تاريخ بداية متابعة المشاهد لك.", "!followdate", "!followdate", "$(user) followed on $(followdate)", "$(user) تابع بتاريخ $(followdate)", ""], ["$(followage)", "followers", "How long the viewer has followed you.", "كم صار للمشاهد وهو يتابعك.", "!followage", "!followage", "$(user) has followed for $(followage)", "$(user) يتابعك من $(followage)", ""], ["$(firststreak)", "first", "How many streams in a row the viewer was first in chat.", "كم بث ورا بعض كان المشاهد أول واحد في الشات.", "!first", "!first", "$(user) was first $(firststreak) streams in a row", "$(user) كان الأول $(firststreak) بثوث ورا بعض", "new"], ["$(firststreakpeak)", "first", "The viewer's best \"first in chat\" streak ever.", "أفضل سلسلة «أول واحد» للمشاهد.", "!best", "!best", "$(user)'s best first streak: $(firststreakpeak)", "أفضل سلسلة لـ $(user): $(firststreakpeak)", "new"], ["$(weather city)", "world", "The weather in a city right now.", "الطقس في مدينة الحين.", "!weather", "!weather", "$(weather Riyadh)", "$(weather Riyadh)", "new"], ["$(time city)", "world", "The time in a city right now.", "الوقت الحين في مدينة.", "!time", "!time", "$(time Riyadh)", "$(time Riyadh)", "new"], ["$(streak)", "event", "How many streams in a row they watched.", "كم بث ورا بعض شاهدوه.", "Watch streak reply", "رد سلسلة المشاهدة", "$(user) watched $(streak) streams in a row!", "$(user) شاهد $(streak) بثوث ورا بعض!", "event"], ["$(tier)", "event", "The subscription type: Tier 1, 2, 3 or Prime.", "نوع الاشتراك: Tier 1 أو 2 أو 3 أو Prime.", "Subscription reply", "رد الاشتراك", "Thanks $(user) for the $(tier) sub!", "شكراً $(user) على اشتراك $(tier)!", "event"], ["$(months)", "event", "How many months they've subscribed in total.", "كم شهر اشتركوا بالمجموع.", "Subscription reply", "رد الاشتراك", "$(user) subscribed for $(months) months!", "$(user) مشترك من $(months) أشهر!", "event"], ["$(message)", "event", "The message they wrote with their sub, Bits or donation.", "الرسالة اللي كتبوها مع الاشتراك أو البيتس أو التبرع.", "Subscription reply", "رد الاشتراك", "$(user) says: $(message)", "$(user) يقول: $(message)", "event"], ["$(gifts)", "event", "How many subs were gifted at once.", "كم اشتراك انهدى مرة وحدة.", "Gift subs reply", "رد إهداء الاشتراكات", "$(user) gifted $(gifts) subs!", "$(user) أهدى $(gifts) اشتراكات!", "event"], ["$(raider)", "event", "The streamer who raided you.", "الستريمر اللي سوّى لك رِيد.", "Raid reply", "رد الغارة", "Welcome $(raider) and $(viewers) raiders!", "حيّاك $(raider) ومعه $(viewers) مشاهد!", "event"], ["$(level)", "event", "The Hype Train level.", "مستوى قطار الحماس.", "Hype train reply", "رد قطار الحماس", "Hype Train level $(level)!", "قطار الحماس مستوى $(level)!", "event"], ["$(bits)", "event", "How many Bits were cheered.", "كم بيتس انرسلت.", "Bits reply", "رد البيتس", "Thanks $(user) for $(bits) Bits!", "شكراً $(user) على $(bits) بيتس!", "event"], ["$(amount)", "event", "The donation amount.", "مبلغ التبرع.", "Donation reply", "رد التبرع", "$(user) donated $(amount) $(currency)!", "$(user) تبرّع بـ $(amount) $(currency)!", "event"], ["$(currency)", "event", "The donation currency, like USD or SAR.", "عملة التبرع، مثل USD أو SAR.", "Donation reply", "رد التبرع", "$(amount) $(currency), thank you!", "$(amount) $(currency)، شكراً!", "event"], ["$(total)", "event", "Everything this person gave so far.", "كل اللي قدّمه هالشخص لين الحين.", "Bits reply", "رد البيتس", "$(user) has cheered $(total) Bits in total!", "$(user) أرسل $(total) بيتس بالمجموع!", "event,new"], ["$(eval …)", "adv", "Does a little math, like a random number.", "يسوي عملية حسابية، مثل رقم عشوائي.", "!roll", "!roll", "$(user) rolled $(eval Math.floor(Math.random() * 101))", "$(user) طلع له $(eval Math.floor(Math.random() * 101))", ""], ["$(urlfetch link)", "adv", "Puts the text of a public web page in the reply.", "يحط نص صفحة ويب عامة في الرد.", "!quote", "!quote", "$(urlfetch https://example.com/quote)", "$(urlfetch https://example.com/quote)", ""]];      // [variable, group, English, Arabic, example command EN, AR, reply EN, AR, tags]
+const VAR_SAMPLE = {"en": {"user": "FQPN", "touser": "sam_99", "query": "hello chat", "querystring": "twitch%20bot", "count": "42", "count *": "8", "getcount *": "8", "accountage": "2 years, 3 months, 5 days", "random.chatter": "night_owl", "channel": "fqpn_", "game": "Valorant", "title": "Ranked grind!", "uptime": "2h 14m", "viewers": "128", "clip": "https://clips.twitch.tv/…", "followers": "1234", "follow": "followed fqpn_ on March 3, 2024 (1 year, 2 months ago)", "followdate": "March 3, 2024", "followage": "1 year, 2 months, 3 days", "firststreak": "3", "firststreakpeak": "7", "weather *": "{0}: 31°C, clear sky", "time *": "{0}: 3:42 PM", "streak": "12", "tier": "Tier 1", "months": "7", "message": "Keep going!", "gifts": "5", "raider": "StreamerXYZ", "level": "3", "bits": "100", "amount": "12.50", "currency": "USD", "total": "1466", "eval *": "57", "urlfetch *": "(text from the page)"}, "ar": {"user": "فقبن", "touser": "sam_99", "query": "هلا بالشات", "querystring": "twitch%20bot", "count": "42", "count *": "8", "getcount *": "8", "accountage": "سنتين و3 أشهر و5 أيام", "random.chatter": "night_owl", "channel": "fqpn_", "game": "Valorant", "title": "رانكد!", "uptime": "ساعتين و14 دقيقة", "viewers": "128", "clip": "https://clips.twitch.tv/…", "followers": "1234", "follow": "يتابع fqpn_ من 3 مارس 2024 (سنة وشهرين)", "followdate": "3 مارس 2024", "followage": "سنة وشهرين و3 أيام", "firststreak": "3", "firststreakpeak": "7", "weather *": "{0}: 31°م، صافي", "time *": "{0}: 3:42 م", "streak": "12", "tier": "Tier 1", "months": "7", "message": "كمّل!", "gifts": "5", "raider": "StreamerXYZ", "level": "3", "bits": "100", "amount": "12.50", "currency": "SAR", "total": "1466", "eval *": "57", "urlfetch *": "(نص من الصفحة)"}};
+// $(…) → its sample value, innermost first (like the app); unknown ones stay as typed. Used by the page and its script.
+function fillVars(s, S) {
+  function one(body) {
+    var b = body.trim(), sp = b.indexOf(" "), k = (sp < 0 ? b : b.slice(0, sp)).toLowerCase(), arg = sp < 0 ? "" : b.slice(sp + 1).trim();
+    if (arg && S[k + " *"] !== undefined) return S[k + " *"].split("{0}").join(arg);
+    if (S[k] !== undefined) return S[k];
+    return null;
+  }
+  function walk(str, depth) {
+    var out = "", i = 0;
+    while (i < str.length) {
+      var at = str.indexOf("$(", i);
+      if (at < 0 || depth > 8) { out += str.slice(i); break; }
+      var d = 0, j = at + 1, end = -1;
+      for (; j < str.length; j++) { var c = str[j]; if (c === "(") d++; else if (c === ")") { d--; if (!d) { end = j; break; } } }
+      if (end < 0) { out += str.slice(i); break; }
+      out += str.slice(i, at);
+      var inner = str.slice(at + 2, end), k0 = inner.trim().split(" ")[0].toLowerCase();
+      var body = k0 === "eval" ? inner : walk(inner, depth + 1), v = one(body);
+      out += v === null ? "$(" + body + ")" : v;
+      i = end + 1;
+    }
+    return out;
+  }
+  return walk(String(s), 0);
+}
+function varsBody() {
+  const L = (en, ar) => `<span class="L-en">${en}</span><span class="L-ar" lang="ar" dir="rtl">${ar}</span>`;
+  const hl = (r) => {      // each whole $(…) (brackets inside included) kept in one piece, in the variable color
+    let out = "", i = 0;
+    while (i < r.length) {
+      const at = r.indexOf("$(", i);
+      if (at < 0) { out += esc(r.slice(i)); break; }
+      let d = 0, end = -1;
+      for (let j = at + 1; j < r.length; j++) { if (r[j] === "(") d++; else if (r[j] === ")" && !--d) { end = j; break; } }
+      if (end < 0) { out += esc(r.slice(i)); break; }
+      out += esc(r.slice(i, at)) + `<bdi dir="ltr" class="vv">${esc(r.slice(at, end + 1))}</bdi>`;
+      i = end + 1;
+    }
+    return out;
+  };
+  const card = (v) => {
+    const tags = (v[8] ? v[8].split(",") : []).map((x) => x === "new" ? `<span class="vtag n" data-t="v_new">${T("v_new")}</span>` : `<span class="vtag e" data-t="v_event">${T("v_event")}</span>`).join("");
+    const ex = v[4].startsWith("!") ? `<bdi dir="ltr" class="vcmd">${esc(v[4])}</bdi>` : L(esc(v[4]), esc(v[5]));
+    const s = (v[0] + " " + v[2] + " " + v[3]).toLowerCase();
+    return `<div class="vcard" data-s="${esc(s)}"><div class="vtop"><button class="vname" type="button" data-copy="${esc(v[0])}" dir="ltr">${esc(v[0])}</button>${tags}</div>
+<p class="vdesc">${L(esc(v[2]), esc(v[3]))}</p>
+<div class="vex"><div><span class="lbl" data-t="v_ex">${T("v_ex")}</span> ${ex} <span class="arr" aria-hidden="true">→</span> <span class="vr">${L(hl(v[6]), hl(v[7]))}</span></div>
+<div><span class="lbl" data-t="v_chat">${T("v_chat")}</span> <span class="vo">${L(esc(fillVars(v[6], VAR_SAMPLE.en)), esc(fillVars(v[7], VAR_SAMPLE.ar)))}</span></div></div></div>`;
+  };
+  const groups = VAR_GROUPS.map((g) => { const vs = VARS.filter((v) => v[1] === g); return `<section class="group vgroup"><h2><span data-t="vg_${g}">${T("vg_" + g)}</span> <span class="n">(${vs.length})</span></h2><div class="vgrid">${vs.map(card).join("")}</div></section>`; }).join("");
+  return `<header class="top"><a class="who home" href="/"><img class="logo" src="${LOGO}" alt="" width="48" height="48"><b class="brand">FQPN's Chat Bot</b></a>${langBtn()}</header>
+<h1 class="vh1" data-t="v_title">${T("v_title")}</h1>
+<p class="lead" data-t="v_lead">${T("v_lead")}</p>
+<p class="vcount" data-t="v_count" data-n="${VARS.length}">${esc(TEXT.en.v_count.replace("{n}", VARS.length))}</p>
+<section class="vtry"><h2 data-t="v_try">${T("v_try")}</h2><textarea id="vtin" dir="auto" rows="2" spellcheck="false" aria-label="${T("v_try")}"></textarea>
+<div class="vchatline"><b>fqpnbot:</b><span><small data-t="v_chat">${T("v_chat")}</small><span id="vtout" dir="auto"></span></span></div>
+<p class="vnote" data-t="v_note">${T("v_note")}</p></section>
+<div class="searchbox"><input id="vq" type="search" autocomplete="off" spellcheck="false" dir="auto" data-ph="v_search" aria-label="${T("v_search")}" placeholder="${T("v_search")}"></div>
+<p class="hint" data-t="v_copy">${T("v_copy")}</p>
+<div id="vgroups">${groups}</div><p class="empty" id="vnone" hidden data-t="v_none">${T("v_none")}</p>
+<footer class="foot"><span><span data-t="by">${T("by")}</span> <a href="https://www.twitch.tv/fqpn_" rel="noopener">FQPN_</a> &amp; <a href="https://www.twitch.tv/1asoom" rel="noopener">1asoom</a></span><a href="/" data-t="v_home">${T("v_home")}</a></footer>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>`;
 }
 
 function missingBody(login) {
@@ -1145,6 +1308,34 @@ table.adm{width:100%;border-collapse:collapse;font-size:15px}.adm th,.adm td{tex
 .chip .ct{display:inline-flex;align-items:baseline;gap:0}
 .chip .ex{font:400 13px 'Outfit','Tajawal',system-ui,sans-serif;color:var(--mute);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-align:start;unicode-bidi:plaintext}
 .group.games h2{color:var(--soft)}
+html:not([lang=ar]) .L-ar,html[lang=ar] .L-en{display:none}
+.topr{display:flex;align-items:center;gap:8px}.vbtn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);color:var(--text);padding:8px 14px;border-radius:8px;font:600 15px 'Outfit','Tajawal',sans-serif;text-decoration:none}
+.vbtn:hover,.vbtn:focus-visible{border-color:var(--red2);outline:none}.vbi{color:var(--red2);font-family:ui-monospace,Consolas,monospace;font-size:13px;direction:ltr;unicode-bidi:isolate}
+.vcta{display:flex;align-items:center;justify-content:space-between;gap:12px 18px;flex-wrap:wrap;margin-top:14px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 20px;color:var(--text);text-decoration:none}
+.vcta:hover,.vcta:focus-visible{border-color:var(--red2);outline:none}.vcta b{display:block;font-size:17px;margin-bottom:3px}.vcta span span{color:var(--soft);font-size:15px}.vcta .vgo{color:var(--red2);font-weight:600;white-space:nowrap}
+html[lang=ar] .arr{display:inline-block;transform:scaleX(-1)}
+a.who.home{color:var(--text);text-decoration:none}.vh1{font-size:34px;margin:0}.vcount{color:var(--mute);font-size:14px;margin:-10px 0 18px}
+.vtry{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:18px}.vtry h2{margin:0 0 10px;font-size:15px;font-weight:600;color:var(--soft)}
+.vtry textarea{width:100%;box-sizing:border-box;min-height:56px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font:15px 'Outfit','Tajawal',system-ui,sans-serif;resize:vertical}
+.vtry textarea:focus{outline:none;border-color:var(--red2)}
+.vchatline{margin-top:10px;display:flex;gap:10px;align-items:flex-start;background:var(--chip);border:1px solid var(--line);border-radius:8px;padding:10px 12px}.vchatline b{color:#a970ff;white-space:nowrap}
+.vchatline small{display:block;color:var(--mute);font-size:11px;margin-bottom:2px}#vtout{overflow-wrap:anywhere;white-space:pre-wrap}.vnote{color:var(--mute);font-size:12px;margin:8px 2px 0}
+.vgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px}@media (max-width:600px){.vgrid{grid-template-columns:1fr}}
+.vcard{background:var(--chip);border:1px solid var(--line);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:7px;min-width:0}
+.vtop{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.vname{border:1px solid var(--line);background:var(--bg);color:var(--red2);padding:3px 9px;border-radius:6px;font:600 14px ui-monospace,Consolas,monospace;cursor:pointer;max-width:100%;overflow-wrap:anywhere}
+.vname:hover,.vname:focus-visible{border-color:var(--red2);outline:none}
+.vtag{font-size:11px;font-weight:700;border-radius:5px;padding:1px 6px;border:1px solid}.vtag.n{color:#e5b74b;border-color:#e5b74b}.vtag.e{color:var(--mute);border-color:var(--line)}
+.vdesc{margin:0;color:var(--soft);font-size:14px;line-height:1.45}
+.vex{border-top:1px dashed var(--line);padding-top:7px;font-size:13px;color:var(--mute);display:grid;gap:4px;overflow-wrap:anywhere}.vex .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.04em;opacity:.85;margin-inline-end:4px}
+.vcmd{color:var(--soft)}.vr,.vo{color:var(--text)}.vv{font-family:ui-monospace,Consolas,monospace;color:var(--red2)}
+.gcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px}
+@media (max-width:600px){.gcards{grid-template-columns:1fr}}
+.gcard{border:1px solid var(--line);background:var(--chip);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.gnames{display:flex;flex-wrap:wrap;gap:6px}
+.gname{border:1px solid var(--line);background:var(--bg);color:var(--text);padding:3px 9px;border-radius:6px;font:600 14px 'Outfit','Tajawal',system-ui,sans-serif;cursor:pointer;max-width:100%;overflow-wrap:anywhere}
+.gname:hover,.gname:focus-visible{border-color:var(--red2);outline:none}
+.gdesc{margin:0;color:var(--mute);font-size:13px;line-height:1.45;overflow-wrap:anywhere}
+.gwho{color:var(--mute);font-size:11px;margin-top:auto}
 .avlink{display:block;flex:none;border-radius:50%;transition:box-shadow .15s}
 .avlink:hover{box-shadow:0 0 0 3px var(--red2)}
 a.chname{color:inherit;text-decoration:none;border-bottom:2px solid transparent;transition:border-color .15s}
@@ -1173,7 +1364,20 @@ h2{font-size:22px;font-weight:600;margin:0 0 16px}
 .feat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px}
 .feat svg{color:var(--red2)}
 .feat h3{margin:10px 0 6px;font-size:17px;font-weight:600}
+.beta{font-size:11px;font-weight:700;color:#d29922;border:1px solid rgba(210,153,34,.55);border-radius:5px;padding:0 6px;margin-inline-start:4px;vertical-align:2px}
 .feat p{margin:0;color:var(--soft);font-size:15px;overflow-wrap:anywhere}
+.lbhead{display:flex;align-items:center;gap:10px}.lbhead svg{width:24px;height:24px;fill:none;stroke:var(--red2);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.lbgrid{display:grid;grid-template-columns:1.6fr 1fr;gap:14px}@media (max-width:760px){.lbgrid{grid-template-columns:1fr}}
+.lbcard{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px;position:relative;overflow:hidden}
+.lbcard.main::before{content:"";position:absolute;inset:-40% auto auto -20%;width:60%;height:120%;background:radial-gradient(var(--glow2),transparent 70%);pointer-events:none}
+.lbtop{display:flex;gap:14px;align-items:center}.lbic{width:48px;height:48px;border-radius:12px;display:grid;place-items:center;background:color-mix(in srgb,var(--red2) 16%,transparent);color:var(--red2);flex:none}
+.lbic svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.lbcard h3{margin:0;font-size:19px;font-weight:600}.lbcard p{color:var(--soft);font-size:15px;margin:12px 0}
+.lbpts{list-style:none;padding:0;margin:0 0 14px;display:grid;gap:8px;color:var(--soft);font-size:15px}.lbpts li::before{content:"✓";color:var(--ok);margin-inline-end:8px;font-weight:700}
+.lbst{border-top:1px solid var(--line);padding-top:12px;margin-bottom:0!important;color:var(--mute)!important;font-size:13px!important}
+.lbsteps{list-style:none;padding:0;margin:14px 0 0;display:grid;gap:12px}.lbsteps li{display:flex;gap:12px;align-items:center;color:var(--soft);font-size:15px}
+.lbsteps .num{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:var(--chip);border:1px solid var(--line);font-weight:700;color:var(--text);flex:none}
+.lbsoon{margin-top:16px;padding:14px 16px;border:1px dashed var(--line);border-radius:10px;opacity:.8}.lbsoon p{margin:4px 0 0!important;font-size:14px!important}
 .steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
 .steps li{display:flex;gap:14px;align-items:flex-start;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;font-size:16px}
 .num{width:28px;height:28px;border-radius:50%;background:var(--red2);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:15px;flex:none}
@@ -1271,23 +1475,43 @@ function group(title,list,cls,make){var g=document.createElement("section");g.cl
   var w=document.createElement("div");w.className="chips";list.forEach(function(c){w.appendChild(make(c))});g.appendChild(w);return g}
 function biText(c){return c.key?t("bd_"+c.key):""}
 function gmText(c){return t("gd_"+c.game+"_"+c.what)}
+/* 1.17.0: one card per game action (its "game" + "what", as the app sends them), with all the commands that do it as chips
+   on top, in the order they came; each name keeps its own direction (bdi dir=auto). A click on a name copies it. */
+function gameCards(cmds){var out=[],at={};cmds.forEach(function(c){if(!c.game)return;var k=c.game+"/"+c.what;
+  if(!at[k]){at[k]={game:c.game,what:c.what,perm:c.perm,names:[]};out.push(at[k])}at[k].names.push(c.name)});return out}
+function gameCard(g){var d=document.createElement("div");d.className="gcard";var top=document.createElement("div");top.className="gnames";
+  g.names.forEach(function(n){var b=document.createElement("button");b.type="button";b.className="gname";var i=document.createElement("bdi");i.dir="auto";i.textContent=n;b.appendChild(i);
+    b.title=t("copy");b.addEventListener("click",function(){copy(n)});top.appendChild(b)});
+  var p=document.createElement("p");p.className="gdesc";p.dir="auto";p.textContent=gmText(g).replace(/\u00ab([^\u00bb]+)\u00bb/g,"\u00ab\u2068$1\u2069\u00bb");   // a «name» inside keeps its own direction
+  var w=document.createElement("small");w.className="gwho";w.textContent=t("g_"+g.perm);
+  d.appendChild(top);d.appendChild(p);d.appendChild(w);return d}
 function hit(c,q,extra){return !q||c.name.toLowerCase().indexOf(q)>=0||(extra||"").toLowerCase().indexOf(q)>=0}
 function draw(){
-  if(!D)return;var q=($("q").value||"").trim().toLowerCase(),box=$("groups"),shown=0;box.textContent="";
+  if(!D||!D.commands)return;var q=($("q").value||"").trim().toLowerCase(),box=$("groups"),shown=0;box.textContent="";
   ORDER.forEach(function(p){
     var cs=D.commands.filter(function(c){return !c.builtin&&!c.game&&c.perm===p&&hit(c,q,c.ex)});if(!cs.length)return;shown+=cs.length;
     box.appendChild(group(t("g_"+p),cs,"",function(c){return chip(c,c.ex||"","")}))});
-  var gm=D.commands.filter(function(c){return c.game&&hit(c,q,gmText(c))});      // 1.13.0: the mini games' commands
-  if(gm.length){shown+=gm.length;box.appendChild(group(t("g_games"),gm,"games",function(c){var b=chip(c,gmText(c),t("g_"+c.perm));return b}))}
+  var gm=gameCards(D.commands).filter(function(g){return g.names.some(function(n){return hit({name:n},q,gmText(g))})});      // 1.13.0: the mini games' commands
+  if(gm.length){shown+=gm.length;var gg=group(t("g_games"),gm,"games",gameCard);gg.querySelector(".chips").className="gcards";box.appendChild(gg)}
   var bi=D.commands.filter(function(c){return c.builtin&&hit(c,q,biText(c))});    // the app's built-in commands
   if(bi.length){shown+=bi.length;box.appendChild(group(t("g_builtin"),bi,"builtin",function(c){var b=chip(c,biText(c),t("g_"+c.perm));if(!biText(c))b.title=t("bi_who",{w:t("g_"+c.perm)});return b}))}
   var none=$("none");none.hidden=shown>0;var own=D.commands.filter(function(c){return !c.builtin&&!c.game});none.textContent=own.length||bi.length||gm.length?t("none"):t("empty");
   setCount();   // Arabic: 2 = dual, 3-10 = plural
   $("updated").textContent=t("updated",{t:when(D.updated)})}
+/* 1.17.0: the Variables page: Try it (sample values in the page's language), the search, a click copies a variable */
+${fillVars.toString()}
+var VS=${JSON.stringify(VAR_SAMPLE)},vTyped=false;
+function vTry(){var i=$("vtin");if(!i)return;if(!vTyped)i.value=t("v_try_ex");$("vtout").textContent=fillVars(i.value,VS[lang]||VS.en)}
+function vFind(){var q=($("vq").value||"").trim().toLowerCase(),any=false;
+  document.querySelectorAll(".vgroup").forEach(function(g){var n=0;g.querySelectorAll(".vcard").forEach(function(c){var on=!q||c.getAttribute("data-s").indexOf(q)>=0;c.hidden=!on;if(on)n++});g.hidden=!n;if(n)any=true});
+  $("vnone").hidden=any}
+if($("vtin")){$("vtin").addEventListener("input",function(){vTyped=true;vTry()});$("vq").addEventListener("input",vFind)}
+document.addEventListener("click",function(e){var b=e.target.closest?e.target.closest("[data-copy]"):null;if(b)copy(b.getAttribute("data-copy"))});
 function apply(){
   document.documentElement.lang=lang;document.documentElement.dir=lang==="ar"?"rtl":"ltr";
   document.querySelectorAll("[data-t]").forEach(function(x){var p={};for(var k in x.dataset)p[k]=x.dataset[k];if(p.d)p.d=when(+p.d,true);x.textContent=t(x.getAttribute("data-t"),p)});
   var q=$("q");if(q){q.placeholder=t("search");q.setAttribute("aria-label",t("search"))}
+  var vq=$("vq");if(vq){vq.placeholder=t("v_search");vq.setAttribute("aria-label",t("v_search"));vTry()}
   var b=$("lang");b.textContent=t("lang");b.lang=lang==="ar"?"en":"ar";draw();drawLb()}
 $("lang").addEventListener("click",function(){lang=lang==="ar"?"en":"ar";try{localStorage.setItem("lang",lang)}catch(e){}apply()});
 if($("q"))$("q").addEventListener("input",draw);

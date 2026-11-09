@@ -62,6 +62,16 @@ jobs:
       - name: Build the program folder
         run: pyinstaller TwitchChatBot.spec --noconfirm
 
+      # 1.17.0 Voice commands: the speech engine (downloaded by the app) needs Microsoft's C++ runtime. Microsoft lets apps
+      # ship these four files next to themselves, so people never have to install the "Visual C++ Redistributable".
+      - name: Add the C++ runtime for Voice commands
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist\TwitchChatBot\vcrt | Out-Null
+          foreach ($f in "msvcp140.dll","vcruntime140.dll","vcruntime140_1.dll","vcomp140.dll") {
+            Copy-Item "$env:SystemRoot\System32\$f" dist\TwitchChatBot\vcrt\ -ErrorAction Stop
+          }
+
       - name: Install Inno Setup
         run: choco install innosetup -y --no-progress
 

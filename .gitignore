@@ -1,6 +1,8 @@
 # ---- secrets and personal data: NEVER upload these ----
 authentication/
 data/
+# the speech engine and model of Voice commands (about 200 MB), downloaded when running from this folder
+voice/
 
 # ---- Python ----
 venv/

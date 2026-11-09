@@ -62,7 +62,7 @@ OLD_IN = {"core/dashboard.html": ["animation:tick", "transform-origin:0.75rem"],
 ROOT_FILES = ["launcher.py", "main.py", "check_install.py", "installer.iss", "requirements.txt", "README.md", "CHANGELOG.md",
               "RELEASING.md", "TwitchChatBot.spec", "icon.ico", "run.bat", "update.bat", "build.bat"]
 CORE_FILES = ["auth.py", "bot.py", "dashboard.py", "dashboard.html", "store.py", "manage.py", "variables.py", "greetings.py",
-              "events.py", "version.py", "activity.py", "notify.py", "desktop.py", "updater.py", "winpos.py", "support.py", "accounts.py", "safefile.py", "botsender.py", "editor.py", "pinfirst.py", "world.py", "testchat.py", "giveaway.py", "titlebar.py", "netfix.py", "gamewords_easy.py", "backup.py", "perfmon.py", "chatstats.py", "trivia_ar.py", "riddles_ar.py", "translate_words.py", "opposites_ar.py", "blocks.py", "botsay.py", "gamesearch.py", "oddone_ar.py", "counters.py", "cmdhistory.py"]
+              "events.py", "version.py", "activity.py", "notify.py", "desktop.py", "updater.py", "winpos.py", "support.py", "accounts.py", "safefile.py", "botsender.py", "editor.py", "pinfirst.py", "world.py", "testchat.py", "giveaway.py", "titlebar.py", "netfix.py", "gamewords_easy.py", "backup.py", "perfmon.py", "chatstats.py", "trivia_ar.py", "riddles_ar.py", "translate_words.py", "opposites_ar.py", "blocks.py", "botsay.py", "gamesearch.py", "oddone_ar.py", "counters.py", "cmdhistory.py", "voice.py", "voiceparse.py", "voiceoverlay.py", "voicestyles.py", "nightbot.py", "streamelements.py"]
 
 
 def ok(text):

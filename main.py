@@ -131,6 +131,13 @@ async def main(open_browser=False):    # open_browser is ignored: the dashboard 
         await dashboard.start(store, state)
     except OSError as e:
         print(f"Could not start the dashboard: {e}. The bot will still run.")
+    try:      # 1.17.0 (beta): Voice commands. Does nothing until switched on in Settings > Voice
+        from core.voice import VOICE
+        import atexit
+        VOICE.start(state, asyncio.get_running_loop())
+        atexit.register(VOICE.shutdown)          # the speech engine never outlives the app
+    except Exception:
+        log.exception("Voice commands could not start")
 
     def start_channel(rt: Runtime):
         """Each channel runs in its own context: everything it does (its bot, logins, files) is that channel's."""

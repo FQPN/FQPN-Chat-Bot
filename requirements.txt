@@ -5,3 +5,5 @@ pystray
 Pillow
 truststore>=0.9
 psutil>=5.9
+sounddevice>=0.4.6
+arabic-reshaper>=3.0
