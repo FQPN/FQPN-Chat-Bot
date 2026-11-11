@@ -14,7 +14,8 @@ APP = "FQPN's Chat Bot"
 FORMAT = 1                      # the file layout; a newer one is refused ("update the app first")
 # What a backup holds (store names). The giveaway part is its settings only (never a running giveaway or its entries).
 PARTS = ["commands", "timers", "events", "greetings", "blocklist", "moderation", "games", "game_wins", "counters",
-         "stream", "giveaway", "settings", "prefs", "ui"]
+         "stream", "giveaway", "settings", "prefs", "ui", "follow_dates", "voice_fixes", "chatbox", "public_banner",
+         "viewer_stats", "chat_colors"]     # 1.18.0 (Twitch panel): each viewer's messages and watch time     # 1.18.0: + first follow dates, Voice spelling fixes
 MAX_BYTES = 5_000_000
 
 
@@ -94,6 +95,35 @@ def restore(store, backup: dict, validate, apply_side_effects=None) -> dict:
                 giveaway.update_settings(store, raw["settings"])
                 done.append(name)
                 continue
+            if name == "follow_dates":          # 1.18.0: merged, the earliest date of each person wins (nothing is lost)
+                if not isinstance(raw, dict):
+                    raise ValueError("follow_dates")
+                data = dict(store.get("follow_dates") or {})
+                for uid, v in list(raw.items())[:500000]:
+                    if not isinstance(v, (list, tuple)) or not v or isinstance(v[0], bool) or not isinstance(v[0], (int, float)):
+                        continue
+                    old = data.get(str(uid)[:30])
+                    if not (isinstance(old, (list, tuple)) and old and isinstance(old[0], (int, float)) and old[0] <= v[0]):
+                        data[str(uid)[:30]] = [float(v[0]), str(v[1])[:40] if len(v) > 1 else ""]
+                store.save(name, data, allow_empty=True)
+                done.append(name)
+                continue
+            if name == "viewer_stats":          # 1.18.0: merged, each number the bigger one (nothing is lost)
+                if not isinstance(raw, dict) or not isinstance(raw.get("users"), dict):
+                    raise ValueError("viewer_stats")
+                data = merge_viewer_stats(store.get("viewer_stats") or {}, raw)
+                old = store.get(name)
+                store.save(name, data, allow_empty=True)
+                if apply_side_effects:
+                    apply_side_effects(name, old, data)
+                done.append(name)
+                continue
+            if name == "chat_colors":           # 1.18.0: the !color name colors, checked
+                from . import chatbox
+                data = chatbox.clean_colors(raw)
+                store.save(name, data, allow_empty=True)
+                done.append(name)
+                continue
             if name == "counters":
                 if not isinstance(raw, dict):
                     raise ValueError("counters")
@@ -109,3 +139,31 @@ def restore(store, backup: dict, validate, apply_side_effects=None) -> dict:
             log.warning("Backup: the part %r was skipped (%s)", name, str(e)[:200])
             skipped.append(name)
     return {"restored": done, "skipped": skipped}
+
+
+def _num(x) -> int:
+    return int(x) if isinstance(x, (int, float)) and not isinstance(x, bool) and x > 0 else 0
+
+
+def merge_viewer_stats(cur: dict, raw: dict) -> dict:
+    """1.18.0: a backup's messages and watch time put together with this PC's: for each viewer the bigger number."""
+    users = dict((cur or {}).get("users") or {})
+    for k, e in list((raw.get("users") or {}).items())[:50000]:
+        if not isinstance(e, dict):
+            continue
+        k = str(k)[:40]
+        mine = dict(users.get(k) or {})
+        out = {"n": str(e.get("n") or mine.get("n") or "")[:40], "l": str(e.get("l") or mine.get("l") or "")[:25].lower(),
+               "m": max(_num(e.get("m")), _num(mine.get("m"))), "t": max(_num(e.get("t")), _num(mine.get("t"))),
+               "last": max(_num(e.get("last")), _num(mine.get("last")))}
+        for p in ("week", "month"):
+            a, b = e.get(p), mine.get(p)
+            a = a if isinstance(a, dict) and isinstance(a.get("id"), str) else None
+            b = b if isinstance(b, dict) and isinstance(b.get("id"), str) else None
+            if a and b and a["id"] == b["id"]:
+                out[p] = {"id": a["id"], "m": max(_num(a.get("m")), _num(b.get("m"))), "t": max(_num(a.get("t")), _num(b.get("t")))}
+            elif a or b:
+                x = max([y for y in (a, b) if y], key=lambda y: y["id"])
+                out[p] = {"id": x["id"][:10], "m": _num(x.get("m")), "t": _num(x.get("t"))}
+        users[k] = out
+    return {"users": users, "wizebot": dict((cur or {}).get("wizebot") or (raw.get("wizebot") if isinstance(raw.get("wizebot"), dict) else {}) or {})}

@@ -23,7 +23,7 @@ from .bot import ANNOUNCE, TwitchBot
 log = logging.getLogger("twitchbot.testchat")
 ROLES = ("viewer", "subscriber", "vip", "moderator", "broadcaster")
 MAX_LINES = 200
-EVENT_KEYS = ("follow", "watch_streak", "subscription", "gift_sub", "raid", "hype_train", "bits", "donation", "falkorie_level", "falkorie_streak")
+EVENT_KEYS = ("follow", "watch_streak", "subscription", "gift_sub", "raid", "hype_train", "bits", "donation", "falkorie_level", "falkorie_streak", "follow_anniversary")
 _ids = itertools.count(1)
 
 
@@ -76,6 +76,7 @@ class SandboxStore:
 
 class SimBot(TwitchBot):
     count_stats = False             # 1.14.0: the Test chat never counts in Stream stats
+    _cb_on = False                  # 1.18.0: the Test chat never reaches the Chat box on your stream
     pin_window_applies = False      # 1.14.0: Pin first message's "first minutes" don't apply in Test chat (try it any time)
     owner_id = None          # (plain values here: the real ones come from TwitchIO, which a pretend bot never starts)
 
@@ -124,7 +125,7 @@ class SimBot(TwitchBot):
         return NS(name=name.lower(), display_name=name, id="sim:" + name.lower(), broadcaster=lv == 4, moderator=lv == 3,
                   vip=lv == 2, subscriber=lv == 1)
 
-    async def say(self, name: str, role: str, text: str, temp=None) -> dict:
+    async def say(self, name: str, role: str, text: str, temp=None, first: bool = False) -> dict:
         """One chat message from a pretend viewer, answered by the real bot code."""
         chatter = self.chatter(name, role)
         if role == "broadcaster":
@@ -132,8 +133,10 @@ class SimBot(TwitchBot):
         text = str(text or "").strip()[:500]
         line = self.add(kind="chat", who=chatter.display_name, role=role, text=text)
         payload = NS(id=f"t{line['id']}", text=text, chatter=chatter, source_broadcaster=None, fragments=[], cheer=None,
-                     chatter_is_anonymous=False)
-        before, greets = len(self.lines), len(self._greet_tasks)
+                     chatter_is_anonymous=False, _first=bool(first),      # 1.18.0: "First time" = their first message ever
+                     badges=[NS(set_id=b, id="1") for b in {"subscriber": ["subscriber"], "vip": ["vip"], "moderator": ["moderator"],
+                                                             "broadcaster": ["broadcaster"]}.get(role, [])])   # (a sub / VIP / mod is never "new")
+        before, greets, welcomes = len(self.lines), len(self._greet_tasks), getattr(self, "_welcomes", 0)
         self.store.temp = temp or None
         try:
             if self.store.get("settings").get("paused"):
@@ -145,7 +148,9 @@ class SimBot(TwitchBot):
             self.note("error", e=str(e)[:200])
         finally:
             self.store.temp = None
-        if len(self._greet_tasks) > greets:
+        if getattr(self, "_welcomes", 0) > welcomes:
+            self.note("welcome")
+        elif len(self._greet_tasks) > greets:
             self.note("greet")
         elif len(self.lines) == before:
             self.note("noreply")
@@ -169,7 +174,12 @@ class SimBot(TwitchBot):
             self.note("paused")
             return
         if key == "follow":
-            await self._fire_event("follow", 0, user, login)
+            if not hasattr(self, "_fake_follows"):
+                self._fake_follows = {}
+            self._fake_follows[str(login).lower()] = datetime.now(timezone.utc)    # 1.18.0: "just followed" for First-time chatters
+            if await self._on_follow(user, login):    # 1.18.0: the same wait as a real follow (First-time chatters)
+                self.note("followhold", s=self.FOLLOW_HOLD)
+                return
         elif key == "watch_streak":
             await self._fire_event("watch_streak", whole, user, login)
         elif key == "subscription":
@@ -182,6 +192,8 @@ class SimBot(TwitchBot):
             await self._fire_event("hype_train", whole, self.account["login"], "", {"level": whole})
         elif key == "bits":
             await self._fire_event("bits", whole, user, login, {"bits": whole, "message": "", "total": self._add_total("bits", login, whole)})
+        elif key == "follow_anniversary":                         # 1.18.0: as if they chatted on their follow anniversary
+            await self._fire_event(key, whole, user, login, {"years": whole})
         elif key in ("falkorie_level", "falkorie_streak"):      # 1.17.1: as if Falkorie wrote it in chat
             await self._fire_event(key, whole, user, login, {"level": whole} if key == "falkorie_level" else {"streak": whole})
         elif key == "donation":
@@ -294,8 +306,11 @@ class SimBot(TwitchBot):
         return await self.live._title() if self.live is not None else "(no title set)"
 
     async def _followed_at(self, chatter_id: str):
-        live = self.live
         login = str(chatter_id).split(":", 1)[-1]
+        hit = getattr(self, "_fake_follows", {}).get(login.lower())
+        if hit:                                     # 1.18.0: followed here with "Pretend an event > Follow"
+            return hit
+        live = self.live
         if live is None or not login:
             return None
         users = await live.fetch_users(logins=[login])

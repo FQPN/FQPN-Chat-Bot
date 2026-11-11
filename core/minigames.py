@@ -654,6 +654,16 @@ def upgrade_wins(wins: dict) -> bool:
     return changed
 
 
+def ar_wins(n: int) -> str:
+    """1.18.0: the number of wins the way it's said in Arabic: فوز واحد، فوزتين، 3 فوزات … 10 فوزات، 11 فوز، 103 فوزات."""
+    n = int(n)
+    if n == 1:
+        return "فوز واحد"
+    if n == 2:
+        return "فوزتين"
+    return f"{n} فوزات" if 3 <= n % 100 <= 10 else f"{n} فوز"
+
+
 def wins_of(e: dict, game: str | None = None, period: str | None = None, now=None) -> int:
     """All-time wins (all games or one); with period "week" / "month": only this week's / month's (0 once it's over)."""
     if not isinstance(e, dict):

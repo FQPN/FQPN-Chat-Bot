@@ -125,52 +125,73 @@ DEFAULTS = {
     },
     "events": {   # automatic replies to Twitch events; each has tiers picked by the event's number
         "watch_streak": {"enabled": True, "tiers": [
-            {"min": 1, "response": "HUGEEEEEE STREAKKKKKKK! {streak}-STREAM!"}]},
+            {"min": 1, "response": "ستريييك خرافي! {streak} بث ورا بعض 🔥"}]},
         "follow": {"enabled": False, "tiers": [
-            {"min": 0, "response": "Welcome {user}! \u2764\ufe0f"}]},
-        "subscription": {"enabled": False, "tiers": [      # 1.13.0: {total} = months subscribed
-            {"min": 1, "response": "THANK YOU FOR THE SUB, {user}! \U0001f525"},
-            {"min": 2, "response": "{user} IS BACK! THANK YOU FOR THE RESUB! \U0001f525 (( {total} months subbed ))"},
-            {"min": 12, "response": "{total} MONTHS?! {user}, OVER A YEAR OF SUPPORT. THANK YOU! \U0001f6a8\U0001f525"}]},
-        "gift_sub": {"enabled": False, "tiers": [          # {gifts} = this time, {total} = everything they gifted here
-            {"min": 1, "response": "{user} gifted a sub! THANK YOU! \u2764\ufe0f (( {total} gifted in total ))"},
-            {"min": 5, "response": "{gifts} SUBS?! THANK YOU {user}! \U0001f525 (( has gifted {total} subs ))"},
-            {"min": 10, "response": "{gifts} GIFTED SUBS FROM {user}!!! \U0001f525\U0001f525 (( {total} subs gifted so far ))"},
-            {"min": 25, "response": "{user} JUST GIFTED {gifts} SUBS!!! ABSOLUTE LEGEND! \U0001f6a8\U0001f525 (( {total} gifted in total ))"}]},
+            {"min": 0, "response": "حياك الله {user}! ❤️"}]},
+        "subscription": {"enabled": False, "tiers": [
+            {"min": 1, "response": "شكرا على الاشتراك يا {user}! 🔥"},
+            {"min": 2, "response": "رجعت يا {user}! شكرا على تجديد الاشتراك 🔥 (( الشهر رقم {total} ))"},
+            {"min": 12, "response": "{total} شهر؟! {user}، أكثر من سنة دعم. شكرا من القلب! 🚨🔥"}]},
+        "gift_sub": {"enabled": False, "tiers": [
+            {"min": 1, "response": "اشتراك هدية من {user}! شكرا ❤️ (( مجموع الهدايا: {total} ))"},
+            {"min": 5, "response": "{gifts} هدايا؟! شكرا يا {user}! 🔥 (( مجموع الهدايا: {total} ))"},
+            {"min": 10, "response": "مطر هدايا من {user}! العدد: {gifts} 🔥🔥 (( مجموع الهدايا: {total} ))"},
+            {"min": 25, "response": "أسطورة يا {user}! {gifts} هدية مرة وحدة!!! 🚨🔥 (( مجموع الهدايا: {total} ))"}]},
         "raid": {"enabled": False, "tiers": [
-            {"min": 1, "response": "HUGE RAID! Welcome {raider} and {viewers} raiders! \U0001f525"}]},
+            {"min": 1, "response": "ريد قوي! حياكم الله {raider} والجماعة 🔥 (( عددهم: {viewers} ))"}]},
         "hype_train": {"enabled": False, "tiers": [
-            {"min": 1, "response": "HYPE TRAIN LEVEL {level}! \U0001f682"},
-            {"min": 5, "response": "LEVEL {level}?! CHAT IS INSANE \U0001f525"}]},
-        "bits": {"enabled": False, "tiers": [              # {total} = all the Bits this person cheered (counted by the app)
-            {"min": 1, "response": "Thanks for the {bits} Bits, {user}! \u2764\ufe0f (( {total} Bits in total ))"},
-            {"min": 100, "response": "{user} JUST DROPPED {bits} BITS! \U0001f525 (( {total} Bits so far ))"},
-            {"min": 500, "response": "{user} WITH {bits} BITS!!! \U0001f6a8 (( {total} Bits in total ))"},
-            {"min": 1000, "response": "{bits} BITS?! {user}, THAT'S ABSOLUTE MADNESS! \U0001f525\U0001f525\U0001f525 (( {total} Bits so far ))"}]},
-        "falkorie_level": {"enabled": True, "tiers": [   # 1.17.1: when the Falkorie bot says someone reached a new level ({level})
-            {"min": 1, "response": "Huge level {level}, {user}"},
-            {"min": 10, "response": "Level {level} already, {user}? Huge"}]},
-        "falkorie_streak": {"enabled": True, "tiers": [  # 1.17.1: when the Falkorie bot shows someone's streak (also its !streak answer)
-            {"min": 1, "response": "{streak} in a row, {user}! Thank you for being here"},
-            {"min": 50, "response": "{streak} STREAMS IN A ROW?! {user} never misses one"}]},
-        "donation": {"enabled": False, "tiers": [      # replies by amount (in the donation's own currency); {total} = all they gave in it
-            {"min": 0, "response": "Thank you {user} for the {amount} {currency} donation! \u2764\ufe0f (( {total} {currency} in total ))"},
-            {"min": 50, "response": "WOW! {user} donated {amount} {currency}! You are amazing! \U0001f525 (( {total} {currency} in total ))"}]},
+            {"min": 1, "response": "قطار الحماس، المستوى {level}! 🚂"},
+            {"min": 5, "response": "المستوى {level}؟! الشات ولّع 🔥"}]},
+        "bits": {"enabled": False, "tiers": [
+            {"min": 1, "response": "شكرا على {bits} بتس يا {user}! ❤️ (( المجموع: {total} ))"},
+            {"min": 100, "response": "{bits} بتس من {user}! 🔥 (( المجموع: {total} ))"},
+            {"min": 500, "response": "يا سلام! {bits} بتس من {user}!!! 🚨 (( المجموع: {total} ))"},
+            {"min": 1000, "response": "{bits} بتس؟! {user}، هذا جنون! 🔥🔥🔥 (( المجموع: {total} ))"}]},
+        "falkorie_level": {"enabled": True, "tiers": [
+            {"min": 1, "response": "مستوى {level} يا {user}، كفو!"},
+            {"min": 10, "response": "مستوى {level} بعد؟ {user} كفووو"}]},
+        "falkorie_streak": {"enabled": True, "tiers": [
+            {"min": 1, "response": "{streak} بث ورا بعض يا {user}! شكرا على وجودك"},
+            {"min": 50, "response": "{streak} بث ورا بعض؟! {user} ولا بث فاتك"}]},
+        "follow_anniversary": {"enabled": True, "tiers": [   # 1.18.0: a follower's first message on their follow anniversary; {years}
+            {"min": 1, "response": "{user} صار لك سنة كاملة متابع/ة! شكرا على وجودك"},
+            {"min": 2, "response": "{user} صار لك سنتين متابع/ة! شكرا على وجودك"},
+            {"min": 3, "response": "{user} صار لك {years} سنوات متابع/ة! شكرا على وجودك"},
+            {"min": 11, "response": "{user} صار لك {years} سنة متابع/ة! شكرا على وجودك"}]},
+        "donation": {"enabled": False, "tiers": [
+            {"min": 0, "response": "شكرا يا {user} على دعم {amount} {currency}! ❤️ (( المجموع: {total} {currency} ))"},
+            {"min": 50, "response": "واو! دعم {amount} {currency} من {user}! كفو والله 🔥 (( المجموع: {total} {currency} ))"}]},
     },
-    "greetings": {"enabled": True, "users": []},   # people to greet, each with one or more messages
+    "greetings": {"enabled": True, "users": []},   # people to greet, each with one or more messages (1.18.0: + "welcome", First-time chatters; missing = its defaults)
     "greeted": {"session": "", "users": [], "last": {}},   # who was already greeted during the current stream
     "counters": {},
     "counter_meta": {},                     # 1.15.0 (owner): each counter's last change, for the Counters page
     "counter_overlay": {"show": [], "first": True, "pos": {}},   # 1.17.0: on stream (OBS: /overlay): these counters, First in chat, and where each one sits
     "command_history": [],                  # 1.16.0 (owner): every change to a command, for History and Undo (core/cmdhistory.py)
     "chat_stats": {},                       # 1.14.0: Dashboard > Stream stats (core/chatstats.py), kept by the app
+    "follow_dates": {},                     # 1.18.0: the first follow date of every follower seen (core/followdates.py)
+    "falkorie_streak_seen": {"session": "", "users": []},   # 1.18.0: who got a Falkorie streak reply this stream
+    "voice_fixes": {"items": []},
+    "chatbox": {},
+    "public_banner": {"data": "", "pos": 50},   # 1.18.0: the public page's banner (base64 picture; its own file)                         # 1.18.0: the Chat box overlay's settings (core/chatbox.py fills in the rest)           # 1.18.0: Voice spelling fixes: yours and the learned ones (core/voice.py)
+    "chat_colors": {},                      # 1.18.0: the name colors viewers chose with !color (core/chatbox.py)
+    "chat_colors_live": {},                 # 1.18.0: when the stream was last seen live (!color resets 30 min after)
+    "first_alias": {},                      # 1.18.0: First in chat: live again within 30 minutes = the same stream
+    "viewer_stats": {},                     # 1.18.0: each viewer's messages and watch time (core/viewerstats.py), kept by the app
+    "panel": {"on": False},                 # 1.18.0: the Twitch panel: send its leaderboard to the website (off until switched on)
+    "panel_state": {},                      # 1.18.0: what was last sent for the Twitch panel, and the viewers' pictures
+    "follow_anniv": {},                     # 1.18.0: the year each person's follow anniversary was last celebrated
 }
 
 
 # 1.13.0: the event replies as they came before {total} existed. A reply list still EXACTLY like this was never touched by
 # the user, so it gets the new texts; anything the user changed stays as they wrote it.
-OLD_EVENT_TEXTS = {"subscription": [{"min": 1, "response": "THANK YOU FOR THE SUB, {user}! 🔥"}], "gift_sub": [{"min": 1, "response": "{user} gifted a sub! THANK YOU! ❤️"}, {"min": 5, "response": "{gifts} SUBS?! THANK YOU {user}! 🔥"}, {"min": 10, "response": "{gifts} GIFTED SUBS FROM {user}!!! 🔥🔥"}, {"min": 25, "response": "{user} JUST GIFTED {gifts} SUBS!!! ABSOLUTE LEGEND! 🚨🔥"}], "bits": [{"min": 1, "response": "Thanks for the Bits, {user}! ❤️"}, {"min": 100, "response": "{user} JUST DROPPED {bits} BITS! 🔥"}, {"min": 500, "response": "{user} WITH {bits} BITS!!! 🚨"}, {"min": 1000, "response": "{user} JUST DROPPED {bits} BITS!!! ABSOLUTE MADNESS! 🔥🔥🔥"}], "donation": [{"min": 0, "response": "Thank you {user} for the {amount} {currency} donation! ❤️"}, {"min": 50, "response": "WOW! {user} donated {amount} {currency}! You are amazing! 🔥"}], "falkorie_level": [{"min": 1, "response": "GG {user}! Level {level} unlocked"}, {"min": 10, "response": "LEVEL {level}?! {user} is a real one"}]}
+OLD_EVENT_TEXTS = {"subscription": [{"min": 1, "response": "THANK YOU FOR THE SUB, {user}! 🔥"}], "gift_sub": [{"min": 1, "response": "{user} gifted a sub! THANK YOU! ❤️"}, {"min": 5, "response": "{gifts} SUBS?! THANK YOU {user}! 🔥"}, {"min": 10, "response": "{gifts} GIFTED SUBS FROM {user}!!! 🔥🔥"}, {"min": 25, "response": "{user} JUST GIFTED {gifts} SUBS!!! ABSOLUTE LEGEND! 🚨🔥"}], "bits": [{"min": 1, "response": "Thanks for the Bits, {user}! ❤️"}, {"min": 100, "response": "{user} JUST DROPPED {bits} BITS! 🔥"}, {"min": 500, "response": "{user} WITH {bits} BITS!!! 🚨"}, {"min": 1000, "response": "{user} JUST DROPPED {bits} BITS!!! ABSOLUTE MADNESS! 🔥🔥🔥"}], "donation": [{"min": 0, "response": "Thank you {user} for the {amount} {currency} donation! ❤️"}, {"min": 50, "response": "WOW! {user} donated {amount} {currency}! You are amazing! 🔥"}], "follow_anniversary": [{"min": 1, "response": "{user} has been following for a whole year! Thank you for being here"}, {"min": 2, "response": "{years} years of following, {user}! Thank you for sticking around"}], "falkorie_level": [{"min": 1, "response": "GG {user}! Level {level} unlocked"}, {"min": 10, "response": "LEVEL {level}?! {user} is a real one"}]}
 
+
+# 1.18.0: the English event replies of 1.13.0–1.17.1. A reply list still EXACTLY like one of these was never changed by
+# the user, so it becomes the new Arabic default; anything the user changed stays as they wrote it.
+OLD_EVENT_TEXTS_EN = {"watch_streak": [{"min": 1, "response": "HUGEEEEEE STREAKKKKKKK! {streak}-STREAM!"}], "follow": [{"min": 0, "response": "Welcome {user}! ❤️"}], "subscription": [{"min": 1, "response": "THANK YOU FOR THE SUB, {user}! 🔥"}, {"min": 2, "response": "{user} IS BACK! THANK YOU FOR THE RESUB! 🔥 (( {total} months subbed ))"}, {"min": 12, "response": "{total} MONTHS?! {user}, OVER A YEAR OF SUPPORT. THANK YOU! 🚨🔥"}], "gift_sub": [{"min": 1, "response": "{user} gifted a sub! THANK YOU! ❤️ (( {total} gifted in total ))"}, {"min": 5, "response": "{gifts} SUBS?! THANK YOU {user}! 🔥 (( has gifted {total} subs ))"}, {"min": 10, "response": "{gifts} GIFTED SUBS FROM {user}!!! 🔥🔥 (( {total} subs gifted so far ))"}, {"min": 25, "response": "{user} JUST GIFTED {gifts} SUBS!!! ABSOLUTE LEGEND! 🚨🔥 (( {total} gifted in total ))"}], "raid": [{"min": 1, "response": "HUGE RAID! Welcome {raider} and {viewers} raiders! 🔥"}], "hype_train": [{"min": 1, "response": "HYPE TRAIN LEVEL {level}! 🚂"}, {"min": 5, "response": "LEVEL {level}?! CHAT IS INSANE 🔥"}], "bits": [{"min": 1, "response": "Thanks for the {bits} Bits, {user}! ❤️ (( {total} Bits in total ))"}, {"min": 100, "response": "{user} JUST DROPPED {bits} BITS! 🔥 (( {total} Bits so far ))"}, {"min": 500, "response": "{user} WITH {bits} BITS!!! 🚨 (( {total} Bits in total ))"}, {"min": 1000, "response": "{bits} BITS?! {user}, THAT'S ABSOLUTE MADNESS! 🔥🔥🔥 (( {total} Bits so far ))"}], "falkorie_level": [{"min": 1, "response": "Huge level {level}, {user}"}, {"min": 10, "response": "Level {level} already, {user}? Huge"}], "falkorie_streak": [{"min": 1, "response": "{streak} in a row, {user}! Thank you for being here"}, {"min": 50, "response": "{streak} STREAMS IN A ROW?! {user} never misses one"}], "donation": [{"min": 0, "response": "Thank you {user} for the {amount} {currency} donation! ❤️ (( {total} {currency} in total ))"}, {"min": 50, "response": "WOW! {user} donated {amount} {currency}! You are amazing! 🔥 (( {total} {currency} in total ))"}]}
 
 class Store:
     def __init__(self, channel=None):
@@ -345,8 +366,8 @@ class Store:
             if key not in ev:
                 ev[key] = copy.deepcopy(default)
                 changed = True
-            elif isinstance(ev[key], dict) and ev[key].get("tiers") == OLD_EVENT_TEXTS.get(key):
-                ev[key]["tiers"] = copy.deepcopy(default["tiers"])     # 1.13.0: never changed by the user -> the new texts with {total}
+            elif isinstance(ev[key], dict) and ev[key].get("tiers") in (OLD_EVENT_TEXTS.get(key), OLD_EVENT_TEXTS_EN.get(key)):
+                ev[key]["tiers"] = copy.deepcopy(default["tiers"])     # never changed by the user -> the newest default texts
                 changed = True
         if changed:
             self.save("events", ev)

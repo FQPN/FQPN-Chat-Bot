@@ -206,6 +206,13 @@ def act(store, action: str, body: dict, validate_commands=None, clash=None) -> N
     if action == "first":                  # 1.17.0: First in chat on the overlay, or not
         set_first(store, body.get("show"))
         return
+    if action == "pos" and body.get("key") == "chat":     # 1.18.0: the Chat box: its place and its width and height
+        from . import chatbox
+        try:
+            chatbox.set_box(store, float(body.get("x")), float(body.get("y")), float(body.get("w")), float(body.get("h")))
+        except (TypeError, ValueError):
+            raise CounterError("That place isn't on the screen.")
+        return
     if action == "pos":                    # 1.17.0: an overlay dragged on the Overlays page's preview
         try:
             x, y = float(body.get("x")), float(body.get("y"))
@@ -215,7 +222,9 @@ def act(store, action: str, body: dict, validate_commands=None, clash=None) -> N
         set_position(store, body.get("key"), x, y, size)
         return
     if action == "pos_reset":              # 1.17.0: all of them back to the top-left corner
-        store.save("counter_overlay", dict(store.get("counter_overlay") or {}, pos={}))
+        ov = dict(store.get("counter_overlay") or {}, pos={})
+        ov.pop("chat_box", None)           # 1.18.0: the Chat box goes back to the bottom-left
+        store.save("counter_overlay", ov)
         return
     if not name:
         raise CounterError("Give the counter a name: letters, numbers or _ (like deaths).")

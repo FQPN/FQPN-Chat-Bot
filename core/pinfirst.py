@@ -89,7 +89,11 @@ def claim(state: dict, stream_id, login: str, user: str, once: bool = True, now:
         return st, int(st.get("streak") or 0) if st.get("winner") == login else 0     # a later pin: the streak stays the first winner's
     streak = int(st.get("streak") or 0) + 1 if st.get("winner") == login else 1
     peaks[login] = max(int(peaks.get(login) or 0), streak)
-    return {"stream": stream_id, "winner": login, "user": user, "streak": streak, "at": now, "peaks": peaks}, streak
+    counts = dict(st.get("counts") or {})        # 1.18.0 (Twitch panel): how many streams each viewer was first in
+    counts[login] = int(counts.get(login) or 0) + 1
+    names = dict(st.get("names") or {})          # and the name they show with
+    names[login] = str(user or login)[:40]
+    return {"stream": stream_id, "winner": login, "user": user, "streak": streak, "at": now, "peaks": peaks, "counts": counts, "names": names}, streak
 
 
 def missed(state: dict, stream_id) -> dict:
@@ -98,7 +102,8 @@ def missed(state: dict, stream_id) -> dict:
     st = dict(state or {})
     if st.get("stream") == stream_id:
         return None
-    return {"stream": stream_id, "winner": "", "user": "", "streak": 0, "at": 0, "peaks": dict(st.get("peaks") or {})}
+    return {"stream": stream_id, "winner": "", "user": "", "streak": 0, "at": 0, "peaks": dict(st.get("peaks") or {}),
+            "counts": dict(st.get("counts") or {}), "names": dict(st.get("names") or {})}
 
 
 def peak_of(states: dict, login: str) -> int:
@@ -117,3 +122,26 @@ def streak_of(states: dict, login: str) -> int:
         if isinstance(st, dict) and st.get("winner") == login:
             best = max(best, int(st.get("streak") or 0))
     return best
+
+
+def boards(states: dict, n: int = 10) -> dict:
+    """1.18.0 (Twitch panel): First in chat, all Pin first message commands together.
+    {"peak": [(login, name, best streak)], "count": [(login, name, streams first)], "now": (login, name, streak) or None}.
+    "count" only knows the firsts since 1.18.0 (before that the app kept the streaks, not how many times)."""
+    peak, count, names, now = {}, {}, {}, None
+    for st in (states or {}).values():
+        if not isinstance(st, dict):
+            continue
+        names.update({k: str(v) for k, v in (st.get("names") or {}).items()})
+        for k, v in (st.get("peaks") or {}).items():
+            peak[k] = max(peak.get(k, 0), int(v or 0))
+        for k, v in (st.get("counts") or {}).items():
+            count[k] = count.get(k, 0) + int(v or 0)
+        if st.get("winner") and int(st.get("streak") or 0) > 0 and (now is None or int(st["streak"]) > now[2]):
+            now = (st["winner"], str(st.get("user") or st["winner"]), int(st["streak"]))
+            names.setdefault(st["winner"], now[1])
+    def rows(d):
+        r = [(k, names.get(k) or k, v) for k, v in d.items() if v > 0]
+        r.sort(key=lambda x: (-x[2], x[1].lower()))
+        return r[:n]
+    return {"peak": rows(peak), "count": rows(count), "now": now}

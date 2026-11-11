@@ -108,6 +108,8 @@ def event_text(key: str, user: str, value: int, extra: dict | None = None) -> tu
         return "Falkorie: new level", f"{user} reached level {value}"
     if key == "falkorie_streak":
         return "Falkorie: streak", f"{user} watched {value} streams in a row"
+    if key == "follow_anniversary":
+        return "Follow anniversary", f"{user}: {value} year{'s' if value != 1 else ''} of following"
     if key == "donation":
         return "Donation", f"{user} donated {extra.get('amount', value)} {extra.get('currency', '')}".strip()
     return "FQPN's Chat Bot", f"{key.replace('_', ' ')} from {user}"

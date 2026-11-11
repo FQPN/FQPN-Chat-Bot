@@ -78,12 +78,12 @@ ANNOUNCE_RE = re.compile(r"^/announce(?:blue|green|orange|purple)?\s+", re.IGNOR
 SAMPLES = {   # 1.13.0: what a reply looks like on the public page: variables become example values, in the app's language
     "en": {"user": "viewer", "touser": "sam", "query": "…", "querystring": "…", "count": "7", "getcount": "7", "game": "(the game)", "title": "(the stream title)",
            "uptime": "2h 15m", "viewers": "120", "followers": "(the follower count)", "follow": "1 year, 2 months", "followage": "1 year, 2 months",
-           "followdate": "Jan 5, 2025", "accountage": "3 years, 4 months", "random.chatter": "(a random viewer)", "firststreak": "3", "firststreakpeak": "7",
+           "followdate": "Jan 5, 2025", "accountage": "3 years, 4 months", "random.chatter": "(a random viewer)", "firststreak": "3", "firststreakpeak": "7", "watchtime": "34 hours, 12 minutes", "messages": "1,250",
            "weather": "(the weather in {a})", "time": "(the time in {a})", "eval": "(a calculated value)", "urlfetch": "(text from a website)",
            "act_game": "(moderators change the stream's game with it)", "act_title": "(moderators change the stream title with it)", "clip": "(a clip link)"},
     "ar": {"user": "مشاهد", "touser": "سامي", "query": "…", "querystring": "…", "count": "7", "getcount": "7", "game": "(اللعبة)", "title": "(عنوان البث)",
            "uptime": "2س 15د", "viewers": "120", "followers": "(عدد المتابعين)", "follow": "سنة وشهران", "followage": "سنة وشهران",
-           "followdate": "5 يناير 2025", "accountage": "3 سنوات و4 أشهر", "random.chatter": "(مشاهد عشوائي)", "firststreak": "3", "firststreakpeak": "7",
+           "followdate": "5 يناير 2025", "accountage": "3 سنوات و4 أشهر", "random.chatter": "(مشاهد عشوائي)", "firststreak": "3", "firststreakpeak": "7", "watchtime": "34 ساعة و12 دقيقة", "messages": "1,250",
            "weather": "(الطقس في {a})", "time": "(الوقت في {a})", "eval": "(قيمة محسوبة)", "urlfetch": "(نص من موقع)",
            "act_game": "(يغيّر به المشرفون لعبة البث)", "act_title": "(يغيّر به المشرفون عنوان البث)", "clip": "(رابط كليب)"},
 }
@@ -185,7 +185,7 @@ def all_commands(commands, settings, games, lang: str = "en", channel: str = "")
     return out
 
 
-def build(commands, settings, wins=None, accent=None, games=None, lang: str = "en", channel: str = "") -> dict:
+def build(commands, settings, wins=None, accent=None, games=None, lang: str = "en", channel: str = "", first_state=None) -> dict:
     """The data the website gets: switched-on commands that are not hidden, by name, with who can use them.
     1.13.0: with a short example of each reply ("ex", unless Commands > Public list says not to), the mini games' commands
     (game + what) and each built-in's key (the website words what it does)."""
@@ -219,7 +219,50 @@ def build(commands, settings, wins=None, accent=None, games=None, lang: str = "e
         payload["accent"] = a                    # 1.13.0: the page in the streamer's own color
     if wins is not None and (settings or {}).get("public_leaderboard", True):
         payload["leaderboard"] = leaderboard(wins)   # 1.13.0: viewers' names + wins (Commands > Public list can hide it)
+        f = firsts(commands, first_state)
+        if f:
+            payload["firsts"] = f                    # 1.18.0: First in chat's longest streaks / most firsts (a «First» tab)
     return payload
+
+
+def firsts(commands, first_state) -> dict | None:
+    """1.18.0: {"peak": [{"n", "v"}], "count": [{"n", "v"}], "now": {"n", "v"} or None}, the top 10; None when the channel
+    has no Pin first message command or nobody was first yet."""
+    from . import pinfirst
+    if not pinfirst.pin_commands(commands) or not first_state:
+        return None
+    b = pinfirst.boards(first_state, LB_ROWS)
+    if not b["peak"]:
+        return None
+    rows = lambda r: [{"n": str(n)[:40], "v": int(v)} for _, n, v in r]
+    return {"peak": rows(b["peak"]), "count": rows(b["count"]), "now": {"n": b["now"][1][:40], "v": b["now"][2]} if b["now"] else None}
+
+
+BANNER_MAX = 900 * 1024        # 1.18.0: the website refuses a bigger banner picture (the app makes it about 1600 pixels wide first)
+BANNER_MAGIC = (b"\xff\xd8\xff", b"\x89PNG", b"RIFF")
+
+
+def banner_check(data) -> dict:
+    """1.18.0: the "public_banner" section: {"data": base64 JPEG/PNG/WebP or "", "pos": 0 | 50 | 100}. Raises ValueError."""
+    import base64
+    data = data if isinstance(data, dict) else {}
+    raw = str(data.get("data") or "")
+    pos = data.get("pos", 50)
+    pos = pos if pos in (0, 50, 100) and not isinstance(pos, bool) else 50
+    if raw:
+        try:
+            b = base64.b64decode(raw, validate=True)
+        except Exception:
+            raise ValueError("The banner picture couldn't be read.")
+        if len(b) > BANNER_MAX:
+            raise ValueError("The banner picture is too big.")
+        if not (b.startswith(BANNER_MAGIC[:2]) or (b.startswith(b"RIFF") and b[8:12] == b"WEBP")):
+            raise ValueError("The banner must be a JPEG, PNG or WebP picture.")
+    return {"data": raw, "pos": pos}
+
+
+def banner_digest(b: dict) -> str:
+    return hashlib.sha256((str(b.get("data") or "") + "|" + str(b.get("pos"))).encode()).hexdigest() if b.get("data") else ""
 
 
 def digest(payload: dict, login: str) -> str:
@@ -254,6 +297,7 @@ class Syncer:
         self.pending = None          # (digest, first seen) of a list that has not been sent yet
         self.fails = 0
         self.next_try = 0.0
+        self.banner_next = 0.0       # 1.18.0: when the banner may be tried again after a failure
         self.status = {"state": "off", "url": "", "error": "", "at": None}
         state["publist"] = self.status
         state["publist_wake"] = self.wake
@@ -300,7 +344,7 @@ class Syncer:
                 code, body, retry = await self.send("DELETE", token, None)
                 if code in (200, 204, 404):
                     self.fails, self.next_try = 0, 0.0
-                    self._remember(uploaded=False, digest="")
+                    self._remember(uploaded=False, digest="", banner="")     # (the website takes the banner off with the list)
                 elif code == 0:
                     self._failed("off", "offline", retry)
                     return
@@ -318,13 +362,14 @@ class Syncer:
         # website would drop their mark and file them among the streamer's own commands ("Everyone").
         site_ok = saved.get("features_site") == SITE and "games" in (saved.get("features") or [])
         payload = build(self.store.get("commands"), settings, self.store.get("game_wins"), ui.get("accent"), self.store.get("games") if site_ok else None,
-                        "ar" if ui.get("language") == "ar" else "en", str(self.state.get("account") or ""))
+                        "ar" if ui.get("language") == "ar" else "en", str(self.state.get("account") or ""), self.store.get("first_state"))
         d = digest(payload, login)
         # 1.10.1: also the SAME website. After the address changes (a new domain, a new Cloudflare account with an empty
         # database) the list is sent again once, instead of "already uploaded" forever.
         if saved.get("uploaded") and saved.get("digest") == d and saved.get("login") == login and saved.get("site") == SITE:
             self.pending = None
             self.set("ok", url=page_url(login), at=saved.get("at"))
+            await self._banner(token, saved, now)
             return
         if self.pending is None or self.pending[0] != d:
             self.pending = (d, now)          # changed: wait until it stops changing
@@ -339,7 +384,8 @@ class Syncer:
             who = str(body.get("login") or login)
             self.fails, self.next_try, self.pending = 0, 0.0, None
             feats = [str(f) for f in (body.get("features") or []) if isinstance(f, str)][:20]
-            self._remember(uploaded=True, digest=d, login=login, at=int(now), site=SITE, features=feats, features_site=SITE)
+            moved = {"banner": ""} if saved.get("login") != login or saved.get("site") != SITE else {}   # (1.18.0: another channel / website: send the banner again)
+            self._remember(uploaded=True, digest=d, login=login, at=int(now), site=SITE, features=feats, features_site=SITE, **moved)
             if "games" in feats and not site_ok:
                 self.wake.set()          # the website can show them: send the list again with the mini games' commands
             self.set("ok", url=page_url(who), at=int(now))
@@ -350,7 +396,44 @@ class Syncer:
         else:
             self._failed("error", str(body.get("error") or f"The website answered {code}."), retry)
 
+    async def _banner(self, token: str, saved: dict, now: float) -> None:
+        """1.18.0: the page's banner (Commands > Share > Public list), sent after the list is on the website, and removed
+        there when it is removed here."""
+        if now < self.banner_next:          # (an older website answers 404 / 405: tried again in an hour)
+            return
+        raw = self.store.get("public_banner") or {}
+        memo = getattr(self, "_ban_memo", None)
+        if memo is not None and memo[0] is raw:      # the same saved banner as last time: no need to read the picture again
+            b, want = memo[1], memo[2]
+        else:
+            try:
+                b = banner_check(raw)
+            except ValueError:
+                b = {"data": "", "pos": 50}
+            want = banner_digest(b)
+            self._ban_memo = (raw, b, want)
+        if want == (saved.get("banner") or ""):
+            return
+        if want:
+            code, body, retry = await self.send("PUT", token, {"data": b["data"], "pos": b["pos"]}, "/api/banner")
+        else:
+            code, body, retry = await self.send("DELETE", token, None, "/api/banner")
+        if code == 200 or (not want and code == 404):
+            self.banner_next = 0.0
+            self._remember(banner=want)
+        else:
+            self.banner_next = now + (3600 if code in (404, 405) else max(60, min(int(retry or 0), 3600)))
+            log.warning("Public list: the banner wasn't saved (%s %s)", code, body.get("error") if isinstance(body, dict) else "")
+
     async def run(self) -> None:
+        from . import panel                       # 1.18.0: the Twitch panel's leaderboards run next to the list
+        side = asyncio.create_task(panel.Syncer(self.store, self.state).run())
+        try:
+            await self._run()
+        finally:
+            side.cancel()
+
+    async def _run(self) -> None:
         while True:
             try:
                 await self.step()

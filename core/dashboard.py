@@ -22,6 +22,25 @@ from .store import EmptySaveRefused, Store
 
 log = logging.getLogger("twitchbot.dashboard")
 
+
+def _more_scopes(extra=("channel:manage:vips", "channel:manage:moderators", "moderator:read:chatters")) -> None:
+    """1.18.0 (Voice: VIP / mod): two more Twitch permissions asked at login (and "who is in the chat" for the Twitch panel's watch time). An account that logged in before keeps
+    working; only VIP / mod by voice says to log in again until it does."""
+    try:
+        cur = auth.SCOPES
+        if isinstance(cur, str):
+            have = cur.split()
+            auth.SCOPES = " ".join(have + [x for x in extra if x not in have])
+        else:
+            have = list(cur)
+            new = have + [x for x in extra if x not in have]
+            auth.SCOPES = type(cur)(new) if isinstance(cur, (list, tuple)) else new
+    except Exception:
+        log.exception("Couldn't add the VIP / moderator permissions")
+
+
+_more_scopes()
+
 HOST = "127.0.0.1"   # this PC only - never exposed to the network
 PORT = 5000          # the first port tried. Another program (a Flask app, for example) may already use it: start() then takes
 PORT_TRIES = 25      # the next free one, and PORT is updated to the one really in use.
@@ -49,7 +68,8 @@ async def bind_first_free(first: int, tries: int, bind) -> int:
 PAGE = Path(__file__).resolve().parent / "dashboard.html"
 ICON = Path(__file__).resolve().parent.parent / "icon.ico"   # next to main.py (and inside the installed program folder)
 PERMISSIONS = ("everyone", "subscriber", "vip", "moderator", "broadcaster")
-SECTIONS = ("commands", "timers", "greetings", "events", "blocklist", "settings", "ui", "prefs", "stream", "moderation", "games", "game_wins")
+SECTIONS = ("commands", "timers", "greetings", "events", "blocklist", "settings", "ui", "prefs", "stream", "moderation", "games", "game_wins",
+            "voice_fixes", "chatbox", "public_banner")      # 1.18.0: Voice spelling fixes, the Chat box overlay
 _LOGIN = re.compile(r"[a-z0-9_]{1,25}")
 
 
@@ -603,7 +623,51 @@ def validate(section: str, data, prefix: str = "!"):
             if len(msgs) > 30:
                 raise ValidationError(f"Too many messages for '{user}' (the most is 30).")
             users.append({"user": user, "messages": msgs, "enabled": _bool(g.get("enabled", True), f"Enabled for '{user}'")})
-        return {"enabled": _bool(data.get("enabled", True), "Greetings"), "users": users}
+        out = {"enabled": _bool(data.get("enabled", True), "Greetings"), "users": users}
+        if "welcome" in data:          # 1.18.0: First-time chatters
+            from . import greetings as greet_mod
+            w = data.get("welcome")
+            if not isinstance(w, dict):
+                raise ValidationError("First-time chatters settings are invalid.")
+            raw = w.get("replies", [])
+            if not isinstance(raw, list):
+                raise ValidationError("First-time chatters replies must be a list.")
+            replies = []
+            for r in raw:
+                r = _text(r, "First-time chatters reply", 500, required=False)
+                if r and r not in replies:
+                    replies.append(r)
+            if len(replies) > 30:
+                raise ValidationError("Too many first-time chatters replies (the most is 30).")
+            lists = {}
+            for key, label in (("salam_replies", "السلام عليكم"), ("follow_replies", "Just followed"), ("salam_follow_replies", "السلام عليكم + just followed")):
+                raw_s = w.get(key)
+                if raw_s is None:
+                    lists[key] = None            # not sent: the ready one in the app's language
+                    continue
+                if not isinstance(raw_s, list):
+                    raise ValidationError(f"The {label} replies must be a list.")
+                out_s = []
+                for r in raw_s:
+                    r = _text(r, f"{label} reply", 500, required=False)
+                    if r and r not in out_s:
+                        out_s.append(r)
+                if len(out_s) > 30:
+                    raise ValidationError(f"Too many {label} replies (the most is 30).")
+                lists[key] = out_s
+            on = _bool(w.get("enabled", True), "First-time chatters")
+            if on and not replies:
+                raise ValidationError("Add at least one reply for first-time chatters, or switch it off.")
+            try:
+                delay = int(w.get("delay", 3))
+            except (TypeError, ValueError):
+                raise ValidationError("The wait before the welcome is invalid.")
+            if delay not in greet_mod.WELCOME_DELAYS:
+                raise ValidationError("The wait before the welcome must be 0, 3, 5 or 10 seconds.")
+            out["welcome"] = {"enabled": on, "replies": replies, **lists, "delay": delay,
+                              "skip_commands": _bool(w.get("skip_commands", True), "Skip commands"),
+                              "reply_bots": _bool(w.get("reply_bots", False), "Reply to bots")}
+        return out
 
     if section == "blocklist":
         if not isinstance(data, dict):
@@ -844,6 +908,43 @@ def validate(section: str, data, prefix: str = "!"):
                                rounds_per_stream=int(_number(sh.get("rounds_per_stream", 0), "Rounds per stream", 0, minigames.MAX_ROUNDS)),
                                cooldown_seconds=int(_number(sh.get("cooldown_seconds", 0), "Cooldown between rounds", 0, minigames.MAX_COOLDOWN)),
                                enabled=_bool(sh.get("enabled", True), "All mini games"))}
+
+    if section == "public_banner":         # 1.18.0: the public page's banner (a picture made small by the page first)
+        from . import publiclist
+        try:
+            return publiclist.banner_check(data)
+        except ValueError as e:
+            raise ValidationError(str(e))
+
+    if section == "chatbox":               # 1.18.0: the Chat box overlay's settings (core/chatbox.py checks every key)
+        from . import chatbox
+        if not isinstance(data, dict):
+            raise ValidationError("The Chat box settings are invalid.")
+        return chatbox.validate(data)
+
+    if section == "voice_fixes":           # 1.18.0: {"items": [{heard, to, kind: "word" | "name", auto, n, at}]}
+        items = data.get("items") if isinstance(data, dict) else None
+        if not isinstance(items, list):
+            raise ValidationError("The spelling fixes are invalid.")
+        out, seen = [], set()
+        for f in items[:300]:
+            if not isinstance(f, dict):
+                continue
+            heard = _text(f.get("heard", ""), "Heard", 80, required=False)
+            to = _text(f.get("to", ""), "Should be", 80, required=False)
+            if not heard or not to:
+                raise ValidationError("Write both: what it hears, and what it should be.")
+            key = " ".join(heard.casefold().split())
+            if key in seen:
+                raise ValidationError(f"«{heard}» is in the list twice.")
+            seen.add(key)
+            try:
+                n, at = int(f.get("n") or 0), int(f.get("at") or 0)
+            except (TypeError, ValueError):
+                n, at = 0, 0
+            out.append({"heard": heard, "to": to, "kind": "name" if f.get("kind") == "name" else "word",
+                        "auto": f.get("auto") is True, "n": max(0, n), "at": max(0, at)})
+        return {"items": out}
 
     if section == "game_wins":
         if not isinstance(data, dict) or len(data) > 100000:
@@ -1182,7 +1283,7 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
                     if not isinstance(temp, dict) or len(temp) != 1:
                         return web.json_response({"error": "Only one command can be tried at a time."}, status=400)
                     temp = validate("commands", temp)
-                await sim.say(name, role, str(body.get("text") or ""), temp)
+                await sim.say(name, role, str(body.get("text") or ""), temp, first=body.get("first") is True)
             elif action == "event":
                 await sim.fake_event(str(body.get("key") or ""), body.get("value", 1), name, str(body.get("currency") or "USD"))
             elif action == "try":
@@ -1297,10 +1398,16 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
                 except Exception:
                     log.exception("Backup: could not change the start-up setting")
                 store.activity.prune()
-            if name in ("commands", "settings") and state.get("publist_wake") is not None:
+            if name in ("commands", "settings", "public_banner") and state.get("publist_wake") is not None:
                 state["publist_wake"].set()
             if name == "settings" and bool((old or {}).get("separate_bot")) != bool((new or {}).get("separate_bot")):
                 restart_bot(state)
+            if name == "viewer_stats":         # 1.18.0: the running bot counts on from the restored numbers
+                b = state.get("bot")
+                vs = getattr(b, "vstats", None) if b is not None else None
+                if vs is not None:
+                    vs.data = {"users": dict(new.get("users") or {}), "wizebot": dict(new.get("wizebot") or {})}
+                    vs.dirty = False
 
         res = backup.restore(store, b, lambda n, d: validate(n, keep_tour_flag(n, d, store)), side_effects)
         log.info("Backup restored (%d parts; skipped: %s); the setup before is %s", len(res["restored"]), res["skipped"], safety)
@@ -1403,7 +1510,7 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             words = [w for w in (cmd.get("words") or [])][:3]
             st = (store.get("first_state") or {}).get(name) or {}
             bot = state.get("bot")
-            sid = bot._stream_id() if bot is not None else None
+            sid = (bot._first_sid() if hasattr(bot, "_first_sid") else bot._stream_id()) if bot is not None else None
             first = {"words": words, "won": False}
             if sid and st.get("stream") == sid and st.get("winner"):
                 pic = ""
@@ -1413,13 +1520,130 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
                     pass
                 first = {"words": words, "won": True, "user": st.get("user") or st["winner"], "login": st["winner"],
                          "streak": int(st.get("streak") or 0), "avatar": pic}
+            elif sid:     # 1.18.0: the first minutes are over and nobody was first: «Who's first today?» leaves the stream
+                window = int(cmd.get("window_min", pinfirst.WINDOW_MIN) or 0)
+                since = getattr(bot, "live_since", None)
+                late = bool(window and since and (datetime.now(timezone.utc) - since).total_seconds() > window * 60)
+                if st.get("stream") == sid or late:
+                    first["over"] = True
         pos = counters_mod.positions(store)
         if first:
             first["pos"] = pos.get("first")
+        chat = None
+        if request.query.get("chat") or request.query.get("cb"):    # 1.18.0: the Chat box: its own link (/chat) and its preview
+            from . import chatbox
+            cb = chatbox.cfg_of(store)
+            if cb is not None:
+                bot = state.get("bot")
+                owner = str(((getattr(bot, "account", None) or {}).get("login")) or "") if bot is not None else ""
+                writer = str(((getattr(bot, "bot_account", None) or {}).get("login")) or "") if bot is not None and getattr(bot, "separate", False) else ""
+                try:
+                    items = chatbox.view(store, cb, bot, owner, writer)
+                except Exception:
+                    log.exception("Chat box: couldn't draw the chat")
+                    items = []
+                chat = {"cfg": cb, "box": chatbox.box_of(store), "items": items, "now": time.time(), "ver": chatbox.BUF.ver,
+                        "samples": chatbox.samples(lang) if request.query.get("edit") else None,
+                        "burls": chatbox.badge_samples() if request.query.get("edit") else None}
         return web.json_response({"counters": [dict(r, icon=overlays.icon_for(r["name"]), pos=pos.get("c:" + r["name"])) for r in rows],
+                                  "chat": chat,
                                   "first": first, "lang": lang, "has_first_cmd": bool(cmds), "order": counters_mod.order(store),
                                   "accent": str((store.get("ui") or {}).get("accent") or "#9a1118"),
                                   "v": overlays.VERSION})
+
+    async def chatbox_test(request):
+        """1.18.0: «Send test messages»: made-up lines in the Chat box only (never in your Twitch chat)."""
+        from . import chatbox
+        chatbox.BUF.test("ar" if (store.get("ui") or {}).get("language") == "ar" else "en")
+        return web.json_response({"ok": True})
+
+    # ---- 1.18.0: the Twitch panel (Commands > Share > Twitch panel)
+
+    def _vstats():
+        b = state.get("bot")
+        vs = getattr(b, "vstats", None) if b is not None else None
+        if vs is None:
+            from . import viewerstats
+            vs = viewerstats.ViewerStats(store)
+        return vs
+
+    async def panel_view(request):
+        data = auth.load_token() or {}
+        scopes = data.get("scopes") or []
+        b = state.get("bot")
+        vs = _vstats()
+        users = vs.data.get("users") or {}
+        top_t = vs.top("t", None, 1)
+        return web.json_response({
+            "on": bool((store.get("panel") or {}).get("on")), "status": dict(state.get("panel_status") or {}),
+            "login": state.get("account") or "", "site": publiclist.SITE,
+            "watch": "scopes" if scopes and "moderator:read:chatters" not in scopes else (getattr(b, "watch_problem", None) or "ok"),
+            "viewers": sum(1 for e in users.values() if isinstance(e, dict) and (e.get("m") or e.get("t"))),
+            "top_watch": [top_t[0][2], top_t[0][3]] if top_t else None,
+            "wizebot": dict(vs.data.get("wizebot") or {}), "pending": bool(state.get("wz_pending"))})
+
+    async def panel_action(request):
+        action = request.match_info["action"]
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        body = body if isinstance(body, dict) else {}
+        if action == "set":
+            store.save("panel", dict(store.get("panel") or {}, on=bool(body.get("on"))))
+            if state.get("panel_wake") is not None:
+                state["panel_wake"].set()
+            return web.json_response({"ok": True})
+        if action == "wizebot":
+            # The WizeBot key is used for these 6 requests only: never saved, never written to the log.
+            key = str(body.get("key") or "").strip()
+            if not re.match(r"^[A-Za-z0-9_\-]{8,200}$", key):
+                return web.json_response({"error": "key"}, status=400)
+            lists, problem = {}, ""
+            try:
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as s:
+                    for kind, wtype in (("t", "uptime"), ("m", "message")):
+                        for period, wsub in ((None, "global"), ("week", "week"), ("month", "month")):
+                            async with s.get(f"https://wapi.wizebot.tv/api/ranking/{key}/top/{wtype}/{wsub}/100") as r:
+                                try:
+                                    j = await r.json(content_type=None)
+                                except Exception:
+                                    j = {}
+                                if r.status in (401, 403) or (isinstance(j, dict) and j.get("success") is False):
+                                    problem = "key"
+                                    break
+                                if r.status != 200 or not isinstance(j, dict) or not isinstance(j.get("list"), list):
+                                    problem = problem or f"wizebot {r.status}"
+                                    continue
+                                lists[(kind, period)] = [x for x in j["list"][:100] if isinstance(x, dict)]
+                        if problem == "key":
+                            break
+            except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
+                problem = "offline"
+            del key
+            if problem == "key" or not lists:
+                return web.json_response({"error": problem or "empty"}, status=400)
+            state["wz_pending"] = {"lists": lists, "at": time.time()}
+            def sample(kind):
+                rows = lists.get((kind, None)) or []
+                return [[str(x.get("user_name") or "")[:40], str(x.get("value") or "")[:20]] for x in rows[:3]]
+            return web.json_response({"ok": True, "watch": sample("t"), "msgs": sample("m"),
+                                      "count": len({str(x.get("user_name") or "").lower() for rows in lists.values() for x in rows}),
+                                      "partial": problem or ""})
+        if action == "import":
+            pend = state.pop("wz_pending", None)
+            if not pend or time.time() - pend["at"] > 1800:
+                return web.json_response({"error": "expired"}, status=400)
+            unit = 60 if body.get("unit") == 60 else 1
+            n = _vstats().import_wizebot(pend["lists"], unit)
+            if state.get("panel_wake") is not None:
+                state["panel_wake"].set()
+            log.info("Twitch panel: %d viewers imported from WizeBot", n)
+            return web.json_response({"ok": True, "count": n})
+        if action == "cancel":
+            state.pop("wz_pending", None)
+            return web.json_response({"ok": True})
+        return web.json_response({"error": "unknown"}, status=404)
 
     async def history_view(request):
         """1.16.0 (owner): Command history: every change to a command, newest first (?name= for one command)."""
@@ -1667,6 +1891,9 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
         section = request.match_info["section"]
         if section not in SECTIONS:
             raise web.HTTPNotFound()
+        if section == "chatbox":           # 1.18.0: every setting filled in (a new install has none saved yet)
+            from . import chatbox
+            return web.json_response(chatbox.cfg_of(store))
         return web.json_response(store.get(section))
 
     async def write(request):
@@ -1691,7 +1918,7 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
                 return web.json_response({"error": "Couldn't change the Windows start-up setting: " + str(e)[:150]}, status=500)
         previous = store.get("settings") if section == "settings" else None
         store.save(section, data)
-        if section in ("commands", "settings") and state.get("publist_wake") is not None:
+        if section in ("commands", "settings", "public_banner") and state.get("publist_wake") is not None:
             state["publist_wake"].set()         # the public command list follows the change in a few seconds
         if section == "settings" and previous is not None and bool(previous.get("separate_bot")) != bool(data.get("separate_bot")):
             restart_bot(state)          # the bot talks from another account now (or from yours again)
@@ -1874,8 +2101,12 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
     app.router.add_post("/api/game_wins/set", game_wins_set)      # 1.17.0 (owner)
     app.router.add_post("/api/counters/{action}", counter_action)      # 1.15.0 (owner)
     app.router.add_get("/overlay", overlay_page)                       # 1.17.0: on stream (OBS Browser Source)
+    app.router.add_get("/chat", overlay_page)                          # 1.18.0: the Chat box, its own Browser Source (any scene, any size)
     app.router.add_get("/overlay/counters", overlay_page)              #   (the first name it had while testing)
     app.router.add_get("/api/overlay", overlay_data)
+    app.router.add_post("/api/chatbox/test", chatbox_test)             # 1.18.0
+    app.router.add_get("/api/panel", panel_view)                       # 1.18.0: the Twitch panel
+    app.router.add_post("/api/panel/{action}", panel_action)
     app.router.add_get("/api/history", history_view)                   # 1.16.0 (owner): Command history and undo
     app.router.add_post("/api/history/undo", history_undo)
     app.router.add_post("/api/nightbot/{action}", nightbot_action)     # 1.17.0 (owner): Import from Nightbot

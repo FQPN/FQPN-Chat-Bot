@@ -5,6 +5,8 @@ English words said in Arabic letters, like «تايم اوت»).
 
 parse(text) -> {"act": ..., ...} or None
   timeout  {who, secs}          ban {who}           unban {who}
+  vip / unvip / mod / unmod {who}                   (1.18.0)
+  count {what, op: add | sub | set, n}   runcmd {name}   ignore / unignore {who}   clear       (1.18.0)
   addcmd   {name, reply}        editcmd {name, reply}   delcmd {name}       reset {what}
   game     {game | "random"}    pause / resume      giveaway
   title    {text}               setgame {text}       say {text} (sent in chat after a yes)
@@ -22,7 +24,7 @@ def norm(text: str) -> str:
     """Small letters, no punctuation or Arabic diacritics, one spelling for أ إ آ ا / ة ه / ى ي, Western digits."""
     t = str(text or "").translate(_AR_DIGITS).casefold()
     t = _TASHKEEL.sub("", t)
-    t = re.sub("[أإآٱ]", "ا", t).replace("ة", "ه").replace("ى", "ي").replace("ؤ", "و").replace("ئ", "ي")
+    t = re.sub("[أإآٱ]", "ا", t).replace("ة", "ه").replace("ى", "ي").replace("ؤ", "و").replace("ئ", "ي").replace("ڤ", "ف")
     t = t.replace("’", "'").replace("'", "")
     t = _PUNCT.sub(" ", t)
     return " ".join(t.split())
@@ -103,7 +105,26 @@ PICK = {"one": 1, "first": 1, "1": 1, "two": 2, "second": 2, "2": 2, "three": 3,
         "ثنين": 2, "اثنان": 2, "ثلاث": 3}
 
 # (act, list of lead-in patterns). The lead-in is matched at the start; what follows is the "rest".
+_VIPW = r"(?:vip|vips|في اي بي|في ايبي|فيايبي|في اي بيه|فيب|فيبي|ف اي ب)"
+_MODW = r"(?:mod|mods|moderator|مود|مودريتر|موديريتر|مودرتر|اشراف|الاشراف|مشرف|مشرفه)"
 LEADS = [
+    # 1.18.0: the Chat box overlay hidden / shown on stream («خبّي الشات», «ورّ الشات»)
+    ("hidechat", [r"hide( the)? chat( box)?", r"(خب|خبي|خبى|اخفي|اخف|سكر|طفي) (ال)?(شات|تشات|chat)( بوكس)?( من البث| عن البث)?"]),
+    ("showchat", [r"(show|unhide)( the)? chat( box)?", r"(ور|وري|اعرض|رجع|طلع|افتح|اظهر) (ال)?(شات|تشات|chat)( بوكس)?( على البث| علي البث| في البث)?"]),
+    # 1.18.0: chat cleared, a command run, someone ignored / no longer ignored by the bot
+    ("clear", [r"clear( the)? chat", r"(امسح|نظف|نضف|كلير|فضي|فرمت|امسحي) (ال)?(شات|تشات|chat)( كله| كامل)?"]),
+    ("unignore", [r"(un ?ignore|stop ignoring|dont ignore)", r"(فك|شيل|الغي|وقف) (ال)?(تجاهل|تطنيش)( عن| من)?", r"(لا تتجاهل|لا تطنش|رجع)"]),
+    ("ignore", [r"ignore", r"(تجاهل|طنش|تطنيش|انطنش)( ل| على)?"]),
+    ("runcmd", [r"(run|use|trigger|do)( the)? command", r"(run|use|trigger)( the)?(?= \S+ command$)", r"(شغل|شغ|شغلي|نفذ|سو|سوي|ارسل|رسل|استخدم) (ال)?(امر|كوماند)",
+                r"(امر|الامر|كوماند)"]),
+    # 1.18.0: VIP and moderator (the removals first: «شيل الفي اي بي عن فقبن», «شيل المود عن فقبن»)
+    ("unvip", [r"un ?vip", r"(remove|take)( the)? vip( from)?", r"(شيل|سحب|اسحب|نزل|فك|احذف|ارفع|نزع|انزع) (ال)?" + _VIPW + r"( عن| من| حق)?"]),
+    ("unmod", [r"un ?mod", r"(de ?mod|demote)", r"(remove|take)( the)? (mod|moderator)( from)?",
+               r"(شيل|سحب|اسحب|نزل|فك|احذف|ارفع|نزع|انزع) (ال)?" + _MODW + r"( عن| من| حق)?"]),
+    ("vip", [r"(make|give)( him| her)?( a)? vip( to)?", r"vip",
+             r"(عط|عطه|اعط|اعطي|عطي|حط|خل|خلي|سو|سوي|ضيف) (ال)?" + _VIPW + r"( ل| على| حق)?", _VIPW + r"( ل)?"]),
+    ("mod", [r"(make|give)( him| her)?( a)? (mod|moderator)( to)?", r"(mod|modded)",
+             r"(عط|عطه|اعط|اعطي|عطي|حط|خل|خلي|سو|سوي|ضيف) (ال)?" + _MODW + r"( ل| على| حق)?", r"(مود|مشرف)( ل)?"]),
     ("unban", [r"un ?ban", r"unbanned", r"(فك|شيل|ارفع) (ال)?(بان|باند|حظر|البند)( عن| من)?", r"(انبان|ان بان|انبن)", r"فك عن"]),
     ("ban", [r"(ban|band|banned|bann)", r"(بان|باند|بند|بنّد|احظر|حظر|احظره|بنده|اطرد|اطرده|كيك)( ل| على)?",
              r"(عط|عطه|اعط|اعطي|عطي) (ال)?(بان|باند|حظر)( ل)?"]),
@@ -139,6 +160,10 @@ def _unfill(t: str) -> str:
 
 # a word anywhere in the sentence that says which action it is (for any word order: «سامي عطه تايم اوت»)
 ANYWHERE = [
+    ("unvip", ["unvip", "شيل الفي اي بي", "شيل vip", "سحب الفي اي بي"]),
+    ("unmod", ["unmod", "شيل المود", "شيل الاشراف", "سحب المود", "سحب الاشراف"]),
+    ("vip", ["vip", "في اي بي", "فيب"]),
+    ("mod", ["مشرف", "مود", "moderator"]),
     ("unban", ["unban", "انبان", "فك البان", "فك الحظر", "فك البند"]),
     ("timeout", ["timeout", "time out", "تايم اوت", "تايماوت", "تيم اوت", "ميوت", "mute"]),
     ("ban", ["ban", "بان", "باند", "حظر", "بند"]),
@@ -182,7 +207,77 @@ def _game_pool(extra=None) -> dict:
     return pool
 
 
+# ---------- 1.18.0: spelling fixes: what the engine keeps hearing wrong → what it should be ----------
+# Built in (common mishearings of the command words), plus the streamer's own and the ones learned by themselves
+# (core/voice.py sets FIXES from the "voice_fixes" store: [{"heard": .., "to": ..}, …]).
+BUILTIN_FIXES = [
+    ("تايم ات", "تايم اوت"), ("تام اوت", "تايم اوت"), ("تايمن اوت", "تايم اوت"), ("تايم آوت", "تايم اوت"), ("تيماوت", "تايماوت"),
+    ("time art", "timeout"), ("tame out", "timeout"), ("tie mount", "timeout"), ("time ought", "timeout"),
+    ("بانّد", "باند"), ("بنّد", "بند"),
+    ("un band", "unban"), ("anne ban", "unban"),
+    ("في آي بي", "vip"), ("في أي بي", "vip"), ("فى اى بى", "vip"), ("ڤي آي بي", "vip"), ("في اي بي", "vip"), ("في.آي.بي", "vip"),
+    ("v i p", "vip"), ("v.i.p", "vip"), ("vip's", "vip"), ("v ip", "vip"),
+    ("مودريتور", "مود"), ("مودريتر", "مود"), ("موديريتور", "مود"), ("مودرايتر", "مود"), ("modd", "mod"),
+    ("un mod", "unmod"), ("un vip", "unvip"),
+    ("صفّر", "صفر"), ("ريسيت", "ريست"), ("re set", "reset"),
+    ("ايموجى", "ايموجي"), ("إيموجي", "ايموجي"), ("ايموشي", "ايموجي"), ("سؤآل", "سؤال"), ("سوءال", "سؤال"), ("حرووف", "حروف"),
+    ("دئايق", "دقايق"), ("دقائق", "دقايق"), ("دقيقة", "دقيقه"), ("ربع ساعة", "ربع ساعه"), ("نص ساعة", "نص ساعه"),
+    ("كانسل", "كنسل"), ("كنسّل", "كنسل"), ("كنسللها", "كنسلها"),
+    ("طايم اوت", "تايم اوت"), ("تايم اوط", "تايم اوت"), ("تايم آت", "تايم اوت"), ("تايم اووت", "تايم اوت"), ("تايمز اوت", "تايم اوت"),
+    ("فيآيبي", "vip"), ("في اي بيه", "vip"), ("في آي پي", "vip"), ("ڤي آي پي", "vip"), ("في آي بيز", "vip"),
+    ("مودريتورز", "مود"), ("موديريتر", "مود"), ("مود ريتر", "مود"),
+    ("time outs", "timeout"), ("timeouts", "timeout"), ("timed-out", "timeout"), ("time-out", "timeout"),
+    ("un-ban", "unban"), ("un-mod", "unmod"), ("un-vip", "unvip"), ("de-mod", "demod"), ("v.i.p.", "vip"), ("vee eye pee", "vip"),
+    ("moderater", "moderator"), ("moderators", "moderator"), ("re-set", "reset"),
+    ("ايموجيه", "ايموجي"), ("ايموجيز", "ايموجي"), ("حروووف", "حروف"), ("لغزز", "لغز"), ("ترجمي", "ترجم"),
+    ("دقايء", "دقايق"), ("ديقيقه", "دقيقه"), ("ساعا", "ساعه"), ("ثواني", "ثانيه"),
+]
+FIXES = []           # [{"heard": "...", "to": "..."}]: yours and the learned ones (set by core/voice.py)
+
+
+def _fix_list(extra=None):
+    """(heard words, right spelling, built in?): yours and learned ones first (they win), then the built-in ones."""
+    out, seen = [], set()
+    mine = [(f.get("heard"), f.get("to"), False) for f in (extra if extra is not None else FIXES) if isinstance(f, dict)]
+    for h, to, built in mine + [(h, to, True) for h, to in BUILTIN_FIXES]:
+        h = norm(h)
+        if h and to and h != norm(to) and h not in seen:
+            seen.add(h)
+            out.append((h.split(), str(to), built))
+    return sorted(out, key=lambda x: len(x[0]), reverse=True)     # the longest first: «سامي قيمر» before «سامي»
+
+
+BUILTIN_SPAN = 4      # built-in fixes only touch the first words (the command word), never a title or a message
+
+
+def apply_fixes(text: str, extra=None, builtins: bool = True) -> str:
+    """Puts the right spelling in place of what was heard wrong, whole words only (Arabic letters compared the easy way:
+    أ/ا, ة/ه, ى/ي, no tashkeel). The rest of the sentence stays exactly as said."""
+    fixes = _fix_list(extra)
+    if not fixes or not text:
+        return text
+    words = str(text).split()
+    keys = [norm(w) for w in words]
+    out, i = [], 0
+    while i < len(words):
+        for h, to, built in fixes:
+            n = len(h)
+            if (not built or (builtins and i < BUILTIN_SPAN)) and keys[i:i + n] == h:
+                out.append(to)
+                i += n
+                break
+        else:
+            out.append(words[i])
+            i += 1
+    return " ".join(out)
+
+
+_FREE_TEXT = [rx for act, pats in _LEADS if act in ("say", "title", "setgame") for rx in pats]
+
+
 def parse(text: str):
+    t0 = _unfill(norm(text))           # your own words (say / title / game): only your fixes, never the built-in ones
+    text = apply_fixes(text, builtins=not any(rx.match(t0) for rx in _FREE_TEXT))
     t = _unfill(norm(text))
     if not t:
         return None
@@ -190,6 +285,16 @@ def parse(text: str):
     words = t.split()
     if t in UNDO:
         return {"act": "undo"}
+    m = re.match(r"^(?:رجع|خل|خلي|حط)(?: عداد)? (.+?) (?:ل|الى |الي |علي |على )?صفر$", t)
+    if m:                                              # «رجع الموتات صفر», «خل الموتات صفر»
+        return {"act": "reset", "what": m.group(1)}
+    if words[0] in _ADD_W or words[0] in _SUB_W or (len(words) >= 2 and (words[1] in _ADD_W or words[1] in _SUB_W)) \
+            or re.match(r"^(?:set|حط|خل|خلي|غير) \S+ (?:to |على |الى |ل |يصير |يكون )?\S+$", t) and (words[-1].isdigit() or _num(words[-1]) is not None):
+        out = _count_op(t)                             # 1.18.0: counters + / − / set
+        if out:
+            return out
+    if len(words) > 1 and words[0] == "لا" and words[1] in ("تتجاهل", "تطنش", "تجاهل"):     # «لا تتجاهل سامي»
+        return {"act": "unignore", "who": _who(" ".join(words[2:]))} if words[2:] else None
     if t in YES or " ".join(words[:2]) in YES:
         return {"act": "yes"}
     if t in NO or words[0] in NO:
@@ -197,9 +302,7 @@ def parse(text: str):
     for w in words[:3]:
         if w in PICK and len(words) <= 3:
             return {"act": "pick", "n": PICK[w]}
-    m = re.match(r"^(?:رجع|خل|خلي|حط)(?: عداد)? (.+?) (?:ل|الى |الي |علي |على )?صفر$", t)
-    if m:                                              # «رجع الموتات صفر», «خل الموتات صفر»
-        return {"act": "reset", "what": m.group(1)}
+
     for act, pats in _LEADS:
         for rx in pats:
             m = rx.match(t)
@@ -317,7 +420,19 @@ def _strip(rest: str, *drop) -> str:
 
 
 def _finish(act: str, rest: str):
-    if act in ("timeout", "ban", "unban"):
+    if act in ("hidechat", "showchat"):
+        return {"act": act} if set(rest.split()) <= {"now", "الحين", "please", "on", "stream", "box", "عن", "من", "على", "علي", "في", "البث"} else None
+    if act == "clear":
+        return {"act": "clear"} if rest.split() == [] or set(rest.split()) <= {"كله", "كامل", "now", "الحين", "please"} else None
+    if act in ("ignore", "unignore"):
+        who = " ".join(w for w in rest.split() if w not in ("him", "her", "the", "user", "عن", "من", "ل", "على"))
+        return {"act": act, "who": who} if who else None
+    if act == "runcmd":
+        name = re.sub(r"\s+command$", "", _strip(rest, "called", "named", "the", "اسمه", "حق")).lstrip("!")
+        return {"act": "runcmd", "name": name} if name else None
+    if act == "count":
+        return _count(rest)
+    if act in ("timeout", "ban", "unban", "vip", "unvip", "mod", "unmod"):
         words = rest.split()
         d = duration(words) if act == "timeout" else None
         if d:
@@ -328,7 +443,9 @@ def _finish(act: str, rest: str):
                     k = i
                     break
             words = words[:k] + words[k + len(said):]
-        words = [w for w in words if w not in ("for", "لمده", "مده", "ل", "the", "user", "ذا", "هذا", "اللي", "يوزر")]
+        words = [w for w in words if w not in ("for", "لمده", "مده", "ل", "the", "user", "ذا", "هذا", "اللي", "يوزر", "a", "an",
+                                               "يصير", "يكون", "صار", "خله", "خليه", "to", "as", "be")
+                 and not (act in ("vip", "unvip", "mod", "unmod") and w in ("make", "خل", "خلي", "سو", "سوي", "him", "her", "from"))]
         if not words:
             return None
         out = {"act": act, "who": " ".join(words)}
@@ -379,12 +496,53 @@ def _finish(act: str, rest: str):
     return None
 
 
+_ADD_W = {"زيد", "زود", "ضيف", "اضف", "زد", "كثر", "add", "plus", "increase", "up"}
+_SUB_W = {"نقص", "نزل", "انقص", "قلل", "ناقص", "subtract", "minus", "decrease", "lower"}
+
+
+def _count(rest: str, op: str = ""):
+    """1.18.0: «زيد الموتات», «زيد الموتات ثلاث», «نقص الموتات», «حط الموتات 50», "deaths plus one", "add 2 to deaths",
+    "set deaths to 50". {act: count, what, op, n}"""
+    words = [w for w in rest.split() if w not in ("to", "from", "the", "counter", "عداد", "العداد", "على", "الى", "ل", "من",
+                                                   "يصير", "يكون", "by", "واحد") or w == "واحد" and False]
+    n = None
+    keep = []
+    for w in words:
+        v = _num(w) if not w.isdigit() else int(w)
+        if v is not None and n is None:
+            n = v
+        else:
+            keep.append(w)
+    what = " ".join(keep).strip()
+    if not what:
+        return None
+    return {"act": "count", "what": what, "op": op or "add", "n": n}
+
+
+def _count_op(t: str):
+    """The counter sentences in any order: "deaths plus one", «الموتات زيد», "set deaths to 50"."""
+    w = t.split()
+    if not w:
+        return None
+    if w[0] in ("set", "حط", "خل", "خلي", "غير") and len(w) >= 3 and (w[-1].isdigit() or _num(w[-1]) is not None):
+        out = _count(" ".join(w[1:]), "set")
+        return out if out and out["n"] is not None else None
+    for i, x in enumerate(w):
+        if x in _ADD_W or x in _SUB_W:
+            out = _count(" ".join(w[:i] + w[i + 1:]), "add" if x in _ADD_W else "sub")
+            if out:
+                return out
+    return None
+
+
 # ---------- the nearest word: when the speech engine heard a word slightly wrong ----------
 
 VOCAB = ["timeout", "ban", "unban", "reset", "start", "play", "change", "title", "game", "cancel", "undo",
          "تايماوت", "تايم", "اوت", "ميوت", "بان", "باند", "احظر", "حظر", "فك", "صفر", "تصفير", "ريست", "ابدا", "شغل", "العب",
          "يلا", "غير", "العنوان", "اللعبه", "كنسل", "تراجع", "الغي", "دقيقه", "دقايق", "دقيقتين", "ساعه", "ثانيه",
-         "minutes", "minute", "seconds", "hour"]
+         "minutes", "minute", "seconds", "hour",
+         "مشرف", "مودريتر", "اشراف", "شيل", "سحب", "moderator", "unmod", "unvip",
+         "زيد", "زود", "نقص", "تجاهل", "طنش", "امسح", "الشات", "نفذ", "increase", "decrease", "ignore", "unignore", "clear", "minus", "plus"]
 _SHORT_OK = {"بان", "فك", "صفر", "اوت", "ban", "يلا", "غير"}      # (short words: only exact, never guessed)
 
 
@@ -540,9 +698,71 @@ def match_name(said: str, names: list, cutoff: float = 0.6):
             r = 1.0
         elif latin(b) == latin(want):
             r = 0.95
+        else:                            # 1.18.0: Arabic letters said for an English name («ديسكورد» → !discord)
+            lw, lb = _vowelless(re.sub(r"[^a-z0-9]", "", latin(want).replace("k", "c").replace("w", ""))), \
+                _vowelless(re.sub(r"[^a-z0-9]", "", latin(b).replace("k", "c").replace("w", "")))
+            if lw and lb and len(lw) >= 3:
+                r = max(r, 0.9 * difflib.SequenceMatcher(None, lw, lb).ratio())
         if r > score:
             best, score = n, r
     return best if score >= cutoff else None
+
+
+# 1.18.0: the built-in commands by easy spoken names («شغل امر كوماندات» = !cmlist, «شغل امر برنامج» = app?)
+BUILTIN_SPOKEN = {
+    "commands": ("cmlist", "cm list", "commands", "command list", "commands list", "my commands", "كوماندات", "الكوماندات",
+                 "كوماند", "اوامر", "الاوامر", "قائمه الاوامر", "قايمه الاوامر", "لسته الاوامر", "سي ام ليست"),
+    "app": ("app", "the app", "برنامج", "البرنامج", "تطبيق", "التطبيق", "ابلكيشن"),
+    "title": ("title", "settitle", "stream title", "عنوان", "العنوان", "عنوان البث", "تايتل", "التايتل"),
+    "game": ("game", "setgame", "current game", "لعبه", "اللعبه", "قيم", "القيم", "اللعبه الحاليه"),
+}
+# Arabic letters said by name, for one-letter commands («شين» = !ش, «حا حا» = !حح)
+_LETTER_NAMES = {"الف": "ا", "با": "ب", "باء": "ب", "تا": "ت", "تاء": "ت", "ثا": "ث", "ثاء": "ث", "جيم": "ج", "حا": "ح",
+                 "حاء": "ح", "خا": "خ", "خاء": "خ", "دال": "د", "ذال": "ذ", "را": "ر", "راء": "ر", "زاي": "ز", "زين": "ز",
+                 "سين": "س", "شين": "ش", "صاد": "ص", "ضاد": "ض", "طا": "ط", "طاء": "ط", "ظا": "ظ", "ظاء": "ظ", "عين": "ع",
+                 "غين": "غ", "فا": "ف", "فاء": "ف", "قاف": "ق", "كاف": "ك", "لام": "ل", "ميم": "م", "نون": "ن", "ها": "ه",
+                 "هاء": "ه", "واو": "و", "يا": "ي", "ياء": "ي"}
+
+
+def _spelled(said: str) -> str:
+    """«شين» → «ش», «حا حا» → «حح»; "" when it isn't letters said by name."""
+    w = norm(said).split()
+    return "".join(_LETTER_NAMES[x] for x in w) if w and all(x in _LETTER_NAMES for x in w) else ""
+
+
+def match_command(said: str, customs: dict, builtins: list):
+    """1.18.0 «شغل امر ...»: which command was meant. customs = {name: response} (your commands), builtins = the built-in
+    keys that are on. Returns ("custom", name), ("builtin", key) or None. In order: your command by its exact name (also
+    spelled letter by letter), a built-in by an easy name («كوماندات», «برنامج»), a short name the word starts with
+    («الدسكور» → !دس), the closest name, and last a short command whose reply has the word («الشكر» → !ش: «شكرا ع الفولو»)."""
+    want = _bare(said)
+    if not want:
+        return None
+    alt = _spelled(said)
+    for n in customs:
+        if _bare(n) and _bare(n) in (want, alt):
+            return ("custom", n)
+    spoken = {}
+    for k in builtins:
+        for a in BUILTIN_SPOKEN.get(k, ()):
+            spoken[_bare(a)] = k
+    if want in spoken:
+        return ("builtin", spoken[want])
+    w0 = want.replace(" ", "")
+    pre = [n for n in customs if len(_bare(n)) >= 2 and w0.startswith(_bare(n).replace(" ", "")) and len(w0) - len(_bare(n)) <= 4]
+    if pre:
+        return ("custom", max(pre, key=lambda n: len(_bare(n))))
+    hit = match_name(said, list(customs) + list(spoken))
+    if hit in customs:
+        return ("custom", hit)
+    if hit:
+        return ("builtin", spoken[hit])
+    if len(w0) >= 3:
+        found = [n for n, r in customs.items() if len(_bare(n)) <= 3 and _bare(n)[:1] == w0[:1]
+                 and any(x.startswith(w0[:3]) for x in norm(r).split())]
+        if len(found) == 1:
+            return ("custom", found[0])
+    return None
 
 
 def command_name(said: str) -> str:

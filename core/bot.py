@@ -18,6 +18,9 @@ import twitchio
 from twitchio import eventsub
 from twitchio.ext import commands
 
+from . import followdates
+from . import viewerstats
+from . import chatbox
 from . import auth, botauth, botsay, counters as counters_mod, chatstats, gamesearch, events, giveaway, greetings, logsafe, manage, minigames, moderation, notify, pinfirst, publiclist, blocks
 from .manage import CommandError
 from .store import Store
@@ -102,6 +105,16 @@ def part_of(why) -> str:
 TIMER_GAP = 60          # 1.15.0 (owner): seconds; two timer messages are never sent closer together than this
 TIMER_WINDOW = 300      # 1.15.0 (owner): like Nightbot, "chat lines" are counted over the last 5 minutes
 
+def is_echoed_command(template: str, text: str) -> bool:
+    """1.18.0: a reply that only became a command because of what the viewer typed ($(query) and friends): «قول !ban x»
+    → "!ban x", «قول /timeout» → "/timeout". A reply you wrote starting with ! yourself still goes out."""
+    out = str(text or "").lstrip()
+    if not out or out[0] not in "!/.\\":
+        return False
+    tpl = str(template or "").lstrip()
+    return not tpl.startswith(out[0])
+
+
 class TwitchBot(commands.Bot):
     def __init__(self, account: dict, store: Store | None = None, bot_account: dict | None = None, sender=None):
         self._fqpn_init(account, store, bot_account, sender)
@@ -127,6 +140,12 @@ class TwitchBot(commands.Bot):
         except Exception:
             log.exception("Stream stats could not start")
             self.stats = None
+        try:                                        # 1.18.0: each viewer's messages and watch time (the Twitch panel)
+            self.vstats = viewerstats.ViewerStats(store) if getattr(self, "count_stats", True) and store is not None else None
+        except Exception:
+            log.exception("Viewer stats could not start")
+            self.vstats = None
+        self.watch_problem = None                   # 1.18.0: "scopes" when the login can't see who's in the chat yet
         self.bot_account = bot_account or account
         self.separate = bot_account is not None and str(bot_account["user_id"]) != str(account["user_id"])
         # 1.12.0: a shared bot account sends this channel's replies (core/botsender.py). This bot then reads its own chat
@@ -205,10 +224,20 @@ class TwitchBot(commands.Bot):
             log.warning("Watch Streak detection needs TwitchIO 3.3 or newer (you have %s). Run: pip install -U twitchio",
                         ".".join(map(str, ver)))
         await self._subscribe_optional()
+        for make in (getattr(eventsub, "ChatMessageDeleteSubscription", None), getattr(eventsub, "ChatClearUserMessagesSubscription", None),
+                     getattr(eventsub, "ChatClearSubscription", None)):
+            if make is None:
+                continue
+            try:      # 1.18.0: the Chat box overlay takes away deleted messages (and those of someone timed out or banned)
+                await self.subscribe_websocket(payload=make(broadcaster_user_id=self.owner_id, user_id=self.bot_id))
+            except Exception as e:
+                log.warning("Chat box: can't listen for deleted messages (%s)", e.__class__.__name__)
         if self._dash_closed:       # 1.13.0: closed (a restart) while it was still starting: no timers left running
             return
         self._tasks.append(asyncio.create_task(self._live_loop()))
         self._tasks.append(asyncio.create_task(self._timer_loop()))
+        self._tasks.append(asyncio.create_task(self._cb_emotes_loop()))
+        self._tasks.append(asyncio.create_task(self._watch_loop()))
 
     async def event_ready(self) -> None:
         self.connected = True
@@ -246,10 +275,12 @@ class TwitchBot(commands.Bot):
         try:
             if getattr(self, "stats", None) is not None:
                 self.stats.flush(force=True)           # 1.14.0: nothing counted is lost
+            if getattr(self, "vstats", None) is not None:
+                self.vstats.flush(force=True)          # 1.18.0: the same for messages and watch time
         except Exception:
             log.exception("Could not save the stream stats")
         self.connected = False
-        for t in [*self._tasks, *self._greet_tasks]:
+        for t in [*self._tasks, *self._greet_tasks, *getattr(self, "_side_tasks", set())]:
             t.cancel()
         await super().close(*args, **kwargs)
 
@@ -291,6 +322,86 @@ class TwitchBot(commands.Bot):
             log.exception("Could not count a chat message")
             return False
 
+    def _not_counted(self, uid: str, login: str) -> bool:
+        """1.18.0: the channel itself, the bot that writes here and known bots never get messages or watch time."""
+        return (not uid or uid in (str(self.owner_id or ""), str(getattr(self, "writer_id", "") or ""))
+                or login in greetings.KNOWN_BOTS)
+
+    def _count_viewer(self, payload) -> None:
+        if getattr(self, "vstats", None) is None:
+            return
+        try:
+            ch = payload.chatter
+            uid, login = str(getattr(ch, "id", "") or ""), str(getattr(ch, "name", "") or "").lower()
+            if getattr(payload, "source_broadcaster", None) is not None or self._not_counted(uid, login):
+                return                                  # (a message from a shared chat's other channel isn't ours)
+            self.vstats.message(uid, login, getattr(ch, "display_name", None) or login)
+        except Exception:
+            log.exception("Could not count a message for the leaderboard")
+
+    WATCH_EVERY = 300          # 1.18.0: seconds between looks at who is in the chat (only while live)
+
+    async def _chatters(self):
+        """Everyone in the chat right now [(uid, login, name)], or None (with self.watch_problem set). Needs the channel
+        login's "moderator:read:chatters" permission (an older login: log out and in once)."""
+        data = auth.load_token() or {}
+        if data.get("scopes") and "moderator:read:chatters" not in (data.get("scopes") or []):
+            self.watch_problem = "scopes"
+            return None
+        token = data.get("access_token") or self.account.get("access_token")
+        headers = {"Authorization": f"Bearer {token}", "Client-Id": auth.CLIENT_ID}
+        out, after = [], None
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as s:
+                for _ in range(20):                 # up to 20,000 people (1,000 a page)
+                    q = {"broadcaster_id": str(self.owner_id), "moderator_id": str(self.owner_id), "first": "1000"}
+                    if after:
+                        q["after"] = after
+                    async with s.get("https://api.twitch.tv/helix/chat/chatters", params=q, headers=headers) as r:
+                        if r.status in (401, 403):
+                            self.watch_problem = "scopes"
+                            return None
+                        if r.status != 200:
+                            self.watch_problem = f"twitch {r.status}"
+                            return None
+                        body = await r.json()
+                    for c in body.get("data") or []:
+                        out.append((str(c.get("user_id") or ""), str(c.get("user_login") or "").lower(), str(c.get("user_name") or "")))
+                    after = (body.get("pagination") or {}).get("cursor")
+                    if not after:
+                        break
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
+            self.watch_problem = "offline"
+            return None
+        self.watch_problem = None
+        return out
+
+    async def _watch_loop(self) -> None:
+        """1.18.0 (Twitch panel): watch time. While live, every WATCH_EVERY seconds: who is in the chat gets the minutes."""
+        last = 0.0
+        while True:
+            await asyncio.sleep(30)
+            try:
+                vs = getattr(self, "vstats", None)
+                if vs is None:
+                    continue
+                if not self.is_live:
+                    vs.offline()
+                    last = 0.0
+                    continue
+                if time.time() - last < self.WATCH_EVERY:
+                    continue
+                last = time.time()
+                people = await self._chatters()
+                if people is None:
+                    vs.offline()                    # (a missed look isn't counted as watch time later)
+                    continue
+                vs.watch([p for p in people if not self._not_counted(p[0], p[1])])
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("Watch time failed")
+
     def _log_chat(self, payload) -> None:
         """'Log chat messages' in Settings: keeps what viewers wrote next to the bot's own actions."""
         try:
@@ -323,6 +434,11 @@ class TwitchBot(commands.Bot):
             self.store.activity.add("bot", text[:300], user or "", why=why or "")
         except Exception:
             log.exception("Could not log a bot message")
+        try:          # 1.18.0: the Chat box shows this answer under the message that asked for it
+            if self._cb_on and payload is not None and getattr(payload, "id", None):
+                chatbox.BUF.attach(payload.id, text)
+        except Exception:
+            log.exception("Chat box: couldn't attach an answer")
 
     async def _send(self, text: str, payload=None, why: str | None = None, user: str | None = None, reply: bool = False) -> None:
         """Sends to chat. Text starting with /announce, /announceblue,
@@ -544,11 +660,52 @@ class TwitchBot(commands.Bot):
             log.warning("Moderation %s %s could not reach Twitch", method, path)
         return False
 
+    async def _set_role(self, act: str, uid: str):
+        """1.18.0 (Voice): VIP / unVIP / mod / unmod. Twitch only lets the channel's own login do these (never a moderator
+        or the bot account), with the "Manage VIPs" and "Manage moderators" permissions. Returns (ok, problem):
+        problem is "scopes", "already", "is_mod", "is_vip", "full", "banned", "rate" or "twitch <status>"."""
+        path = "channels/vips" if act in ("vip", "unvip") else "moderation/moderators"
+        method = "POST" if act in ("vip", "mod") else "DELETE"
+        data = auth.load_token() or {}
+        token = data.get("access_token") or self.account.get("access_token")
+        headers = {"Authorization": f"Bearer {token}", "Client-Id": auth.CLIENT_ID}
+        q = {"broadcaster_id": str(self.owner_id), "user_id": str(uid)}
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as s:
+                async with s.request(method, "https://api.twitch.tv/helix/" + path, params=q, headers=headers) as r:
+                    if r.status in (200, 204):
+                        return True, ""
+                    try:
+                        msg = str((await r.json()).get("message") or "").lower()
+                    except Exception:
+                        msg = ""
+                    log.warning("Role %s answered %s: %s", act, r.status, msg[:200])
+                    if r.status in (401, 403) or "scope" in msg or "permission" in msg:
+                        return False, "scopes"
+                    if r.status == 429:
+                        return False, "rate"
+                    if r.status == 409 or "slot" in msg:
+                        return False, "full"
+                    if "banned" in msg or "blocked" in msg:
+                        return False, "banned"
+                    if act == "vip" and "moderator" in msg:
+                        return False, "is_mod"
+                    if act == "mod" and "vip" in msg:
+                        return False, "is_vip"
+                    if "already" in msg or "isn't" in msg or "is not" in msg or "not a" in msg or r.status == 422:
+                        return False, "already"
+                    return False, f"twitch {r.status}"
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
+            log.warning("Role %s could not reach Twitch", act)
+            return False, "net"
+
     def _on_cooldown(self, key: str, seconds: float) -> bool:
         now = time.time()
         if now - self._cooldowns.get(key, 0) < seconds:
             return True
         self._cooldowns[key] = now
+        if len(self._cooldowns) > 2000:      # 1.18.0: per-person ones (!wins) would pile up over a long session: old ones go
+            self._cooldowns = {k: v for k, v in self._cooldowns.items() if now - v < 86400}
         return False
 
     # ---------- variables ----------
@@ -605,6 +762,10 @@ class TwitchBot(commands.Bot):
         async for f in result.followers:
             when = f.followed_at
             break
+        try:                                       # 1.18.0: the first follow date kept on this PC, if earlier
+            when = followdates.first_date(self.store, str(chatter_id), when)
+        except Exception:
+            log.exception("Follow date memory failed")
         # Followers are cached for 10 minutes; "not following" only for 1 minute.
         self._follow_cache[chatter_id] = (time.time() + (600 if when else 60), when)
         if len(self._follow_cache) > 500:
@@ -637,6 +798,7 @@ class TwitchBot(commands.Bot):
             first_peak=lambda: pinfirst.peak_of(self.store.get("first_state"), str(getattr(chatter, "name", "") or user).lower()),
             followed_of=self._followed_of,
             first_of=lambda login, peak: (pinfirst.peak_of if peak else pinfirst.streak_of)(self.store.get("first_state"), login),
+            viewer_stat=lambda login, kind: self._viewer_stat(login, kind, chatter, user),
         )
 
     # ---------- 1.13.0 variables ----------
@@ -718,7 +880,7 @@ class TwitchBot(commands.Bot):
         answered). True when this message won (then nothing else answers it). Only while you're live."""
         if not self.is_live:
             return False
-        sid = self._stream_id()
+        sid = self._first_sid()
         if not sid:
             return False
         chatter = payload.chatter
@@ -764,10 +926,30 @@ class TwitchBot(commands.Bot):
             return True
         return False
 
+    FIRST_SAME_STREAM = 1800      # 1.18.0: live again within 30 minutes = the same stream for First in chat
+
+    def _first_sid(self):
+        """1.18.0: the stream as First in chat sees it. The stream messages already keep one stream across a short drop
+        (up to Events > Stream's "came back within" minutes); First in chat goes further: live again within 30 minutes of
+        the last time it saw the stream live is still the same stream (no second «first» round, no broken streak)."""
+        raw = self._stream_id()
+        if not raw:
+            return raw
+        fa = dict(self.store.get("first_alias") or {})
+        now = time.time()
+        if fa.get("sid") != raw:
+            near = fa.get("sid") and now - float(fa.get("seen") or 0) <= self.FIRST_SAME_STREAM
+            fa = {"sid": raw, "root": (fa.get("root") or fa.get("sid")) if near else raw, "seen": now}
+            self.store.save("first_alias", fa)
+        elif self.is_live and now - float(fa.get("seen") or 0) > 60:
+            fa["seen"] = now
+            self.store.save("first_alias", fa)
+        return fa.get("root") or raw
+
     def _first_window_check(self) -> None:
         """1.14.0: Pin first message's first minutes passed with nobody first: mark the stream, so the streak is broken
         (also when nobody chats at all after that)."""
-        sid = self._stream_id()
+        sid = self._first_sid()
         if not sid or not self.live_since:
             return
         elapsed = (datetime.now(timezone.utc) - self.live_since).total_seconds()
@@ -1001,7 +1183,14 @@ class TwitchBot(commands.Bot):
     async def event_follow(self, payload) -> None:
         try:
             user, login = self._names(getattr(payload, "user", None))
-            await self._fire_event("follow", 0, user or "viewer", login, dedupe=f"follow:{login}")
+            try:                                   # 1.18.0: keep the first follow date (a re-follow keeps the old one)
+                uid = str(getattr(getattr(payload, "user", None), "id", "") or "")
+                if uid and getattr(payload, "followed_at", None):
+                    followdates.first_date(self.store, uid, payload.followed_at, login)
+                    self._follow_cache.pop(uid, None)
+            except Exception:
+                log.exception("Follow date memory failed")
+            await self._on_follow(user or "viewer", login)
         except Exception:
             log.exception("Follow handling failed")
 
@@ -1061,16 +1250,181 @@ class TwitchBot(commands.Bot):
         self._greet_tasks.add(task)
         task.add_done_callback(self._greet_tasks.discard)
 
-    async def _greet_later(self, login, chatter, template) -> None:
+    REGULAR_BADGES = {"subscriber", "founder", "vip", "moderator", "lead_moderator", "artist-badge"}
+
+    async def _really_new(self, payload) -> bool:
+        """1.18.0: the app has never seen them write here, but are they really new? The app only remembers chatters since
+        it started counting them, so a regular who hasn't written since then looks new. Not new: a sub, VIP or mod here,
+        or someone who followed before this stream started (more than an hour before). Then no welcome: a normal greeting."""
         try:
-            await asyncio.sleep(greetings.GREETING_DELAY)
-            if (self.store.get("settings").get("paused") or not self.is_live
-                    or not self.store.get("greetings").get("enabled", True)):
+            for b in getattr(payload, "badges", None) or []:
+                if str(getattr(b, "set_id", "") or "") in self.REGULAR_BADGES:
+                    return False
+            if not self.is_live or self.live_since is None:
+                return True
+            when = await self._followed_at(str(getattr(payload.chatter, "id", "")))
+            if when and when.timestamp() < min(self.live_since.timestamp(), time.time() - greetings.JUST_FOLLOWED):
+                return False
+        except Exception:
+            log.exception("First-time chatter check failed")
+        return True
+
+    def _maybe_welcome(self, payload) -> bool:
+        """1.18.0: someone wrote in this chat for the first time ever: a welcome a few seconds later (Greetings > First-time
+        chatters, a tab on the Events page). Only while live, like greetings. True when a welcome is on its way (then no greeting this stream)."""
+        if not self.is_live or self.live_since is None:
+            return False
+        chatter = payload.chatter
+        login = (getattr(chatter, "name", None) or "").lower()
+        g = self.store.get("greetings") or {}
+        cfg = greetings.welcome_cfg(g, (self.store.get("ui") or {}).get("language", "en"))
+        if not login or not cfg["enabled"] or not cfg["replies"]:
+            return False
+        if str(getattr(chatter, "id", "")) == str(self.owner_id or "") or login == str((self.account or {}).get("login") or "").lower():
+            return False                                   # the streamer
+        if not cfg["reply_bots"] and greetings.is_bot(login, getattr(chatter, "badges", None) or getattr(payload, "badges", None) or ()):
+            return False
+        if cfg["skip_commands"] and clean_chat(payload.text).startswith("!"):
+            return False
+        salam = greetings.says_salam(clean_chat(payload.text))
+        state, _ = greetings.claim(self.store.get("greeted"), self.live_since.isoformat(), login, ["(welcome)"])
+        self.store.save("greeted", state)                  # no Greetings-list greeting for them this stream
+        task = asyncio.create_task(self._welcome_later(login, chatter, cfg, salam))
+        self._greet_tasks.add(task)
+        task.add_done_callback(self._greet_tasks.discard)
+        self._welcomes = getattr(self, "_welcomes", 0) + 1
+        if not hasattr(self, "_welcomed"):
+            self._welcomed = {}
+        self._welcomed[login] = time.time()                 # (a Follow reply waiting for them isn't sent: see _on_follow)
+        if len(self._welcomed) > 500:
+            self._welcomed = {k: v for k, v in self._welcomed.items() if time.time() - v < 600}
+        return True
+
+    def _streak_first(self, login: str) -> bool:
+        """1.18.0: the first Falkorie streak of this person this stream? Kept on this PC with the stream's start time
+        (Twitch's), so closing and opening the app mid-stream remembers it; a new stream starts a new list. While you
+        aren't live, a day counts as one stream. Only counted when the Falkorie streak reply is on."""
+        ev = (self.store.get("events") or {}).get("falkorie_streak") or {}
+        if not ev.get("enabled", True):
+            return True
+        session = self.live_since.isoformat() if (self.is_live and self.live_since) else "day:" + datetime.now().date().isoformat()
+        data = self.store.get("falkorie_streak_seen") or {}
+        users = list(data.get("users") or []) if data.get("session") == session else []
+        if login in users:
+            return False
+        users.append(login)
+        self.store.save("falkorie_streak_seen", {"session": session, "users": users[-5000:]})
+        return True
+
+    FOLLOW_HOLD = 20          # seconds a follow reply waits while a First-time chatters welcome could thank them instead
+
+    async def _on_follow(self, user: str, login: str) -> bool:
+        """1.18.0: the Follow reply. While live with First-time chatters on (and a «just followed» reply in it), it waits a
+        few seconds: if that person's first message comes in the meantime, their welcome already thanks them for the
+        follow, so the Follow reply isn't sent too (still counted, and the pop-up still shows)."""
+        cfg = greetings.welcome_cfg(self.store.get("greetings") or {}, (self.store.get("ui") or {}).get("language", "en"))
+        hold = self.is_live and cfg["enabled"] and (cfg.get("follow_replies") or cfg.get("salam_follow_replies"))
+        if not hold:
+            await self._fire_event("follow", 0, user, login, dedupe=f"follow:{login}")
+            return False
+
+        async def later():
+            try:
+                await asyncio.sleep(self.FOLLOW_HOLD)
+                w = getattr(self, "_welcomed", {}).get(str(login).lower(), 0)
+                extra = {"_no_reply": True} if time.time() - w < self.FOLLOW_HOLD + 120 else None
+                await self._fire_event("follow", 0, user, login, extra, dedupe=f"follow:{login}")
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("Follow reply failed")
+        self._side(later())
+        return True
+
+    def _side(self, coro) -> None:
+        """1.18.0: a small job for later (follow anniversary, a follow reply that waits), stopped when the bot closes."""
+        if not hasattr(self, "_side_tasks"):
+            self._side_tasks = set()
+        task = asyncio.create_task(coro)
+        self._side_tasks.add(task)
+        task.add_done_callback(self._side_tasks.discard)
+
+    def _maybe_anniversary(self, payload) -> None:
+        """1.18.0: a follower's first message this stream, on their follow anniversary (or up to 6 days after it): the
+        Follow anniversary event, once a year. One follow lookup per person per stream."""
+        if not self.is_live or self.live_since is None:
+            return
+        ev = (self.store.get("events") or {}).get("follow_anniversary") or {}
+        if not ev.get("enabled"):
+            return
+        chatter = payload.chatter
+        uid, login = str(getattr(chatter, "id", "") or ""), (getattr(chatter, "name", None) or "").lower()
+        if not uid or uid == str(self.owner_id or "") or getattr(chatter, "broadcaster", False) or greetings.is_bot(login):
+            return
+        stream = self.live_since.isoformat()
+        seen = getattr(self, "_anniv_checked", None)
+        if seen is None or seen[0] != stream:
+            seen = self._anniv_checked = (stream, set())
+        if uid in seen[1]:
+            return
+        seen[1].add(uid)
+        self._side(self._anniversary(chatter))
+
+    async def _anniversary(self, chatter) -> None:
+        try:
+            uid = str(chatter.id)
+            when = await self._followed_at(uid)
+            now = datetime.now()
+            years = followdates.anniversary(when, now.date())
+            if years < 1 or followdates.celebrated(self.store, uid, now.year):
+                return
+            followdates.mark_celebrated(self.store, uid, now.year)
+            await asyncio.sleep(2)
+            await self._fire_event("follow_anniversary", years, chatter.display_name or chatter.name, chatter.name.lower(),
+                                   {"years": years}, dedupe=f"anniv:{uid}:{now.year}")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Follow anniversary failed")
+
+    async def _just_followed(self, chatter) -> bool:
+        """1.18.0: did they follow during this stream (or in the last hour)? Asks Twitch; unknown = no."""
+        try:
+            when = await self._followed_at(str(getattr(chatter, "id", "")))
+        except Exception:
+            return False
+        if not when:
+            return False
+        start = min(self.live_since.timestamp() if self.live_since else time.time(), time.time() - greetings.JUST_FOLLOWED)
+        return when.timestamp() >= start
+
+    async def _welcome_later(self, login, chatter, cfg, salam) -> None:
+        """The welcome after the wait: the follow check happens then, so a follow in those seconds still counts."""
+        try:
+            await asyncio.sleep(cfg["delay"])
+            followed = await self._just_followed(chatter)
+            text = greetings.pick_welcome(cfg, getattr(self, "_last_welcome", ""), salam=salam, followed=followed)
+            self._last_welcome = text
+            if text:
+                await self._greet_later(login, chatter, text, delay=0, why="welcome")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Welcome failed")
+
+    async def _greet_later(self, login, chatter, template, delay=None, why="greeting") -> None:
+        try:
+            await asyncio.sleep(greetings.GREETING_DELAY if delay is None else delay)
+            g = self.store.get("greetings") or {}
+            on = greetings.welcome_cfg(g).get("enabled") if why == "welcome" else g.get("enabled", True)
+            if self.store.get("settings").get("paused") or not self.is_live or not on:
                 self.store.save("greeted", greetings.release(self.store.get("greeted"), login))   # try again on their next message
                 return
             user = chatter.display_name or chatter.name
             self._log_activity("greeting", login, user)
             ctx = self._ctx(user, "", counter_key=f"greet:{login}", chatter=chatter)
+            if why == "welcome":
+                template = events.at_user(template, user, login)   # {user} tags them, like Events replies
             await self._send(await expand(template, ctx), why="greeting", user=user)
         except asyncio.CancelledError:
             raise
@@ -1129,8 +1483,10 @@ class TwitchBot(commands.Bot):
         # Note: we do NOT ignore the streamer's own messages (the bot IS the
         # streamer's account), only the bot's own replies.
         if self._is_own_echo(payload):
+            self._cb_add(payload, bot=True)            # 1.18.0: the Chat box (core/chatbox.py)
             return
         if payload.source_broadcaster is not None:     # a message from a channel sharing this chat (Shared Chat)
+            self._cb_add(payload, shared=True)
             if (self.store.get("moderation") or {}).get("shared_chat"):
                 try:
                     await self._moderate(payload)
@@ -1138,11 +1494,14 @@ class TwitchBot(commands.Bot):
                     log.exception("Moderation failed")
             return
         if (self.separate or self.sender is not None) and str(getattr(payload.chatter, "id", "")) == self.writer_id:
+            self._cb_add(payload, bot=True)
             return      # whatever the bot account writes is never treated as a command
         try:            # 1.17.1: the Falkorie bot says someone reached a level or shows their streak: an Events reply
             f = events.falkorie(getattr(payload.chatter, "name", ""), clean_chat(payload.text))
             if f:
                 key, who, n = f
+                if key == "falkorie_streak" and not self._streak_first(who.lstrip("@").lower()):
+                    return      # 1.18.0: one streak reply per person per stream (also after a restart)
                 await self._fire_event(key, n, who.lstrip("@"), who.lstrip("@").lower(),
                                        {"level": n} if key == "falkorie_level" else {"streak": n}, dedupe=f"{key}:{who.lower()}:{n}")
         except Exception:
@@ -1153,15 +1512,28 @@ class TwitchBot(commands.Bot):
         except Exception:
             log.exception("Moderation failed")
         if self._is_blocked(payload):
+            self._cb_add(payload)                      # (the Chat box hides them unless you say otherwise)
             return
         self._log_chat(payload)
-        self._count_chat(payload)                      # 1.14.0: Stream stats
+        first = self._count_chat(payload)              # 1.14.0: Stream stats (1.18.0: True = their first message here ever)
+        self._count_viewer(payload)                    # 1.18.0: the Twitch panel's Messages
+        first = first or str(getattr(payload, "message_type", "") or "") == "user_intro" or bool(getattr(payload, "_first", False))
+        self._cb_add(payload, first=first)
         self._chat_lines += 1                          # 1.14.0: timers that wait for chat
         self._chat_times.append(time.time())           # 1.15.0: Nightbot-style chat lines (last 5 minutes)
+        self._lines_last_5min(time.time())            # 1.18.0: old ones go now (offline or paused, the timers never trimmed it)
         if self.store.get("settings").get("paused"):   # paused from the dashboard: stay silent
             return
         try:
-            self._maybe_greet(payload)
+            if not first:
+                self._maybe_anniversary(payload)               # 1.18.0: Follow anniversary
+        except Exception:
+            log.exception("Follow anniversary check failed")
+        welcomed = False
+        try:
+            welcomed = bool(first and await self._really_new(payload) and self._maybe_welcome(payload))
+            if not welcomed:                                   # 1.18.0: a first-time chatter's welcome replaces the greeting
+                self._maybe_greet(payload)
         except Exception:
             log.exception("Greeting check failed")
         try:
@@ -1201,12 +1573,139 @@ class TwitchBot(commands.Bot):
         # Custom commands: the creator chose the exact name (any symbol or none, spaces allowed)
         found = manage.match_command(self.store.get("commands"), text)
         if found:
+            if welcomed and not text.startswith("!"):
+                return          # 1.18.0: «السلام عليكم» from a first-time chatter: the welcome answers it, not your own command too
             await self._custom(payload, found[0], found[1], user, level)
             return
+        try:
+            if await self._chat_color(payload, text, user, level):
+                return          # 1.18.0: !color #hex (your own command with that name wins)
+        except Exception:
+            log.exception("!color failed")
         # 1.12.0: «app?» / «برنامج؟» -> the app's website (a built-in; your own command with that name wins)
         ask = APP_ASK.match(text)
         if ask and "app" not in (self.store.get("settings").get("disabled_builtins") or []) and not self._on_cooldown("builtin:app", 60):
             await self._send(self._bt(f"Chatbot app: {publiclist.SITE}"), payload, why="cmd:" + text)
+
+    COLOR_RE = re.compile(r"^!colou?r(?:\s+(.*))?$", re.IGNORECASE)
+    COLOR_TEXT = {
+        "en": {"how": "@{u} type !color and a hex color code, like !color #00e5ff, to change your name color in the chat box 🎨",
+               "done": "@{u} done! Your name color in the chat box is now {c} 🎨", "reset": "@{u} your chat box color is back to your Twitch color",
+               "bad": "@{u} that's not a hex color code. Try one like !color #ff4d6d", "who_subs": "@{u} only subscribers, VIPs and mods can change their chat box color",
+               "who_vips": "@{u} only VIPs and mods can change their chat box color",
+               "done_o": "@{u} done! {n}'s name color in the chat box is now {c} 🎨", "reset_o": "@{u} {n}'s chat box color is back to their Twitch color",
+               "mod_only": "@{u} only mods can change someone else's color", "no_user": "@{u} I can't find {n} on Twitch",
+               "how_o": "@{u} type !color @name #00e5ff, or !color @name reset"},
+        "ar": {"how": "@{u} اكتب !color وبعدها كود لون hex مثل !color #00e5ff عشان تغيّر لون اسمك في الشات بوكس 🎨",
+               "done": "@{u} تم! لون اسمك في الشات بوكس صار {c} 🎨", "reset": "@{u} رجع لونك في الشات بوكس للون تويتش حقك",
+               "bad": "@{u} هذا مو كود لون hex. جرّب مثل !color #ff4d6d", "who_subs": "@{u} تغيير اللون في الشات بوكس للمشتركين والـVIP والمشرفين بس",
+               "who_vips": "@{u} تغيير اللون في الشات بوكس للـVIP والمشرفين بس",
+               "done_o": "@{u} تم! لون {n} في الشات بوكس صار {c} 🎨", "reset_o": "@{u} رجع لون {n} في الشات بوكس للون تويتش حقه",
+               "mod_only": "@{u} تغيير لون غيرك للمشرفين بس", "no_user": "@{u} ما لقيت {n} في تويتش",
+               "how_o": "@{u} اكتب !color @fqpn_ #00e5ff أو !color @fqpn_ reset"}}
+    RESET_WORDS = {"reset", "off", "remove", "default", "حذف", "مسح", "شيل", "رجع"}
+
+    async def _chat_color(self, payload, text: str, user: str, level: int) -> bool:
+        """1.18.0: «!color #00e5ff»: the viewer's name color in the Chat box overlay (Overlays > Chat box). «!color» alone
+        says how; «!color reset» goes back to the Twitch color. Only while the Chat box's "Viewers' own colors" is on."""
+        m = self.COLOR_RE.match(text or "")
+        if not m:
+            return False
+        cfg = chatbox.cfg_of(self.store)
+        if not cfg.get("own_colors"):
+            return False
+        chatter = payload.chatter
+        uid, login = str(getattr(chatter, "id", "") or ""), str(getattr(chatter, "name", "") or "").lower()
+        if not uid or self._on_cooldown(f"color:{uid}", 5):
+            return True
+        T = self.COLOR_TEXT["ar" if (self.store.get("ui") or {}).get("language") == "ar" else "en"]
+        arg = (m.group(1) or "").strip()
+        need = chatbox.COLOR_LEVEL.get(cfg.get("own_colors_who"), 0)
+        first = arg.split()[0] if arg else ""
+        if first.startswith("@") and len(first) > 1:
+            msg = await self._color_other(first[1:], arg.split()[1:], level, T)
+        elif level < need:
+            msg = T["who_vips" if need >= 2 else "who_subs"]
+        elif not arg:
+            msg = T["how"]
+        elif arg.split()[0].casefold() in self.RESET_WORDS:
+            chatbox.set_color(self.store, uid, login, "")
+            msg = T["reset"]
+        else:
+            c = chatbox.parse_hex(arg.split()[0])
+            if c:
+                chatbox.set_color(self.store, uid, login, c)
+                msg = T["done"].replace("{c}", c)
+            else:
+                msg = T["bad"]
+        await self._send(msg.replace("{u}", str(user)), payload, why="cmd:!color", user=str(user))
+        return True
+
+    async def _color_other(self, name: str, rest: list, level: int, T: dict) -> str:
+        """1.18.0: a mod sets or resets someone else's chat box color: «!color @name #00e5ff» / «!color @name reset»."""
+        login = name.strip().lower().lstrip("@")
+        if level < 3:
+            return T["mod_only"]
+        if not re.fullmatch(r"[a-z0-9_]{1,25}", login):
+            return T["no_user"].replace("{n}", name[:25])
+        word = rest[0] if rest else ""
+        if not word:
+            return T["how_o"]
+        reset = word.casefold() in self.RESET_WORDS
+        c = "" if reset else chatbox.parse_hex(word)
+        if not reset and not c:
+            return T["bad"]
+        uid, shown = await self._uid_of(login)
+        if reset:
+            chatbox.forget_login(self.store, login)          # (also when Twitch can't be asked right now)
+            if uid:
+                chatbox.set_color(self.store, uid, login, "")
+            return T["reset_o"].replace("{n}", shown or login)
+        if not uid:
+            return T["no_user"].replace("{n}", login)
+        chatbox.set_color(self.store, uid, login, c)
+        return T["done_o"].replace("{n}", shown or login).replace("{c}", c)
+
+    def _viewer_stat(self, login, kind: str, chatter=None, user: str = "") -> int:
+        """1.18.0 $(watchtime) / $(messages): all-time seconds watched or messages (the viewer, or someone by name)."""
+        vs = getattr(self, "vstats", None)
+        if vs is None:
+            return 0
+        users = vs.data.get("users") or {}
+        if login is None:
+            e = users.get(str(getattr(chatter, "id", "") or ""))
+            login = str(getattr(chatter, "name", "") or user or "").lower()
+            if isinstance(e, dict):
+                return int(e.get(kind) or 0)
+        login = str(login or "").lower()
+        for e in users.values():
+            if isinstance(e, dict) and e.get("l") == login:
+                return int(e.get(kind) or 0)
+        return 0
+
+    async def _uid_of(self, login: str):
+        """(Twitch user ID, name) of a login: from the chat seen lately, the counted viewers, then Twitch (cached 1 hour)."""
+        for it in reversed(list(chatbox.BUF.items)):
+            if it.get("login") == login and it.get("uid"):
+                return it["uid"], it.get("name") or login
+        vs = getattr(self, "vstats", None)
+        for k, e in ((vs.data.get("users") or {}).items() if vs is not None else []):
+            if isinstance(e, dict) and e.get("l") == login and k.isdigit():
+                return k, e.get("n") or login
+        key = "uid:" + login
+        hit = self._acct_cache.get(key)
+        if hit and time.time() < hit[0]:
+            return hit[1], (hit[2] if len(hit) > 2 else login)
+        try:
+            users = await self.fetch_users(logins=[login])
+        except Exception:
+            return "", login
+        uid = str(users[0].id) if users else ""
+        if len(self._acct_cache) > 500:
+            self._acct_cache.clear()
+        shown = (getattr(users[0], "display_name", None) or login) if users else login
+        self._acct_cache[key] = (time.time() + 3600, uid, shown)
+        return uid, shown
 
     @staticmethod
     def _who(user: str, level: int) -> str:
@@ -1264,7 +1763,11 @@ class TwitchBot(commands.Bot):
             return
         self._log_activity("command", owner, user)
         ctx = self._ctx(user, rest, counter_key=f"cmd:{owner}", chatter=payload.chatter)
-        await self._send(await expand(cmd["response"], ctx), payload, reply=reply)
+        text = await expand(cmd["response"], ctx)
+        if is_echoed_command(cmd["response"], text):
+            log.info("%s: not sent, what the viewer typed would be a command (%s)", owner, text[:40])
+            return      # 1.18.0: «قول !ban x» with $(query): the bot never says a command for someone (other bots, Twitch's /)
+        await self._send(text, payload, reply=reply)
 
     # ---------- built-in commands ----------
 
@@ -1402,6 +1905,91 @@ class TwitchBot(commands.Bot):
             cfg["enabled"] = False        # 1.14.0: All games switched off: none can start (each keeps its own setting)
         return cfg
 
+    # ---------- 1.18.0: the Chat box overlay (core/chatbox.py) ----------
+
+    _cb_on = True       # the Test chat's pretend bot switches it off (its messages never reach your stream)
+
+    def _cb_add(self, payload, first: bool = False, bot: bool = False, shared: bool = False) -> None:
+        """One chat message into the Chat box's list (what is shown is decided by its settings, when it is drawn)."""
+        if not self._cb_on:
+            return
+        try:
+            ch = payload.chatter
+            login = str(getattr(ch, "name", "") or "").lower()
+            col = getattr(payload, "colour", None)
+            color = str(getattr(col, "html", "") or "") if col is not None else ""
+            badges, tb = [], []
+            for b in getattr(payload, "badges", None) or []:
+                sid = str(getattr(b, "set_id", "") or "")
+                k = chatbox.BADGE_OF.get(sid)
+                if k and k not in badges:
+                    badges.append(k)
+                if sid:
+                    tb.append(f"{sid}/{getattr(b, 'id', '') or '1'}")         # the real Twitch badge picture
+            reply_to, parts = "", chatbox.parts_of(payload)
+            rep = getattr(payload, "reply", None)
+            if rep is not None:
+                pu = getattr(rep, "parent_user", None)
+                reply_to = str(getattr(pu, "display_name", None) or getattr(pu, "name", "") or "")
+                if parts and parts[0][0] == "m":          # Twitch puts «@name» in front of a reply: the reply line says it
+                    parts = parts[1:]
+                    if parts and parts[0][0] == "t":
+                        parts[0] = ["t", parts[0][1].lstrip()]
+            text = str(getattr(payload, "text", "") or "")
+            own = str((self.account or {}).get("login") or "").lower()
+            mention = bool(own) and login != own and re.search(r"(?<![\w])@?" + re.escape(own) + r"(?![\w])", text.lower()) is not None
+            chatbox.BUF.add(mid=getattr(payload, "id", ""), login=login, name=getattr(ch, "display_name", None) or login,
+                            uid=str(getattr(ch, "id", "") or ""), color=color, badges=badges, parts=parts, text=text,
+                            first=first, shared=shared, reply_to=reply_to, bot=bot, mention=mention, tb=tb)
+            if not bot and login and login not in chatbox.BUF.avatars and chatbox.cfg_of(self.store).get("pics"):
+                chatbox.BUF.avatars[login] = ""                # asked for once
+                self._side(self._cb_avatar(login))
+        except Exception:
+            log.exception("Chat box: couldn't add a message")
+
+    async def _cb_badges(self) -> None:
+        """The pictures of Twitch's badges (the global ones, then your channel's own sub and bits badges over them)."""
+        out = {}
+        for got in (await self.fetch_badges(), await self.create_partialuser(self.owner_id).fetch_badges()):
+            for b in got or []:
+                for v in getattr(b, "versions", None) or []:
+                    url = str(getattr(v, "image_url_4x", "") or getattr(v, "image_url_2x", "") or getattr(v, "image_url_1x", "") or "")
+                    if url.startswith("https://"):
+                        out[f"{b.set_id}/{v.id}"] = url
+        if out:
+            chatbox.BADGES.clear()
+            chatbox.BADGES.update(out)
+            chatbox.BUF._touch()
+
+    async def _cb_avatar(self, login: str) -> None:
+        chatbox.BUF.set_avatar(login, await self.avatar_of(login))
+
+    async def _cb_emotes_loop(self) -> None:
+        """The channel's 7TV, BTTV and FFZ emotes for the Chat box: now, then every hour."""
+        while True:
+            try:
+                await self._cb_badges()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("Chat box: badges")
+            try:
+                await chatbox.load_emotes(str(self.owner_id))
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("Chat box: emotes")
+            await asyncio.sleep(3600)
+
+    async def event_message_delete(self, payload) -> None:
+        chatbox.BUF.delete(getattr(payload, "message_id", ""))
+
+    async def event_chat_clear_user(self, payload) -> None:
+        chatbox.BUF.clear_user(getattr(getattr(payload, "user", None), "name", ""))
+
+    async def event_chat_clear(self, payload) -> None:
+        chatbox.BUF.clear_all()
+
     async def avatar_of(self, login: str) -> str:
         """1.17.0 (the First in chat overlay): a viewer's Twitch profile picture URL ("" if none). Cached 1 hour."""
         key = "av:" + str(login or "").lower()
@@ -1511,13 +2099,12 @@ class TwitchBot(commands.Bot):
                     if not hit or not minigames.wins_of(hit[1]):
                         await self._send(f"‏{other} ما عنده فوز بعد.", payload, why="game")
                     else:
-                        n, parts = minigames.wins_of(hit[1]), minigames.breakdown(hit[1])
-                        rank = 1 + sum(1 for v in wins.values() if isinstance(v, dict) and minigames.wins_of(v) > n)
-                        await self._send(f"🏆 ‏{hit[1].get('name')} عنده {n} فوز (المركز {rank})" + self._wins_periods(hit[1]) + (f" ({parts})" if parts else ""), payload, why="game")
+                        n = minigames.wins_of(hit[1])      # 1.18.0: just the total (no week / month / per game)
+                        await self._send(f"🏆 ‏{hit[1].get('name')} عنده {minigames.ar_wins(n)}", payload, why="game")
                     return True
                 e = wins.get(uid) or {}
-                n, parts = minigames.wins_of(e), minigames.breakdown(e)
-                await self._send((f"‏@{user} عندك {n} فوز 🏆" + self._wins_periods(e) + (f" ({parts})" if parts else ""))
+                n = minigames.wins_of(e)                   # 1.18.0: just the total (no week / month / per game)
+                await self._send((f"‏@{user} عندك {minigames.ar_wins(n)} 🏆")
                                  if n else f"‏@{user} ما عندك فوز بعد، جرّب في الجولة الجاية!", payload, why="game")
             return True
         if key in minigames.aliases(sh.get("top_cmd")):
@@ -1554,6 +2141,8 @@ class TwitchBot(commands.Bot):
             return True
         if r is None or r.over or text.startswith("!") or not cfgs.get(getattr(r, "key", "letters"), {}).get("enabled"):
             return False
+        if self._cb_on and len(text.split()) <= 6:        # 1.18.0: the Chat box folds the round's answers into one line
+            chatbox.BUF.guess(getattr(payload, "id", ""), id(r), minigames.GAME_NAMES.get(getattr(r, "key", "letters"), ""))
         if getattr(r, "key", "letters") == "scramble":
             if r.check(text) == "win":
                 await self._game_win(uid, user, r.word)
@@ -1648,6 +2237,8 @@ class TwitchBot(commands.Bot):
         if r is None or r.done:
             return
         r.done = True
+        if self._cb_on:
+            chatbox.BUF.won(id(r), user)                  # 1.18.0: the Chat box's folded line says who won
         self._round_ended()
         if self._round_task:
             self._round_task.cancel()
@@ -1786,6 +2377,10 @@ class TwitchBot(commands.Bot):
                     log.exception("Stream messages failed")
                 if self.is_live and hasattr(self, "_first_window_check"):
                     self._first_window_check()          # 1.14.0: nobody first in the first minutes = the streak is broken
+                try:
+                    chatbox.colors_tick(self.store, self.is_live, was_live)   # 1.18.0: !color lasts one stream
+                except Exception:
+                    log.exception("Chat box colors: reset failed")
                 if self.is_live and not was_live:
                     log.info("Stream went LIVE - bot active")
                 elif was_live and not self.is_live:
@@ -1900,6 +2495,8 @@ class TwitchBot(commands.Bot):
             try:
                 if getattr(self, "stats", None) is not None:
                     self.stats.flush()                     # 1.14.0: Stream stats, saved at most once a minute
+                if getattr(self, "vstats", None) is not None:
+                    self.vstats.flush()                    # 1.18.0: messages and watch time, the same way
                 await giveaway.tick(self.store, self)      # 1.13.0: a keyword giveaway closes when its time is up
                 bl = self.store.get("blocklist")
                 if blocks.prune(bl):                       # 1.15.0: a timed block that ended leaves the list

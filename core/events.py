@@ -8,7 +8,7 @@ each get their own reply. Follows and watch streaks have a single reply."""
 import re
 
 EVENT_KEYS = ("watch_streak", "follow", "subscription", "gift_sub", "raid", "hype_train", "bits", "donation",
-              "falkorie_level", "falkorie_streak")      # 1.17.1: replies to the Falkorie bot's messages (see falkorie())
+              "falkorie_level", "falkorie_streak", "follow_anniversary")      # 1.17.1: replies to the Falkorie bot's messages (see falkorie())
 DECIMAL = {"donation"}              # events whose "from" number can have cents (5.50)
 SINGLE = {"follow", "watch_streak"}   # events that only ever have one reply (it answers every time)
 
@@ -52,6 +52,12 @@ def at_user(template: str, name, login: str = "") -> str:
 #   "FQPN_ has watched 112 streams in a row!"  -> falkorie_streak (who, 112)   (also its answer to !streak)
 FALKORIE = "falkorie"
 _F_LEVEL = re.compile(r"^@?(\S{1,25}) is now level (\d{1,6})\b", re.I)
+# 1.18.0: channels can name their levels («FQPN_ is now Shuaiil level 9!»), so a name before "level" (or "lvl"), a name with
+# no "level" at all («is now Shuaiil 9!»), and "reached / leveled up to level 9" count too
+_F_LEVELS = (_F_LEVEL,
+             re.compile(r"^@?(\S{1,25}) is now (?:an? |the )?[^\d\n]{1,40}? (?:level|lvl|lv\.?) ?(\d{1,6})\b", re.I),
+             re.compile(r"^@?(\S{1,25}) (?:has )?(?:reached|leveled up to|levelled up to|leveled up! now|is level) (?:[^\d\n]{0,40}? )?(?:level |lvl |lv\.? ?)?(\d{1,6})\b", re.I),
+             re.compile(r"^@?(\S{1,25}) is now (?:an? |the )?[^\d\n!.?]{1,40}? (\d{1,6})\s*[!.]?$", re.I))
 _F_STREAK = re.compile(r"^@?(\S{1,25}) has watched (\d{1,6}) streams? in a row\b", re.I)
 
 
@@ -60,10 +66,13 @@ def falkorie(login: str, text: str):
     if str(login or "").lower() != FALKORIE:
         return None
     text = str(text or "").strip()
-    for key, rx in (("falkorie_level", _F_LEVEL), ("falkorie_streak", _F_STREAK)):
+    m = _F_STREAK.match(text)
+    if m:
+        return "falkorie_streak", m.group(1), int(m.group(2))
+    for rx in _F_LEVELS:
         m = rx.match(text)
         if m:
-            return key, m.group(1), int(m.group(2))
+            return "falkorie_level", m.group(1), int(m.group(2))
     return None
 
 

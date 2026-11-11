@@ -72,9 +72,15 @@ ASK_SECONDS = 20                 # a question waits this long for yes / no
 RATE = 16000
 LOCAL = urllib.request.build_opener(urllib.request.ProxyHandler({}))      # the engine on this PC: never through a proxy
 
-ACTIONS = ("timeout", "ban", "reset", "game", "title", "say")     # the switches in Settings > Voice
-ACTION_OF = {"timeout": "timeout", "ban": "ban", "unban": "ban", "reset": "reset", "game": "game", "title": "title", "setgame": "title", "say": "say"}
-ALWAYS_ASK = ("timeout", "ban", "unban")
+ACTIONS = ("timeout", "ban", "reset", "game", "title", "say", "roles", "cmds", "ignore", "clear", "chatbox")     # the switches (1.18.0: + roles … chatbox)
+ACTION_OF = {"timeout": "timeout", "ban": "ban", "unban": "ban", "reset": "reset", "game": "game", "title": "title", "setgame": "title", "say": "say",
+             "vip": "roles", "unvip": "roles", "mod": "roles", "unmod": "roles",
+             "count": "reset", "runcmd": "cmds", "ignore": "ignore", "unignore": "ignore", "clear": "clear",
+             "hidechat": "chatbox", "showchat": "chatbox"}
+ROLE_ACTS = ("vip", "unvip", "mod", "unmod")          # 1.18.0: VIP and moderator (the channel account's own Twitch login does it)
+ALWAYS_ASK = ("timeout", "ban", "unban") + ROLE_ACTS + ("ignore", "unignore", "clear")
+HISTORY = 20                                            # 1.18.0: the last voice commands shown on the Voice page
+FIXES_MAX = 300                                         # 1.18.0: spelling fixes kept (yours + learned)
 DEFAULTS = {"voice": False, "voice_key": "F9", "voice_mic": "", "voice_lang": "both",
             "voice_acts": ["timeout", "ban", "reset", "game", "say"], "voice_ask_all": False, "voice_beep": True,
             "voice_overlay": True, "voice_corner": "tr", "voice_style": "orb", "voice_model": "small",
@@ -115,11 +121,11 @@ VK.update({f"Numpad{i}": 0x60 + i for i in range(10)})
 TEXT = {   # what the corner overlay says (short)
     "en": {"listen": "Listening…", "think": "Working it out…", "nothing": "Didn't catch a command", "off": "{a} is off for voice",
            "ask_who": "{a} — who?", "ask": "{a}?", "say": "Hold {k}: yes / no", "say_pick": "Hold {k}: 1, 2 or 3 · no",
-           "done": "Done", "cancel": "Cancelled", "timeout": "Timeout {m}", "ban": "Ban", "unban": "Unban", "nobody": "Nobody like “{w}” in chat",
+           "done": "Done", "cancel": "Cancelled", "timeout": "Timeout {m}", "ban": "Ban", "unban": "Unban", "vip": "VIP", "unvip": "Remove VIP", "mod": "Make mod", "unmod": "Remove mod", "ignore": "Ignore", "unignore": "Stop ignoring", "clear": "Clear chat", "nobody": "Nobody like “{w}” in chat",
            "fail": "Didn't work", "first": "Starting voice…"},
     "ar": {"listen": "أسمعك…", "think": "لحظة…", "nothing": "ما فهمت أمر", "off": "{a} مقفل للصوت",
            "ask_who": "{a} — مين؟", "ask": "{a}؟", "say": "اضغط {k}: نعم / لا", "say_pick": "اضغط {k}: 1 أو 2 أو 3 · لا",
-           "done": "تم", "cancel": "انلغى", "timeout": "تايم اوت {m}", "ban": "بان", "unban": "فك البان", "nobody": "ما فيه أحد مثل «{w}» في الشات",
+           "done": "تم", "cancel": "انلغى", "timeout": "تايم اوت {m}", "ban": "بان", "unban": "فك البان", "vip": "في آي بي", "unvip": "شيل الفي آي بي", "mod": "مشرف", "unmod": "شيل الإشراف", "ignore": "تجاهل", "unignore": "فك التجاهل", "clear": "مسح الشات", "nobody": "ما فيه أحد مثل «{w}» في الشات",
            "fail": "ما زبط", "first": "تشغيل الصوت…"},
 }
 
@@ -649,9 +655,10 @@ class Voice:
     def _keys(self) -> None:
         import ctypes
         get = ctypes.windll.user32.GetAsyncKeyState
-        down = False
+        down, vk, read_at = False, 0x78, 0.0
         while not self.key_stop.is_set():
-            vk = VK.get(self.prefs()["voice_key"], 0x78)
+            if time.monotonic() - read_at > 1:          # 1.18.0: the settings once a second, not 33 times (lighter on the PC)
+                vk, read_at = VK.get(self.prefs()["voice_key"], 0x78), time.monotonic()
             pressed = bool(get(vk) & 0x8000)
             if pressed and not down and not self.busy:
                 down = True
@@ -665,13 +672,16 @@ class Voice:
     def _hotkeys(self) -> None:
         import ctypes
         get = ctypes.windll.user32.GetAsyncKeyState
-        held = set()
+        held, combos, read_at = set(), [], 0.0
         while not self.hot_stop.is_set():
-            p = self.prefs()
-            for i, hk in enumerate(p.get("hotkeys") or []):
-                c = hot_combo(hk.get("key")) if isinstance(hk, dict) else None
-                if not c:
-                    continue
+            if time.monotonic() - read_at > 1:          # 1.18.0: the settings once a second, not 40 times (lighter on the PC)
+                read_at = time.monotonic()
+                combos = []
+                for i, hk in enumerate(self.prefs().get("hotkeys") or []):
+                    c = hot_combo(hk.get("key")) if isinstance(hk, dict) else None
+                    if c:
+                        combos.append((i, hk, c))
+            for i, hk, c in combos:
                 mods, keys = c
                 down = all(bool(get(VK[k]) & 0x8000) for k in keys) and all(
                     bool(get(MOD_VK[m]) & 0x8000) == (m in mods) for m in MOD_VK
@@ -806,16 +816,26 @@ class Voice:
             people = list(getattr(bot, "_chatters", {}).keys())[-25:] if bot else []
             cmds = [n.lstrip("!") for n in (rt.store.get("commands") or {})][:30]
             own = self._game_names(rt)
-            return ("تايم اوت، بان، فك البان، صفّر، ابدأ، غيّر العنوان، غيّر اللعبة، "
-                    "حروف، رتب، ايموجي، عكس، احسب، سلم، سؤال، لغز، ترجم، ضد، الدخيل، "
-                    "timeout, ban, unban, reset, start, trivia, riddle, emoji, " + ", ".join(own + people + cmds))
+            fixes = self._fixes()
+            VP.FIXES = fixes                                    # 1.18.0: your spelling fixes and the learned ones
+            right = list(dict.fromkeys(str(f["to"]) for f in fixes))[:25]
+            return ("تايم اوت، بان، فك البان، في آي بي، شيل الفي آي بي، مشرف، شيل الإشراف، صفّر، ابدأ، غيّر العنوان، غيّر اللعبة، "
+                    "حروف، رتب، ايموجي، عكس، احسب، سلم، سؤال، لغز، ترجم، ضد، الدخيل، دقايق، ساعة، "
+                    "timeout, ban, unban, VIP, unVIP, mod, unmod, reset, start, trivia, riddle, emoji, "
+                    + ", ".join(dict.fromkeys(right + own + people + cmds)))
         except Exception:
             return "timeout, ban, reset, add command"
 
     # ---------- what was said -> what happens ----------
 
+    def _remember(self, entry: dict) -> None:
+        """1.18.0: the Voice page's history (the last 20, newest first; only while the app is open)."""
+        hist = self.status.get("history") or []
+        self.status["history"] = ([dict(entry)] + hist)[:HISTORY]
+
     def _finish(self, ok: bool, heard: str, result: str, beep: bool = True) -> None:
         self.status["last"] = {"heard": heard, "result": result, "ok": ok, "at": time.time()}
+        self._remember(self.status["last"])
         self._show("ok" if ok else "fail", [result], 2.5 if ok else 3.5)
         if beep:
             self._beep("ok" if ok else "fail", hot=str(heard).startswith("⌨ "))
@@ -843,6 +863,7 @@ class Voice:
             return []
 
     def _handle(self, text: str) -> None:
+        VP.FIXES = self._fixes()
         intent = VP.parse(text)
         pend = self.status.get("pending")
         if pend and intent and intent["act"] == "undo":
@@ -855,6 +876,7 @@ class Voice:
             return
         if not intent or intent["act"] in ("yes", "no", "pick"):
             self.status["last"] = {"heard": text, "result": self.t("nothing"), "ok": False, "at": time.time()}
+            self._remember(self.status["last"])
             self._show("fail", [self.t("nothing")] + ([f"“{text[:40]}”"] if text else []), 3)
             return
         act = ACTION_OF.get(intent["act"])
@@ -880,6 +902,22 @@ class Voice:
         try:
             if a == "say":
                 raise RuntimeError(("A sent message can't be taken back", "الرسالة انرسلت وما تنسحب")[ar])
+            if a == "clear":
+                raise RuntimeError(("A cleared chat can't come back", "الشات الممسوح ما يرجع")[ar])
+            if a == "chatbox":                                     # 1.18.0: the Chat box back as it was
+                self._chatbox(st, last["was"], heard, undo=True)
+                return
+            if a in ("ignore", "unignore"):                        # 1.18.0
+                self._ignore(st, last["login"], a == "unignore")
+                self._finish(True, heard, (f"{last['name']}: cancelled", f"{last['name']}: انلغى")[ar])
+                return
+            if a in ROLE_ACTS:                                     # 1.18.0: the opposite (VIP ↔ no VIP, mod ↔ no mod)
+                back = {"vip": "unvip", "unvip": "vip", "mod": "unmod", "unmod": "mod"}[a]
+                ok, why = (await bot._set_role(back, last["uid"])) if bot is not None else (False, "bot")
+                if not ok:
+                    raise RuntimeError(self._role_problem(back, why, last["name"]))
+                self._finish(True, heard, (f"{last['name']}: cancelled", f"{last['name']}: انلغى")[ar])
+                return
             if a in ("timeout", "ban"):
                 if bot is None or not await bot._mod_api("DELETE", "moderation/bans", {"user_id": last["uid"]}):
                     raise RuntimeError(("Twitch refused it", "تويتش رفض")[ar])
@@ -912,9 +950,96 @@ class Voice:
                 log.exception("Voice cancel failed")
             self._finish(False, heard, str(e)[:80] if isinstance(e, RuntimeError) else self.t("fail"))
 
+    @staticmethod
+    def _ignore(st, login: str, on: bool) -> None:
+        """1.18.0: on the Blocklist for good (on), or off it (also a timed block)."""
+        bl = dict(st.get("blocklist") or {})
+        users = [u for u in (bl.get("users") or []) if str(u).lower() != login.lower()]
+        timed = [x for x in (bl.get("timed") or []) if not (isinstance(x, dict) and str(x.get("user", "")).lower() == login.lower())]
+        if on:
+            users.append(login)
+        bl.update(users=users, timed=timed)
+        st.save("blocklist", bl)
+
+    def _chatbox(self, st, hide: bool, heard: str, undo: bool = False) -> None:
+        """1.18.0: «خبّي الشات» / «ورّ الشات»: the Chat box overlay hidden on stream, or shown again."""
+        ar = self.lang() == "ar"
+        cfg = dict(st.get("chatbox") or {})
+        was = bool(cfg.get("hidden"))
+        cfg["hidden"] = bool(hide)
+        st.save("chatbox", cfg)
+        if undo:
+            self.last_done = None
+            self._finish(True, heard, ("Chat box: cancelled", "صندوق الشات: انلغى")[ar])
+            return
+        self.last_done = {"act": "chatbox", "was": was, "at": time.time()}
+        msg = (("Chat box hidden on stream", "انخفى صندوق الشات عن البث") if hide else ("Chat box shows on stream", "صندوق الشات رجع على البث"))[ar]
+        if not cfg.get("on"):
+            msg += (" (it's off: switch it on on the Overlays page)", " (هو طافي: شغّله من صفحة الأوفرلاي)")[ar]
+        self._finish(True, heard, msg)
+
+    def _role_problem(self, act: str, why: str, name: str) -> str:
+        """1.18.0: Twitch's answer to a VIP / mod change, in words."""
+        ar = self.lang() == "ar"
+        return {
+            "scopes": ("Log out and in again (Settings) so Twitch lets the app change VIPs and mods",
+                       "سجّل خروج ودخول من جديد (الإعدادات) عشان تويتش يسمح للتطبيق يغيّر الفي آي بي والمشرفين"),
+            "already": (f"{name} already is", f"{name} أصلاً كذا") if act in ("vip", "mod") else (f"{name} isn't one", f"{name} مو كذا أصلاً"),
+            "is_mod": (f"{name} is a moderator: remove mod first", f"{name} مشرف: شيل الإشراف أول"),
+            "is_vip": (f"{name} is a VIP: remove VIP first", f"{name} في آي بي: شيل الفي آي بي أول"),
+            "full": ("No VIP spots left on your channel", "ما بقى أماكن في آي بي في قناتك"),
+            "banned": (f"{name} is banned", f"{name} عليه بان"),
+            "rate": ("Too many changes: try again in a bit", "تغييرات كثير: جرّب بعد شوي"),
+        }.get(why, ("Twitch refused it", "تويتش رفض"))[ar]
+
+    # ---------- 1.18.0: spelling fixes (yours, and the ones the app learns by itself) ----------
+
+    def _fixes(self) -> list:
+        try:
+            items = (self.state.rt().store.get("voice_fixes") or {}).get("items") or []
+            return [f for f in items if isinstance(f, dict) and f.get("heard") and f.get("to")]
+        except Exception:
+            return []
+
+    def _learned(self, said: str) -> str:
+        """A name you confirmed before for these same words (learned by itself), or ""."""
+        key = VP.norm(said)
+        for f in self._fixes():
+            if f.get("kind") == "name" and VP.norm(f["heard"]) == key:
+                return str(f["to"]).lower()
+        return ""
+
+    def _learn(self, heard: str, intent: dict, who) -> None:
+        """You said yes (or picked 1 / 2 / 3) to a name the app had to guess: next time those words mean that person
+        straight away. Nothing is learned when it was already spelled right."""
+        try:
+            said = str((intent or {}).get("who") or "").strip()
+            login = str((who or {}).get("login") or "").lower()
+            if not said or not login or VP.norm(said).replace(" ", "") in (login, login.replace("_", "")):
+                return
+            st = self.state.rt().store
+            data = dict(st.get("voice_fixes") or {})
+            items = [f for f in (data.get("items") or []) if isinstance(f, dict)]
+            key = VP.norm(said)
+            for f in items:
+                if VP.norm(f.get("heard")) == key:
+                    if f.get("auto") is False:
+                        return                         # yours: never changed by itself
+                    f.update(to=login, kind="name", n=int(f.get("n") or 0) + 1, at=int(time.time()))
+                    break
+            else:
+                items.insert(0, {"heard": said, "to": login, "kind": "name", "auto": True, "n": 1, "at": int(time.time())})
+            data["items"] = items[:FIXES_MAX]
+            st.save("voice_fixes", data)
+            VP.FIXES = data["items"]
+        except Exception:
+            log.exception("Voice: learning a name failed")
+
     def _label(self, act: str) -> str:
         ar = self.lang() == "ar"
         return {"timeout": ("Timeout", "التايم اوت"), "ban": ("Ban", "البان"), "reset": ("Reset", "التصفير"),
+                "roles": ("VIP / mod", "الفي آي بي / الإشراف"), "cmds": ("Run a command", "تشغيل أمر"),
+                "ignore": ("Ignore", "التجاهل"), "clear": ("Clear chat", "مسح الشات"), "chatbox": ("Chat box", "صندوق الشات"),
                 "game": ("Mini games", "الألعاب"), "title": ("Title / game", "العنوان / اللعبة"),
                 "say": ("Say in chat", "قول")}.get(act, (act, act))[ar]
 
@@ -924,18 +1049,67 @@ class Voice:
         bot, st = rt.state.get("bot"), rt.store
         act, ar = intent["act"], self.lang() == "ar"
         key = self.prefs()["voice_key"].replace("Key", "").replace("Digit", "")
-        if act in ("timeout", "ban", "unban"):
+        if act in ("hidechat", "showchat"):   # 1.18.0: the Chat box overlay, hidden or shown on stream
+            self._chatbox(st, act == "hidechat", heard)
+            return
+        if act == "clear":                    # 1.18.0: always asked first (nothing brings a cleared chat back)
+            self._ask(intent, heard, self.t("clear"), [], key)
+            return
+        if act == "runcmd":                   # 1.18.0: the command's reply, as if you typed it
+            from . import manage
+            customs = {n: str(c.get("response") or "") for n, c in (st.get("commands") or {}).items() if c.get("enabled", True)}
+            off = set((st.get("settings") or {}).get("disabled_builtins") or [])
+            got = VP.match_command(intent["name"], customs, [k for k in VP.BUILTIN_SPOKEN if k not in off])
+            if not got:
+                self._finish(False, heard, (f"No command “{intent['name']}”", f"ما فيه أمر «{intent['name']}»")[ar])
+                return
+            if got[0] == "builtin":           # 1.18.0: «كوماندات» → !cmlist, «برنامج» → «برنامج؟»
+                hit = ("برنامج؟" if ar else "app?") if got[1] == "app" else manage.BUILTIN_PREFIX + manage.BUILTIN_NAMES[got[1]]
+            else:
+                hit = got[1]
+            intent = dict(intent, target=hit, builtin=got[0] == "builtin")
+            if self.prefs()["voice_ask_all"]:
+                self._ask(intent, heard, (f"Run {hit}", f"تشغيل {hit}")[ar], [], key)
+                return
+            await self._do(intent, heard, None)
+            return
+        if act == "count":                    # 1.18.0: + / − / set a counter
+            from . import counters as C
+            names = [c["name"] for c in C.view(st)]
+            hit = VP.match_name(intent["what"], names)
+            if not hit:
+                self._finish(False, heard, (f"No counter “{intent['what']}”", f"ما فيه عداد «{intent['what']}»")[ar])
+                return
+            intent = dict(intent, target=hit)
+            if self.prefs()["voice_ask_all"]:
+                self._ask(intent, heard, self._describe(intent), [], key)
+                return
+            await self._do(intent, heard, None)
+            return
+        if act in ("timeout", "ban", "unban", "ignore", "unignore") + ROLE_ACTS:
             now = time.time()
             people = sorted(((login, v[1], now - v[0]) for login, v in (getattr(bot, "_chatters", {}) or {}).items()),
                             key=lambda x: x[2]) if bot else []
             found = VP.match_people(intent["who"], people)
-            if not found and act == "unban":
+            if act == "unignore":                         # 1.18.0: the people the bot ignores now come first
+                bl = st.get("blocklist") or {}
+                ign = [(u, u, 0) for u in (bl.get("users") or [])] + [(x["user"], x["user"], 0) for x in (bl.get("timed") or []) if isinstance(x, dict)]
+                found = VP.match_people(intent["who"], [(str(a).lower(), b, c) for a, b, c in ign]) or found
+            if not found and act in ROLE_ACTS + ("ignore", "unignore"):           # 1.18.0: also everyone who ever chatted (a VIP may not be here now)
+                seen = ((st.get("chat_stats") or {}).get("seen") or {})
+                old = [(login, (v[1] if isinstance(v, (list, tuple)) and len(v) > 1 else login) or login, 1e9)
+                       for login, v in list(seen.items())[-3000:]]
+                found = VP.match_people(intent["who"], old)
+            if not found and act in ("unban", "ignore", "unignore") + ROLE_ACTS:
                 login = VP.latin(intent["who"]).replace(" ", "")
                 found = [(login, login, 1.0)] if login else []
             if not found:
                 self._finish(False, heard, self.t("nobody", w=intent["who"]))
                 return
             title = self.t("timeout", m=mins_text(intent["secs"], ar)) if act == "timeout" else self.t(act)
+            hit = self._learned(intent["who"])                 # 1.18.0: a name learned before goes first
+            if hit:
+                found = [f for f in found if f[0] == hit] or [(hit, hit, 1.0)]
             self._ask(intent, heard, title, [{"login": f[0], "name": f[1]} for f in found], key)
             return
         if act == "say":                    # your own words go to chat: always asked first (yes / 1 / 2 / 3 sends, no cancels)
@@ -960,6 +1134,10 @@ class Voice:
         a = intent["act"]
         if a == "reset":
             return (f"Reset {intent['target']}" if not ar else f"تصفير {intent['target']}")
+        if a == "count":
+            n = intent.get("n")
+            sign = {"add": "+", "sub": "−", "set": "= "}[intent["op"]]
+            return f"{intent['target']} {sign}{n if n is not None else 1}"
         if a == "game":
             return (f"Start {intent['game']}" if not ar else f"بدء {intent['game']}")
         return {"title": (f"Title: {intent.get('text', '')}", f"العنوان: {intent.get('text', '')}"),
@@ -1037,11 +1215,66 @@ class Voice:
                     raise RuntimeError("Twitch refused it (is the bot a moderator?)")
                 if a in ("timeout", "ban"):
                     self.last_done = {"act": a, "uid": uid, "name": who["name"], "at": time.time()}
+                self._learn(heard, intent, who)
                 if a == "timeout":
                     done = f"{who['name']}: " + (f"تايم اوت {mins_text(intent['secs'], True)}" if ar else f"timeout {mins_text(intent['secs'], False)}")
                 else:
                     done = f"{who['name']}: " + {"ban": ("banned", "بان"), "unban": ("unbanned", "انفك البان")}[a][ar]
                 self._finish(True, heard, done)
+            elif a == "count":                                  # 1.18.0: + / − / set a counter
+                from . import counters as C
+                name = intent["target"]
+                cur = int((st.get("counters") or {}).get("name:" + name, 0) or 0)
+                n = intent.get("n")
+                if intent["op"] == "set":
+                    new = int(n or 0)
+                else:
+                    step = int(n) if n is not None else 1
+                    new = cur + step if intent["op"] == "add" else cur - step
+                new = max(0, min(C.MAX_VALUE, new))
+                if intent["op"] == "sub" and cur == 0:
+                    raise RuntimeError((f"{name} is already 0", f"{name} أصلاً صفر")[ar])
+                C.act(st, "set", {"name": name, "value": new})
+                C.note(st, name, "set", "you (voice)")
+                self.last_done = {"act": "reset", "before": {"name:" + name: cur}, "names": [name], "at": time.time()}
+                self._finish(True, heard, f"{name}: {new}")
+            elif a == "runcmd":                                 # 1.18.0: as if you typed it (its reply is the bot's)
+                if bot is None:
+                    raise RuntimeError("The bot isn't connected")
+                key = intent["target"]
+                await bot.say_as_you(key if intent.get("builtin") or bot.is_command(key) else "!" + key.lstrip("!"))
+                self.last_done = {"act": "say", "at": time.time()}
+                self._finish(True, heard, (f"Ran {intent['target']}", f"اشتغل {intent['target']}")[ar])
+            elif a in ("ignore", "unignore"):                   # 1.18.0: the Blocklist (the bot doesn't answer them)
+                self._ignore(st, who["login"], a == "ignore")
+                self.last_done = {"act": a, "login": who["login"], "name": who["name"], "at": time.time()}
+                self._learn(heard, intent, who)
+                self._finish(True, heard, (f"{who['name']}: ignored by the bot" if a == "ignore" else f"{who['name']}: not ignored anymore",
+                                           f"{who['name']}: البوت يتجاهله" if a == "ignore" else f"{who['name']}: انفك التجاهل")[ar])
+            elif a == "clear":                                  # 1.18.0: Twitch's own clear chat
+                if bot is None:
+                    raise RuntimeError("The bot isn't connected")
+                if not await bot._mod_api("DELETE", "moderation/chat", {}):
+                    raise RuntimeError(("Twitch refused it (is the bot a moderator?)", "تويتش رفض (البوت مشرف؟)")[ar])
+                self.last_done = {"act": "clear", "at": time.time()}
+                self._finish(True, heard, ("Chat cleared", "انمسح الشات")[ar])
+            elif a in ROLE_ACTS:                                # 1.18.0: VIP / moderator
+                if bot is None:
+                    raise RuntimeError("The bot isn't connected")
+                uid = ((getattr(bot, "_chat_info", {}) or {}).get(who["login"]) or (None, None, ""))[2]
+                if not uid:
+                    users = await bot.fetch_users(logins=[who["login"]])
+                    uid = str(users[0].id) if users else ""
+                if not uid:
+                    raise RuntimeError((f"{who['name']} wasn't found on Twitch", f"{who['name']} مو موجود في تويتش")[ar])
+                ok, why = await bot._set_role(a, uid)
+                if not ok:
+                    raise RuntimeError(self._role_problem(a, why, who["name"]))
+                self.last_done = {"act": a, "uid": uid, "name": who["name"], "at": time.time()}
+                self._learn(heard, intent, who)
+                done = {"vip": ("is a VIP now", "صار في آي بي"), "unvip": ("isn't a VIP anymore", "انشال منه الفي آي بي"),
+                        "mod": ("is a moderator now", "صار مشرف"), "unmod": ("isn't a moderator anymore", "انشال منه الإشراف")}[a][ar]
+                self._finish(True, heard, f"{who['name']} {done}")
             elif a == "reset":
                 from . import counters as C
                 before = dict(st.get("counters") or {})

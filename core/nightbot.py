@@ -27,7 +27,7 @@ LEVELS = {"everyone": "everyone", "subscriber": "subscriber", "regular": "vip", 
           "moderator": "moderator", "owner": "broadcaster", "admin": "broadcaster"}
 SUPPORTED = {"user", "touser", "query", "querystring", "count", "getcount", "channel", "game", "title", "uptime", "viewers",
              "urlfetch", "eval", "accountage", "random.chatter", "followers", "firststreak", "firststreakpeak", "weather",
-             "time", "follow", "followdate", "followage", "clip", "streak"}
+             "time", "follow", "followdate", "followage", "clip", "streak", "watchtime", "messages"}
 _VAR = re.compile(r"\$\(([\w.]+)")
 TWITCH_FIELDS = {"uptimeLength": "$(uptime)", "uptime": "$(uptime)", "game": "$(game)", "title": "$(title)",
                  "viewers": "$(viewers)", "name": "$(channel)", "displayName": "$(channel)"}

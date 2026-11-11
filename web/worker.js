@@ -86,6 +86,10 @@ async function setup(db) {
     db.prepare("CREATE TABLE IF NOT EXISTS support (user_id TEXT NOT NULL, at INTEGER NOT NULL)"),
     db.prepare("CREATE INDEX IF NOT EXISTS support_at ON support(at)"),
     db.prepare("CREATE TABLE IF NOT EXISTS seen (user_id TEXT PRIMARY KEY, login TEXT NOT NULL, display TEXT, version TEXT, first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL)"),
+    // 1.18.0: a channel's banner on its public page (one picture, chosen in the app; base64)
+    db.prepare("CREATE TABLE IF NOT EXISTS panels (user_id TEXT PRIMARY KEY, login TEXT NOT NULL, data TEXT NOT NULL, updated INTEGER NOT NULL)"),   // 1.18.0: the Twitch panel
+    db.prepare("CREATE TABLE IF NOT EXISTS banners (user_id TEXT PRIMARY KEY, login TEXT NOT NULL, kind TEXT NOT NULL, data TEXT NOT NULL, pos INTEGER NOT NULL, hash TEXT NOT NULL, updated INTEGER NOT NULL)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS banners_login ON banners(login)"),
   ]);
   tablesReady = true;
 }
@@ -114,6 +118,16 @@ async function handle(req, env) {
   if (path === "/api/list") {
     if (req.method === "PUT") return saveList(req, env, url);
     if (req.method === "DELETE") return deleteList(req, env);
+    return json({ error: "Method not allowed." }, 405, { Allow: "PUT, DELETE" });
+  }
+  if (path === "/api/banner") {                    // 1.18.0: the channel's banner (from the app)
+    if (req.method === "PUT") return saveBanner(req, env);
+    if (req.method === "DELETE") return deleteBanner(req, env);
+    return json({ error: "Method not allowed." }, 405, { Allow: "PUT, DELETE" });
+  }
+  if (path === "/api/panel") {                     // 1.18.0: the Twitch panel's leaderboards (from the app)
+    if (req.method === "PUT") return savePanel(req, env);
+    if (req.method === "DELETE") return deletePanel(req, env);
     return json({ error: "Method not allowed." }, 405, { Allow: "PUT, DELETE" });
   }
   if (path === "/api/seen") {
@@ -153,14 +167,24 @@ async function handle(req, env) {
     return new Response(logoBytes(), { headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=86400" } });
   }
 
-  let m = path.match(/^\/api\/list\/([^/]+)$/);
+  if (path === "/privacy" || path === "/terms") return page(legalBody(path.slice(1)), path === "/privacy" ? "Privacy · FQPN's Chat Bot" : "Terms · FQPN's Chat Bot", 200, 3600);   // 1.18.0
+  let m = path.match(/^\/api\/panel\/(\d{1,20})$/);
+  if (m) {                                         // 1.18.0: what the Twitch panel shows, by the channel's Twitch ID
+    await setup(env.DB);
+    const row = await env.DB.prepare("SELECT login, data, updated FROM panels WHERE user_id = ?").bind(m[1]).first();
+    if (!row) return json({ error: "Not found." }, 404, { ...CORS, "Cache-Control": "public, max-age=60" });
+    let data = {};
+    try { data = JSON.parse(row.data); } catch { data = {}; }
+    return json({ ...data, login: row.login, updated: row.updated }, 200, { ...CORS, "Cache-Control": "public, max-age=60" });
+  }
+  m = path.match(/^\/api\/list\/([^/]+)$/);
   if (m) {
     const login = cleanLogin(m[1]);
     if (!login) return json({ error: "Not found." }, 404, CORS);
     await setup(env.DB);
     const row = await env.DB.prepare("SELECT * FROM lists WHERE login = ?").bind(login).first();
     if (!row) return json({ error: "Not found." }, 404, CORS);
-    return json(publicView(row), 200, { ...CORS, "Cache-Control": "public, max-age=30" });
+    return json(publicView(row, await bannerOf(env, login)), 200, { ...CORS, "Cache-Control": "public, max-age=30" });
   }
   m = path.match(/^\/@?([^/]+)\/edit\/([^/]+)\/app\/?$/);
   if (m) {                                         // 1.13.0: the app's own page, working on this channel through the link
@@ -189,19 +213,32 @@ async function handle(req, env) {
     resp.headers.set("X-Robots-Tag", "noindex, nofollow");
     return resp;
   }
-  m = path.match(/^\/@?([^/]+?)(\/leaderboard)?\/?$/);
+  m = path.match(/^\/@?([^/]+)\/banner$/);
+  if (m) {                                         // 1.18.0: the banner picture itself
+    let raw; try { raw = decodeURIComponent(m[1]); } catch { raw = ""; }
+    const login = cleanLogin(raw);
+    await setup(env.DB);
+    const b = login ? await env.DB.prepare("SELECT kind, data, hash FROM banners WHERE login = ?").bind(login).first() : null;
+    if (!b) return new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=60" } });
+    const bytes = Uint8Array.from(atob(b.data), (c) => c.charCodeAt(0));
+    const fresh = url.searchParams.get("v") === b.hash;          // the page asks with the picture's hash: it can be kept a long time
+    return new Response(req.method === "HEAD" ? null : bytes, { headers: { "Content-Type": BANNER_TYPES[b.kind] || "application/octet-stream",
+      "Cache-Control": fresh ? "public, max-age=31536000, immutable" : "public, max-age=300", "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy": "default-src 'none'" } });
+  }
+  m = path.match(/^\/@?([^/]+?)(\/leaderboard|\/first)?\/?$/);
   if (m) {
     let raw;
     try { raw = decodeURIComponent(m[1]); } catch { raw = ""; }
     const login = cleanLogin(raw);
     if (!login) return page(missingBody(""), "Not found", 404, 60);
-    const tab = m[2] ? "lb" : "cmds", canon = "/" + login + (m[2] ? "/leaderboard" : "");
+    const tab = m[2] === "/first" ? "first" : m[2] ? "lb" : "cmds", canon = "/" + login + (m[2] || "");
     if (path !== canon) return Response.redirect(url.origin + canon, 301);
     await setup(env.DB);
     const row = await env.DB.prepare("SELECT * FROM lists WHERE login = ?").bind(login).first();
     if (!row) return page(missingBody(login), "Not found", 404, 30);
-    const view = publicView(row);
-    return page(listBody(view), (view.display || login) + (tab === "lb" ? " · leaderboard" : " · commands"), 200, 30, { ...view, tab });
+    const view = publicView(row, await bannerOf(env, login));
+    return page(listBody(view), (view.display || login) + (tab === "lb" ? " · leaderboard" : tab === "first" ? " · first in chat" : " · commands"), 200, 30, { ...view, tab });
   }
   return page(missingBody(""), "Not found", 404, 60);
 }
@@ -213,13 +250,22 @@ function cleanLogin(s) {
   return LOGIN_RE.test(login) ? login : "";
 }
 
-function publicView(row) {
+async function bannerOf(env, login) {       // 1.18.0: {v: hash, pos} or null (never the picture itself)
+  try {
+    const b = await env.DB.prepare("SELECT hash, pos FROM banners WHERE login = ?").bind(login).first();
+    return b ? { v: String(b.hash), pos: [0, 50, 100].includes(Number(b.pos)) ? Number(b.pos) : 50 } : null;
+  } catch { return null; }
+}
+
+function publicView(row, banner = null) {
   let data = {};
   try { data = JSON.parse(row.data); } catch { data = {}; }
   return { v: FORMAT, login: row.login, display: row.display || row.login, avatar: row.avatar || "",
            updated: row.updated, commands: Array.isArray(data.commands) ? data.commands : [],
            accent: (typeof data.accent === "string" && HEX_RE.test(data.accent)) ? data.accent : "",
-           leaderboard: data.leaderboard && typeof data.leaderboard === "object" ? data.leaderboard : null };
+           leaderboard: data.leaderboard && typeof data.leaderboard === "object" ? data.leaderboard : null,
+           firsts: data.firsts && typeof data.firsts === "object" && Array.isArray(data.firsts.peak) ? data.firsts : null,
+           banner: banner || null };
 }
 
 // ----------------------------------------------------------------------------------------------- saving and removing
@@ -280,6 +326,18 @@ function cleanLeaderboard(lb) {
   return out;
 }
 
+function cleanFirsts(f) {
+  if (!f || typeof f !== "object" || Array.isArray(f)) return null;
+  const one = (r) => {
+    const n = String((r && r.n) || "").replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, "").trim().slice(0, 40);
+    const v = Math.max(0, Math.min(1e6, Math.floor(Number(r && r.v) || 0)));
+    return n && v > 0 ? { n, v } : null;
+  };
+  const rows = (a) => (Array.isArray(a) ? a : []).slice(0, 10).map(one).filter(Boolean);
+  const out = { peak: rows(f.peak), count: rows(f.count), now: f.now ? one(f.now) : null };
+  return out.peak.length ? out : null;
+}
+
 function cleanList(body) {
   if (!body || typeof body !== "object" || Array.isArray(body)) return { error: "The list couldn't be read." };
   const v = Number(body.v);
@@ -308,7 +366,8 @@ function cleanList(body) {
   }
   const accent = typeof body.accent === "string" && HEX_RE.test(body.accent.trim().toLowerCase()) ? body.accent.trim().toLowerCase() : "";
   const lb = cleanLeaderboard(body.leaderboard);        // 1.13.0: the games' top 10 (only when the app sends it)
-  return { list: { v: FORMAT, commands, ...(accent ? { accent } : {}), ...(lb ? { leaderboard: lb } : {}) } };
+  const fs = cleanFirsts(body.firsts);                  // 1.18.0: First in chat (a «First» tab)
+  return { list: { v: FORMAT, commands, ...(accent ? { accent } : {}), ...(lb ? { leaderboard: lb } : {}), ...(fs ? { firsts: fs } : {}) } };
 }
 
 async function saveList(req, env, url) {
@@ -339,14 +398,145 @@ async function saveList(req, env, url) {
   ]);
   // 1.13.0: what this website understands, so a newer app knows it can send them (an older website says nothing -> the app
   // keeps the mini games' commands back instead of seeing them land among the streamer's own commands)
-  return json({ ok: true, login: who.login, count: clean.list.commands.length, url: url.origin + "/" + who.login, features: ["examples", "games", "builtin_keys"] });
+  return json({ ok: true, login: who.login, count: clean.list.commands.length, url: url.origin + "/" + who.login, features: ["examples", "games", "builtin_keys", "banner"] });
 }
 
 async function deleteList(req, env) {
   const who = await whoIs(req, env);
   if (who.error) return json({ error: who.error }, who.status);
   await setup(env.DB);
-  await env.DB.prepare("DELETE FROM lists WHERE user_id = ?").bind(who.userId).run();
+  await env.DB.batch([env.DB.prepare("DELETE FROM lists WHERE user_id = ?").bind(who.userId),
+                      env.DB.prepare("DELETE FROM banners WHERE user_id = ?").bind(who.userId)]);    // 1.18.0: the banner goes too (the Twitch panel has its own switch)
+  return json({ ok: true });
+}
+
+// 1.18.0: the banner on a channel's public page. The app makes the picture small first (about 1600 pixels wide); here it
+// must really be a JPEG, PNG or WebP picture (its first bytes, not what it says) and at most BANNER_MAX bytes.
+const BANNER_MAX = 900 * 1024;
+const BANNER_TYPES = { jpg: "image/jpeg", png: "image/png", webp: "image/webp" };
+
+async function saveBanner(req, env) {
+  const text = await req.text();
+  if (text.length > BANNER_MAX * 1.4 + 1024) return json({ error: "The picture is too big." }, 413);
+  let body;
+  try { body = JSON.parse(text); } catch { return json({ error: "The picture couldn't be read." }, 400); }
+  const data = String((body && body.data) || "");
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(data)) return json({ error: "The picture couldn't be read." }, 400);
+  let bytes;
+  try { bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0)); } catch { return json({ error: "The picture couldn't be read." }, 400); }
+  if (!bytes.length || bytes.length > BANNER_MAX) return json({ error: "The picture is too big." }, 413);
+  const kind = await imageKind(new Blob([bytes.slice(0, 12)]));
+  if (!BANNER_TYPES[kind]) return json({ error: "Only JPEG, PNG or WebP pictures." }, 400);
+  const pos = [0, 50, 100].includes(Number(body.pos)) ? Number(body.pos) : 50;
+  const who = await whoIs(req, env);
+  if (who.error) return json({ error: who.error }, who.status);
+  await setup(env.DB);
+  const blocked = await env.DB.prepare("SELECT 1 FROM blocked WHERE who IN (?, ?)").bind(who.login, "id:" + who.userId).first();
+  if (blocked) return json({ error: "This channel can't publish a list here." }, 403);
+  const now = Math.floor(Date.now() / 1000);
+  const last = await env.DB.prepare("SELECT updated FROM banners WHERE user_id = ?").bind(who.userId).first();
+  if (last && now - last.updated < MIN_GAP) return json({ error: "Saving too often. Wait a few seconds." }, 429, { "Retry-After": String(MIN_GAP) });
+  const hash = (await sha256hex(data)).slice(0, 16);
+  await env.DB.prepare("INSERT INTO banners (user_id, login, kind, data, pos, hash, updated) VALUES (?, ?, ?, ?, ?, ?, ?) " +
+                       "ON CONFLICT(user_id) DO UPDATE SET login = excluded.login, kind = excluded.kind, data = excluded.data, pos = excluded.pos, hash = excluded.hash, updated = excluded.updated")
+    .bind(who.userId, who.login, kind, data, pos, hash, now).run();
+  return json({ ok: true, hash });
+}
+
+// 1.18.0: the Twitch panel ("FQPN Leaderboard"). The app sends the channel's leaderboards; the panel reads them by the
+// channel's Twitch ID. Rows are [viewer's Twitch ID or "@login", name, number]; pictures only from Twitch's own address.
+const PANEL_MAX = 200 * 1024;
+const PANEL_BOARDS = { t: ["all", "week", "month"], m: ["all", "week", "month"], g: ["all", "week", "month"], f: ["peak", "count"] };
+
+function cleanPanel(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body) || body.v !== 1 || !body.b || typeof body.b !== "object") return null;
+  const name = (x) => String(x ?? "").replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, "").trim().slice(0, 40);
+  const key = (x) => { const k = String(x ?? ""); return /^(\d{1,20}|@[a-z0-9_]{1,25}|wz:[a-z0-9_]{1,25})$/.test(k) ? k : ""; };
+  const num = (x) => Math.max(0, Math.min(1e12, Math.floor(Number(x) || 0)));
+  const rows = (a, n) => (Array.isArray(a) ? a : []).slice(0, n).map((r) => Array.isArray(r) ? [key(r[0]), name(r[1]), num(r[2])] : null)
+    .filter((r) => r && r[1] && r[2] > 0);
+  const b = {};
+  for (const [k, periods] of Object.entries(PANEL_BOARDS)) {
+    const src = body.b[k] && typeof body.b[k] === "object" ? body.b[k] : {};
+    b[k] = {};
+    for (const p of periods) b[k][p] = rows(src[p], k === "t" || k === "m" ? 100 : 10);
+  }
+  const now = body.b.f && Array.isArray(body.b.f.now) ? rows([body.b.f.now], 1)[0] : null;
+  b.f.now = now || null;
+  const av = {};
+  if (body.av && typeof body.av === "object") {
+    for (const [k, u] of Object.entries(body.av).slice(0, 400)) if (key(k) && typeof u === "string" && AVATAR_RE.test(u)) av[k] = u;
+  }
+  const accent = typeof body.accent === "string" && HEX_RE.test(body.accent) ? body.accent : "";
+  return { v: 1, lang: body.lang === "ar" ? "ar" : "en", accent, b, av };
+}
+
+async function savePanel(req, env) {
+  const text = await req.text();
+  if (new TextEncoder().encode(text).length > PANEL_MAX) return json({ error: "Too big." }, 413);
+  let body;
+  try { body = JSON.parse(text); } catch { return json({ error: "The leaderboard couldn't be read." }, 400); }
+  const clean = cleanPanel(body);
+  if (!clean) return json({ error: "The leaderboard couldn't be read." }, 400);
+  const who = await whoIs(req, env);
+  if (who.error) return json({ error: who.error }, who.status);
+  await setup(env.DB);
+  const blocked = await env.DB.prepare("SELECT 1 FROM blocked WHERE who IN (?, ?)").bind(who.login, "id:" + who.userId).first();
+  if (blocked) return json({ error: "This channel can't publish here." }, 403);
+  const now = Math.floor(Date.now() / 1000);
+  const last = await env.DB.prepare("SELECT updated FROM panels WHERE user_id = ?").bind(who.userId).first();
+  if (last && now - last.updated < 60) return json({ error: "Saving too often. Wait a minute." }, 429, { "Retry-After": "60" });
+  await env.DB.prepare("INSERT INTO panels (user_id, login, data, updated) VALUES (?, ?, ?, ?) " +
+                       "ON CONFLICT(user_id) DO UPDATE SET login = excluded.login, data = excluded.data, updated = excluded.updated")
+    .bind(who.userId, who.login, JSON.stringify(clean), now).run();
+  return json({ ok: true });
+}
+
+async function deletePanel(req, env) {
+  const who = await whoIs(req, env);
+  if (who.error) return json({ error: who.error }, who.status);
+  await setup(env.DB);
+  await env.DB.prepare("DELETE FROM panels WHERE user_id = ?").bind(who.userId).run();
+  return json({ ok: true });
+}
+
+function legalBody(kind) {                 // 1.18.0: the privacy policy and terms (the Twitch panel needs both)
+  const P = {
+    privacy: { t: "Privacy policy", ta: "سياسة الخصوصية", en: [
+      "This covers FQPN's Chat Bot (the Windows app), fqpnbot.com, and the FQPN Leaderboard panel on Twitch.",
+      "The app runs on the streamer's own PC and keeps its data there. It only sends to fqpnbot.com what the streamer switches on: the public command list, the page's banner, and the Twitch panel's leaderboards.",
+      "The Twitch panel shows, for one channel: viewers' Twitch names, their public Twitch profile pictures, and their numbers (watch time, chat messages, mini game wins, First in chat). These come from the streamer's app, which counts them from the channel's own chat.",
+      "The panel collects nothing from viewers. It asks Twitch which channel it is on, to show that channel's leaderboard. If a viewer presses \"Show my place\", Twitch tells the panel their user ID inside their own browser so their row can be highlighted; it is not sent anywhere or stored.",
+      "The leaderboards are kept on fqpnbot.com (Cloudflare) until the streamer switches the panel off in the app, which removes them. No ads, no trackers, and nothing is sold or shared.",
+      "Questions or a request to remove your name: write to the streamer of the channel, or to FQPN on Twitch (twitch.tv/fqpn_)."], ar: [
+      "تشمل هذي الصفحة برنامج FQPN's Chat Bot على ويندوز، وموقع fqpnbot.com، وبانل FQPN Leaderboard في تويتش.",
+      "البرنامج يشتغل على جهاز الستريمر ويحفظ بياناته عنده. ما يرسل لـ fqpnbot.com إلا اللي يشغّله الستريمر: قائمة الأوامر، بانر الصفحة، وترتيب بانل تويتش.",
+      "بانل تويتش يعرض لقناة وحدة: أسماء المشاهدين في تويتش، صورهم العامة، وأرقامهم (وقت المشاهدة، الرسائل، الفوز بالألعاب، أول في الشات). تجي من برنامج الستريمر اللي يحسبها من شات القناة نفسها.",
+      "البانل ما يجمع شي من المشاهدين. يسأل تويتش هو في أي قناة عشان يعرض ترتيبها. ولو ضغط المشاهد «اعرض مكاني»، تويتش يعطي البانل رقم حسابه داخل متصفحه بس عشان يبيّن صفه، وما ينرسل لأي مكان ولا ينحفظ.",
+      "الترتيب محفوظ في fqpnbot.com (Cloudflare) لين يطفّي الستريمر البانل من البرنامج، وقتها ينحذف. ما فيه إعلانات ولا تتبّع، ولا ينباع ولا ينشارك شي.",
+      "لأي سؤال أو طلب حذف اسمك: كلّم ستريمر القناة، أو FQPN في تويتش (twitch.tv/fqpn_)."] },
+    terms: { t: "Terms of use", ta: "شروط الاستخدام", en: [
+      "FQPN's Chat Bot, fqpnbot.com and the FQPN Leaderboard panel are free to use.",
+      "They are provided as they are, without any guarantee. We do our best to keep them working, but they may change, pause or stop.",
+      "Streamers are responsible for their own channel: their commands, what their bot says, and what their pages show.",
+      "Don't use them to break Twitch's rules or the law. A channel that abuses them can be blocked from fqpnbot.com.",
+      "These terms may be updated; the newest version is always on this page."], ar: [
+      "برنامج FQPN's Chat Bot وموقع fqpnbot.com وبانل FQPN Leaderboard مجانية.",
+      "تُقدَّم مثل ما هي بدون أي ضمان. نسوي جهدنا عشان تشتغل، بس ممكن تتغيّر أو توقف.",
+      "الستريمر مسؤول عن قناته: أوامره، وش يقول البوت حقه، ووش تعرض صفحاته.",
+      "لا تستخدمها بشي يخالف قوانين تويتش أو القانون. القناة اللي تسيء استخدامها ممكن تنمنع من fqpnbot.com.",
+      "ممكن تتحدّث هذي الشروط، وآخر نسخة دايم في هذي الصفحة."] } }[kind];
+  const ps = (a) => a.map((x) => `<p class="lead">${esc(x)}</p>`).join("");
+  return `<header class="top"><div class="who"><div class="mark" aria-hidden="true"></div><div><h1>${esc(P.t)}</h1></div></div></header>
+<section>${ps(P.en)}</section><section dir="rtl" lang="ar"><h2>${esc(P.ta)}</h2>${ps(P.ar)}</section>
+<footer class="foot"><a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></footer>`;
+}
+
+async function deleteBanner(req, env) {
+  const who = await whoIs(req, env);
+  if (who.error) return json({ error: who.error }, who.status);
+  await setup(env.DB);
+  await env.DB.prepare("DELETE FROM banners WHERE user_id = ?").bind(who.userId).run();
   return json({ ok: true });
 }
 
@@ -905,6 +1095,9 @@ const TEXT = {
     miss_t: "No list here", miss_d: "There is no public command list for {c}. The streamer can switch it on in FQPN's Chat Bot, on the Commands page.",
     lb_tab: "Games leaderboard", lb_all: "All games", lb_p_all: "All time", lb_p_week: "This week", lb_p_month: "This month", wins: "{n} wins", win1: "1 win", lb_empty: "No wins yet.",
     players1: "1 player", players2: "2 players", players_few: "{n} players", players: "{n} players",
+    f_tab: "First", f_now: "Streak now", f_hint: "Type «first» when the stream starts to take it!", f_peak: "Longest streak", f_count: "Most firsts",
+    f_empty: "Nobody has been first yet.", f_s1: "1 stream", f_s2: "2 streams", f_s_few: "{n} streams", f_s: "{n} streams",
+    f_c1: "first once", f_c2: "first 2 times", f_c_few: "first {n} times", f_c: "first {n} times", f_row: "{s} in a row",
     ed_t: "Edit commands", ed_gone_t: "This editor link has ended", ed_gone_d: "It expired, was cancelled, or a new one replaced it. Ask the streamer for a new link and password.",
     ed_in_t: "Sign in to edit", ed_in_d: "The streamer gave you this link and a password. Your name is shown to the streamer next to each change.",
     ed_name: "Your name", ed_pw: "Password", ed_go: "Open the editor", ed_wrong: "Wrong password. {n} tries left.", ed_locked: "Too many wrong passwords: this link is locked. Ask the streamer for a new one.",
@@ -920,18 +1113,28 @@ const TEXT = {
     // the home page (download)
     h_title: "Twitch moderation chat bot", h_lead: "Commands, timers, greetings, replies to Twitch events, chat moderation and mini games, all set up in an app in English and Arabic. Free.",
     dl: "Download for Windows", dl_users: "streamers use it", dl_meta: "Version {v} · {d} · {s} MB", dl_down: "Get the newest version from GitHub", dl_req: "Windows 10 or 11 · installs for your user, no administrator needed",
-    dl_all: "All versions and what changed",
-    f_t: "What it does",
-    f1_t: "Commands", f1_d: "With aliases, user levels, cooldowns and variables like $(user), $(followage), $(weather city) and $(accountage), and counters (deaths, wins…) you can change in one click.",
+    sm_t: "Simple from the first click", sm_dash: "Dashboard", sm_cmds: "Commands", sm_ev: "Events", sm_ov: "Overlays", sm_games: "Mini games", sm_new: "+ New", sm_c_cmds: "Commands", sm_c_bot: "Bot", sm_online: "Online", sm_c_chat: "Chatters today", sm_counters: "Counters", sm_k1: "Deaths", sm_k2: "Wins", sm_k3: "Clutches", sm_k4: "Fails", sm_r1: "Join the Discord!", sm_r2: "Live for 2h 14m", sm_r3: "فقبن was first today 🥇", sm_r4: "All my links: fqpnbot.com/fqpn_", sm_e1: "Follow", sm_e1r: "Thanks for the follow @sara!", sm_e2: "Sub", sm_e2r: "Welcome to the club @ali 💜", sm_e3: "Raid", sm_e3r: "Welcome raiders! 🎉", sm_e4: "Bits", sm_e4r: "Thanks for the 100 bits @nora! ✨", sm_wins: "{n} wins", sm_wins_few: "{n} wins", sm_btn: "Open {n}",
+    ck_free: "Free forever", ck_local: "100% local", ck_noacc: "No account required", ck_lang: "Arabic & English", ck_upd: "Auto updates",
+    f_t: "What the app does", f_sum: "{n} features, all free. What's new in {v} is marked New.", f_new: "New",
+    g1_t: "Replies in chat", g1_d: "The bot answers for you, in your own words.",
+    g2_t: "A clean chat", g2_d: "Less work for your mods.",
+    g3_t: "Fun for viewers", g3_d: "Things that get chat talking.",
+    g4_t: "On stream", g4_d: "Control it while you play.",
+    g5_t: "Getting started", g5_d: "Ready in minutes.",
+    g6_t: "Sharing", g6_d: "For your viewers and your team.",
+    f16_t: "Overlays", f16_d: "One link for OBS: your counters and First in chat with their picture. «Who's first today?» leaves by itself when the time is up. Drag and resize them on a preview, and OBS follows right away.",
+    f17_t: "Chat box", f17_d: "Your chat on stream with its own link: 6 styles, 12 fonts, a box or one sideways line, real Twitch badges, and 7TV, BTTV and FFZ emotes. Viewers pick their name color with !color.",
+    f1_t: "Commands", f1_d: "Other names, user levels, cooldowns, {n} variables like $(user), $(watchtime) and $(weather\u00a0city), and counters (deaths, wins…) you change in one click.", f1_go: "See all variables",
     f2_t: "Timers", f2_d: "Messages on a schedule while you're live, like a reminder to follow or to join your Discord.",
-    f3_t: "Twitch events", f3_d: "Replies for follows, subs, gift subs, raids, hype trains, bits, watch streaks and donations, with running totals.",
+    f3_t: "Twitch events", f3_d: "Replies for follows, subs, gift subs, raids, hype trains, Bits, watch streaks and donations, with running totals. Replies tag the viewer (@name), and the bot answers the Falkorie bot's levels and streaks. Ready in Arabic, with a welcome for first-time chatters and a follow anniversary.",
     f4_t: "Greetings", f4_d: "A hello for the people you choose, once per stream, in your own words.",
     f5_t: "Blocklist", f5_d: "People the bot ignores: their commands get no answer.",
     f6_t: "Moderation", f6_d: "Filters for bad words in Arabic and English, links, caps, emotes, symbols and spam, and a log of what was done.",
-    f7_t: "Mini games", f7_d: "Eleven games, like «\u2068حروف\u2069», «\u2068سؤال\u2069» (easy, medium or hard questions), «\u2068الدخيل\u2069» and «\u2068ترجم\u2069», with «\u2068لعبه؟\u2069» for a random one, «\u2068العاب؟\u2069» for the list, and weekly, monthly and all-time leaderboards.",
+    f7_t: "Mini games", f7_d: "Eleven games, like «\u2068حروف\u2069», «\u2068سؤال\u2069» (easy, medium or hard questions), «\u2068الدخيل\u2069» and «\u2068ترجم\u2069», with «\u2068لعبه؟\u2069» for a random one, «\u2068العاب؟\u2069» for the list, and weekly, monthly and all-time leaderboards. You can fix anyone's wins.",
     f8_t: "Test chat", f8_d: "Try every command, game and event reply as any viewer, without Twitch. With ready-made recipes.",
     f9_t: "Giveaways", f9_d: "Draw an active chatter, let viewers join with a keyword, or guess a number. Subscriber luck and rerolls.",
-    f10_t: "Public command list", f10_d: "One link to a page with all your commands, an example of what each says, and the games leaderboard.",
+    f10_t: "Public command list", f10_d: "One link to a page with all your commands, an example of what each says, the games leaderboard and the longest First in chat streaks, under your Twitch banner.",
+    f18_t: "Twitch panel", f18_d: "A leaderboard right under your stream: watch time, messages, mini games and First in chat, this week, this month and all time. Bring your WizeBot numbers once and they continue.",
     f11_t: "Editor link", f11_d: "Let someone you trust edit your commands from the website, with a link and a one-time password.",
     f12_t: "English and Arabic", f12_d: "The whole app in both languages, right to left in Arabic, in dark and light.",
     f13_t: "Import from Nightbot or StreamElements", f13_d: "Bring your commands and timers over in one click: sign in with Nightbot, paste your StreamElements key, or just type the channel. You choose what comes in, and one click undoes it all.",
@@ -941,7 +1144,7 @@ const TEXT = {
     v_try: "Try it", v_note: "Sample values, not real data. A variable it doesn't know stays as you typed it.", v_search: "Search variables (follow, weather, طقس…)", v_copy: "Click a variable to copy it.",
     v_none: "No variable matches your search.", v_ex: "Example", v_chat: "In chat", v_new: "New", v_event: "Only in event replies", v_home: "Home",
     v_try_ex: "Welcome $(user)! We've been live for $(uptime). $(weather Riyadh)",
-    vg_viewer: "Viewer", vg_stream: "Stream", vg_followers: "Followers", vg_first: "First in chat", vg_world: "World", vg_event: "Event replies", vg_adv: "Advanced",
+    vg_viewer: "Viewer", vg_stream: "Stream", vg_followers: "Followers", vg_first: "First in chat", vg_stats: "Watch time & messages", vg_world: "World", vg_event: "Event replies", vg_adv: "Advanced",
     v_cta_t: "{n} variables for your commands", v_cta_d: "See what each one does, with an example, and try your own reply before you save it.", v_cta_go: "See all variables",
     f15_t: "Hotkeys", f15_d: "One key, even in the middle of a game: +1 to your deaths counter, send !discord, start a mini game. Combos like Ctrl + Shift + F5 or Mouse 4 + Q work too.",
     lab_t: "Labs", lab_s: "New features you can try before they're finished. Switch them on in the app, under Settings → Labs. They can change, or be removed in a future update.",
@@ -985,6 +1188,9 @@ const TEXT = {
     miss_t: "لا توجد قائمة هنا", miss_d: "لا توجد قائمة أوامر عامة لـ {c}. يمكن لصاحب القناة تفعيلها في FQPN's Chat Bot من صفحة الأوامر.",
     lb_tab: "لوحة صدارة الألعاب", lb_all: "كل الألعاب", lb_p_all: "من البداية", lb_p_week: "هالأسبوع", lb_p_month: "هالشهر", wins: "{n} فوز", win1: "فوز واحد", lb_empty: "لا توجد انتصارات بعد.",
     players1: "لاعب واحد", players2: "لاعبان", players_few: "{n} لاعبين", players: "{n} لاعبًا",
+    f_tab: "أول", f_now: "الستريك الحين", f_hint: "اكتب «اول» أول ما يبدأ البث وخذها منه!", f_peak: "أطول ستريك", f_count: "أكثر أول",
+    f_empty: "ما أحد كان أول للحين.", f_s1: "بث", f_s2: "بثين", f_s_few: "{n} بثوث", f_s: "{n} بث",
+    f_c1: "أول مرة وحدة", f_c2: "أول مرتين", f_c_few: "أول {n} مرات", f_c: "أول {n} مرة", f_row: "{s} ورا بعض",
     ed_t: "تعديل الأوامر", ed_gone_t: "انتهى رابط التعديل هذا", ed_gone_d: "انتهت مدته، أو أُلغي، أو استُبدل برابط جديد. اطلب من صاحب القناة رابطًا وكلمة مرور جديدين.",
     ed_in_t: "سجّل الدخول للتعديل", ed_in_d: "أعطاك صاحب القناة هذا الرابط وكلمة مرور. يظهر اسمك لصاحب القناة بجانب كل تعديل.",
     ed_name: "اسمك", ed_pw: "كلمة المرور", ed_go: "افتح المحرّر", ed_wrong: "كلمة مرور خاطئة. بقيت {n} محاولات.", ed_locked: "كلمات مرور خاطئة كثيرة: هذا الرابط مقفل. اطلب رابطًا جديدًا من صاحب القناة.",
@@ -999,18 +1205,28 @@ const TEXT = {
     miss_d0: "هذه الصفحة غير موجودة.",
     h_title: "بوت شات وإشراف لتويتش", h_lead: "أوامر ومؤقتات وترحيب وردود على أحداث تويتش وإشراف على الشات وألعاب، كلها تُضبط من تطبيق بالعربي والإنجليزي. مجاني.",
     dl: "تحميل لويندوز", dl_users: "ستريمر يستخدمونه", dl_meta: "الإصدار {v} · {d} · {s} ميغابايت", dl_down: "احصل على أحدث إصدار من GitHub", dl_req: "ويندوز 10 أو 11 · يُثبَّت لحسابك فقط، بدون صلاحيات المسؤول",
-    dl_all: "كل الإصدارات وما تغيّر فيها",
-    f_t: "ماذا يفعل",
-    f1_t: "الأوامر", f1_d: "بأسماء بديلة ومستويات للمستخدمين وفترات انتظار ومتغيرات مثل \u2066$\u2060(user)\u2069 و\u2066$\u2060(followage)\u2069 و\u2066$\u2060(weather city)\u2069 و\u2066$\u2060(accountage)\u2069، وعدّادات (الموتات، الانتصارات…) تعدّلها بضغطة.",
+    sm_t: "سهل من أول ضغطة", sm_dash: "الرئيسية", sm_cmds: "الأوامر", sm_ev: "الأحداث", sm_ov: "الأوفرلاي", sm_games: "الألعاب", sm_new: "+ جديد", sm_c_cmds: "الأوامر", sm_c_bot: "البوت", sm_online: "شغّال", sm_c_chat: "كتبوا اليوم", sm_counters: "العدادات", sm_k1: "الموتات", sm_k2: "الفوز", sm_k3: "الكلتشات", sm_k4: "الفشل", sm_r1: "ادخلوا الديسكورد!", sm_r2: "صار لنا لايف ساعتين و14 دقيقة", sm_r3: "فقبن أول واحد اليوم 🥇", sm_r4: "كل روابطي: \u2066fqpnbot.com/fqpn_\u2069", sm_e1: "متابعة", sm_e1r: "شكرا عالفولو @sara!", sm_e2: "اشتراك", sm_e2r: "حياك في النادي @ali 💜", sm_e3: "ريد", sm_e3r: "حيّ الله الريد! 🎉", sm_e4: "بتس", sm_e4r: "شكرا على الـ100 بتس @nora! ✨", sm_wins: "{n} فوز", sm_wins_few: "{n} فوزات", sm_btn: "افتح {n}",
+    ck_free: "مجاني للأبد", ck_local: "يشتغل على جهازك 100%", ck_noacc: "بدون إنشاء حساب", ck_lang: "عربي وإنجليزي", ck_upd: "تحديثات تلقائية",
+    f_t: "ماذا يفعل التطبيق", f_sum: "{n} ميزة، كلها مجانية. الجديد في {v} عليه علامة «جديد».", f_new: "جديد",
+    g1_t: "ردود في الشات", g1_d: "البوت يرد عنك، بكلماتك أنت.",
+    g2_t: "شات نظيف", g2_d: "شغل أقل على المشرفين.",
+    g3_t: "متعة للمشاهدين", g3_d: "أشياء تخلّي الشات يتكلم.",
+    g4_t: "على البث", g4_d: "تحكّم وأنت تلعب.",
+    g5_t: "البداية", g5_d: "جاهز في دقائق.",
+    g6_t: "المشاركة", g6_d: "لمشاهديك وفريقك.",
+    f16_t: "الأوفرلاي", f16_d: "رابط واحد لـ OBS: عداداتك و«أول واحد في الشات» بصورته. «مين أول واحد اليوم؟» يختفي لحاله لما يخلص الوقت. اسحبها وكبّرها على المعاينة، و\u2066OBS\u2069 يتبعك فورًا.",
+    f17_t: "الشات بوكس", f17_d: "شاتك على البث برابط خاص فيه: 6 ستايلات و12 خط، صندوق أو سطر واحد يمشي، شارات تويتش الحقيقية، وإيموجيات \u20667TV\u2069 و\u2066BTTV\u2069 و\u2066FFZ\u2069. والمشاهد يختار لون اسمه بـ \u2066!color\u2069.",
+    f1_t: "الأوامر", f1_d: "أسماء بديلة ومستويات للمستخدمين وفترات انتظار، و{n} متغيرًا مثل \u2066$\u2060(user)\u2069 و\u2066$\u2060(watchtime)\u2069 و\u2066$\u2060(weather\u00a0city)\u2069، وعدادات (الموتات، الانتصارات…) تعدّلها بضغطة.", f1_go: "شوف كل المتغيرات",
     f2_t: "المؤقتات", f2_d: "رسائل بجدول زمني أثناء البث، مثل تذكير بالمتابعة أو بالانضمام للديسكورد.",
-    f3_t: "أحداث تويتش", f3_d: "ردود على المتابعة والاشتراكات والإهداءات والغارات وقطار الحماس والـ Bits وسلاسل المشاهدة والتبرعات، مع المجموع.",
+    f3_t: "أحداث تويتش", f3_d: "ردود على المتابعة والاشتراكات والإهداءات والغارات وقطار الحماس والـ Bits وسلاسل المشاهدة والتبرعات، مع المجموع. الردود تمنشن المشاهد (\u2066@name\u2069)، والبوت يرد على مستويات وسلاسل بوت Falkorie. جاهزة بالعربي، مع ترحيب للي يكتبون أول مرة وذكرى المتابعة.",
     f4_t: "التحيات", f4_d: "ترحيب بمن تختارهم، مرة في كل بث، بكلماتك.",
     f5_t: "قائمة الحظر", f5_d: "أشخاص يتجاهلهم البوت: لا رد على أوامرهم.",
     f6_t: "الإشراف", f6_d: "فلاتر للكلمات السيئة بالعربية والإنجليزية والروابط والأحرف الكبيرة والإيموجي والرموز والسبام، وسجل لما حدث.",
-    f7_t: "الألعاب", f7_d: "إحدى عشرة لعبة مثل «حروف» و«سؤال» (أسئلة سهلة أو متوسطة أو صعبة) و«الدخيل» و«ترجم»، و«لعبه؟» للعبة عشوائية، و«العاب؟» لقائمتها، مع لوحات الأوائل للأسبوع والشهر ومن البداية.",
+    f7_t: "الألعاب", f7_d: "إحدى عشرة لعبة مثل «حروف» و«سؤال» (أسئلة سهلة أو متوسطة أو صعبة) و«الدخيل» و«ترجم»، و«لعبه؟» للعبة عشوائية، و«العاب؟» لقائمتها، مع لوحات الأوائل للأسبوع والشهر ومن البداية. وتقدر تعدّل فوز أي أحد.",
     f8_t: "تجربة الدردشة", f8_d: "جرّب كل أمر ولعبة ورد حدث كأي مشاهد، بدون تويتش. مع وصفات أوامر جاهزة.",
     f9_t: "السحوبات", f9_d: "اسحب أحد المتفاعلين، أو دع المشاهدين يشاركون بكلمة، أو يخمّنون رقمًا. حظ للمشتركين وإعادة السحب.",
-    f10_t: "قائمة الأوامر العامة", f10_d: "رابط واحد لصفحة فيها كل أوامرك، ومثال على ما يقوله كل أمر، ولوحة أوائل الألعاب.",
+    f10_t: "قائمة الأوامر العامة", f10_d: "رابط واحد لصفحة فيها كل أوامرك، ومثال على ما يقوله كل أمر، ولوحة أوائل الألعاب وأطول سلاسل «أول واحد في الشات»، تحت بانر تويتش حقك.",
+    f18_t: "بانل تويتش", f18_d: "ترتيب مشاهدينك تحت البث مباشرة: وقت المشاهدة والرسايل والألعاب و«أول واحد»، لهالأسبوع وهالشهر ومن أول. جيب أرقامك من \u2066WizeBot\u2069 مرة وحدة وتكمل.",
     f11_t: "رابط التعديل", f11_d: "اسمح لشخص تثق به بتعديل أوامرك من الموقع، برابط وكلمة مرور لمرة واحدة.",
     f12_t: "العربية والإنجليزية", f12_d: "التطبيق كله باللغتين، من اليمين لليسار بالعربية، بالوضع الداكن والفاتح.",
     f13_t: "استيراد من نايت بوت أو StreamElements", f13_d: "انقل أوامرك ومؤقتاتك بضغطة: سجّل دخول بنايت بوت، أو الصق مفتاح StreamElements، أو اكتب اسم القناة بس. أنت تختار وش ينضاف، وضغطة وحدة تتراجع عن كل شي.",
@@ -1020,7 +1236,7 @@ const TEXT = {
     v_try: "جرّبها", v_note: "قيم للتجربة، مو بيانات حقيقية. المتغير اللي ما يعرفه يبقى مثل ما كتبته.", v_search: "دوّر على متغير (طقس، follow، weather…)", v_copy: "اضغط على المتغير عشان تنسخه.",
     v_none: "ما فيه متغير يطابق بحثك.", v_ex: "مثال", v_chat: "في الشات", v_new: "جديد", v_event: "في ردود الأحداث بس", v_home: "الرئيسية",
     v_try_ex: "هلا $(user)! صار لنا $(uptime) على البث. $(weather الرياض)",
-    vg_viewer: "المشاهد", vg_stream: "البث", vg_followers: "المتابعين", vg_first: "أول واحد في الشات", vg_world: "العالم", vg_event: "ردود الأحداث", vg_adv: "متقدم",
+    vg_viewer: "المشاهد", vg_stream: "البث", vg_followers: "المتابعين", vg_first: "أول واحد في الشات", vg_stats: "وقت المشاهدة والرسايل", vg_world: "العالم", vg_event: "ردود الأحداث", vg_adv: "متقدم",
     v_cta_t: "{n} متغير لأوامرك", v_cta_d: "شوف وش تسوي كل وحدة مع مثال، وجرّب ردك قبل ما تحفظه.", v_cta_go: "شوف كل المتغيرات",
     f15_t: "اختصارات الكيبورد", f15_d: "زر واحد، حتى وأنت في نص اللعبة: +1 لعداد الموتات، يرسل !discord، يبدأ لعبة. وتقدر تسوي كومبو مثل \u2066Ctrl + Shift + F5\u2069 أو \u2066Mouse 4 + Q\u2069.",
     lab_t: "المختبر", lab_s: "ميزات جديدة تقدر تجربها قبل ما تكتمل. شغّلها من التطبيق، في الإعدادات ← المختبر. ممكن تتغير، أو تنشال في تحديث جاي.",
@@ -1057,7 +1273,15 @@ const TEXT = {
   },
 };
 
+// 1.17.1: the home page's feature groups (card numbers = f<n>_t / f<n>_d), and the cards marked New (empty it, or change
+// FEAT_NEW_IN, when the next version comes out). Group sizes 4, 2, 2, 3, 2, 4 keep every row full on a wide screen.
+const FEAT_GROUPS = [[1, 2, 3, 4], [6, 5], [7, 9], [17, 16, 15], [13, 8], [10, 18, 11, 12]];
+const FEAT_NEW = [17, 18, 3, 10, 16];
+const FEAT_NEW_IN = "1.18";
 const ICONS = {   // small line icons for the feature cards (inline SVG: nothing extra to load)
+  f17: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M7 8h8M7 12h5"/>',
+  f18: '<path d="M8 21V11H3v10zM15 21V5h-5v16zM21 21v-7h-5v7z"/>',
+  f16: '<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/><rect x="6" y="7" width="5" height="3" rx="1"/>',
   f1: '<path d="M4 17l6-6-6-6M12 19h8"/>', f2: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   f3: '<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>',
   f4: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>',
@@ -1098,23 +1322,44 @@ function homeBody(origin, rel, users = 0) {
     esc(TEXT.en.dl_meta.replace("{v}", rel.version).replace("{d}", new Date(rel.date * 1000).toISOString().slice(0, 10)).replace("{s}", (rel.size / 1048576).toFixed(1)))}</p>`
     : `<p class="dlmeta" data-t="dl_down">${T("dl_down")}</p>`;
   const icon = (k) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[k]}</svg>`;
-  const feats = [1, 13, 2, 3, 4, 5, 6, 7, 15, 8, 9, 10, 11, 12].map((n) => `<div class="feat">${icon("f" + n)}<h3><span data-t="f${n}_t">${T("f" + n + "_t")}</span></h3><p data-t="f${n}_d">${T("f" + n + "_d")}</p></div>`).join("");
+  // 1.17.1: the features in groups (every row full), the ones new in FEAT_NEW_IN marked New.
+  const card = (n) => `<div class="feat${FEAT_NEW.includes(n) ? " isnew" : ""}">${icon("f" + n)}${FEAT_NEW.includes(n) ? `<span class="nb" data-t="f_new">${T("f_new")}</span>` : ""}<h3><span data-t="f${n}_t">${T("f" + n + "_t")}</span></h3>${n === 1 ? `<p data-t="f1_d" data-n="${VARS.length}">${esc(TEXT.en.f1_d.replace("{n}", VARS.length))}</p><a class="fl" href="/variables"><span data-t="f1_go">${T("f1_go")}</span> <span class="arr" aria-hidden="true">→</span></a>` : `<p data-t="f${n}_d">${T("f" + n + "_d")}</p>`}</div>`;
+  const nFeat = FEAT_GROUPS.reduce((a, g) => a + g.length, 0);
+  const feats = `<p class="fsum" data-t="f_sum" data-n="${nFeat}" data-v="${FEAT_NEW_IN}">${esc(TEXT.en.f_sum.replace("{n}", nFeat).replace("{v}", FEAT_NEW_IN))}</p>` + FEAT_GROUPS.map((g, i) =>
+    `<div class="fg"><div class="fgh"><h3 data-t="g${i + 1}_t">${T("g" + (i + 1) + "_t")}</h3><span data-t="g${i + 1}_d">${T("g" + (i + 1) + "_d")}</span></div><div class="feats n${g.length}">${g.map(card).join("")}</div></div>`).join("");
   // 1.17.0: Labs: beta features (off in the app until switched on in Settings → Labs). Voice commands is the first.
   const labs = `<section id="labs"><h2 class="lbhead">${icon("lab")}<span data-t="lab_t">${T("lab_t")}</span></h2><p class="lead small" data-t="lab_s">${T("lab_s")}</p>
 <div class="lbgrid"><div class="lbcard main"><div class="lbtop"><span class="lbic">${icon("f14")}</span><h3><span data-t="f14_t">${T("f14_t")}</span> <span class="beta" data-t="beta">${T("beta")}</span></h3></div>
 <p data-t="f14_d">${T("f14_d")}</p><ul class="lbpts">${[1, 2, 3].map((n) => `<li data-t="lab_v${n}">${T("lab_v" + n)}</li>`).join("")}</ul><p class="lbst" data-t="lab_st">${T("lab_st")}</p></div>
 <div class="lbcard"><h3 data-t="lab_how">${T("lab_how")}</h3><ol class="lbsteps">${[1, 2, 3].map((n) => `<li><span class="num" aria-hidden="true">${n}</span><span data-t="lab_s${n}">${T("lab_s" + n)}</span></li>`).join("")}</ol>
 <div class="lbsoon"><b data-t="lab_soon">${T("lab_soon")}</b><p data-t="lab_soon_d">${T("lab_soon_d")}</p></div></div></div></section>`;
+  // 1.18.0: a simple drawing of the app that switches between its sections by itself (the squares switch it too)
+  const tt = (k, extra = "") => `<span data-t="${k}"${extra}>${T(k)}</span>`;
+  const sw = (on) => `<i class="smsw${on ? " on" : ""}"></i>`;
+  const row = (a, b, on) => `<div class="smrow">${a}<span class="smtx">${b}</span>${on === null ? "" : sw(on)}</div>`;
+  const panes = [
+    ["sm_dash", "", `<div class="smtiles">${[["sm_c_cmds", "11"], ["sm_c_bot", `<span class="smdot"></span>${tt("sm_online")}`], ["sm_c_chat", "248"]].map(([k, v]) => `<div class="smtile"><small data-t="${k}">${T(k)}</small><b>${v}</b></div>`).join("")}</div>
+<div class="smlbl" data-t="sm_counters">${T("sm_counters")}</div><div class="smctrs">${[["💀", 7], ["🏆", 12], ["🔥", 4], ["😂", 9]].map(([i, v], n) => `<div class="smctr"><span class="smci">${i}</span><small data-t="sm_k${n + 1}">${T("sm_k" + (n + 1))}</small><b>${v}</b><span class="smcb"><i>−</i><i>+</i></span></div>`).join("")}</div>`],
+    ["sm_cmds", `<em data-t="sm_new">${T("sm_new")}</em>`, [["!discord", 1, true], ["!uptime", 2, true], ["!first", 3, false], ["!links", 4, true]].map(([c, n, on]) => row(`<code>${c}</code>`, tt("sm_r" + n), on)).join("")],
+    ["sm_ev", "", [1, 2, 3, 4].map((n) => row(`<b class="smev" data-t="sm_e${n}">${T("sm_e" + n)}</b>`, tt(`sm_e${n}r`), true)).join("")],
+    ["sm_ov", "", `<div class="smov"><div class="smpill">💀 DEATH <b>7</b></div><div class="smchat"><p dir="rtl"><b style="color:#ff6b6b">فقبن</b>: السلام عليكم 👋</p><p dir="ltr"><b style="color:#7cc4ff">sara_gg</b>: gg that clutch 🔥</p><p dir="rtl"><b style="color:#ffd36b">نوره</b>: صار لي سنة أتابعك 🎂</p><p dir="ltr"><b style="color:#c39bff">auk78</b>: !discord</p></div></div>`],
+    ["sm_games", "", [["🥇", "1asoom", 26], ["🥈", "فقبن", 19], ["🥉", "auk78", 11], ["4", "نوره", 8]].map(([m, n, w]) => row(`<b class="smrk">${m}</b>`, `<bdi>${n}</bdi>`, null).replace("</div>", `<b class="smwn" data-t="${w % 100 >= 3 && w % 100 <= 10 ? "sm_wins_few" : "sm_wins"}" data-n="${w}">${esc(TEXT.en.sm_wins.replace("{n}", w))}</b></div>`)).join("")],
+  ];
+  const sample = `<section class="smsec"><h2 data-t="sm_t">${T("sm_t")}</h2><div class="smwin" id="smwin" aria-hidden="true"><div class="smbar"><b></b><b></b><b></b></div><div class="smbody">
+<nav class="smnav">${panes.map(([k], i) => `<button type="button" tabindex="-1" class="${i ? "" : "on"}" data-i="${i}"></button>`).join("")}</nav>
+<div class="smmain">${panes.map(([k, x, body], i) => `<div class="smpane${i ? "" : " on"}"><div class="smhead"><strong data-t="${k}">${T(k)}</strong>${x}</div>${body}</div>`).join("")}</div></div></div></section>`;
   const steps = [1, 2, 3, 4].map((n) => `<li><span class="num" aria-hidden="true">${n}</span><span data-t="s${n}">${T("s" + n)}</span></li>`).join("");
   const faq = [1, 2, 3, 4, 5, 6].map((n) => `<details><summary data-t="q${n}">${T("q" + n)}</summary><p data-t="a${n}">${T("a" + n)}</p></details>`).join("");
-  return `<header class="top"><div class="who"><img class="logo" src="${LOGO}" alt="" width="48" height="48"><div><b class="brand">FQPN's Chat Bot</b></div></div><div class="topr"><a class="vbtn" href="/variables"><span class="vbi" aria-hidden="true">$( )</span><span data-t="v_title">${T("v_title")}</span></a>${langBtn()}</div></header>
+  return `<header class="top big"><div class="who"><img class="logo" src="${LOGO}" alt="" width="84" height="84"><div class="bname"><b class="brand">FQPN's</b><span class="bsub">CHAT BOT</span></div></div><div class="topr"><a class="vbtn" href="/variables"><span class="vbi" aria-hidden="true">$( )</span><span data-t="v_title">${T("v_title")}</span></a>${langBtn()}</div></header>
 <section class="hero">
 <h1 data-t="h_title">${T("h_title")}</h1>
 <p class="lead" data-t="h_lead">${T("h_lead")}</p>
 <div class="dlbox"><div class="dlrow"><a class="dl" id="dl" href="/download/windows"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M4 20h16"/></svg><span data-t="dl">${T("dl")}</span></a>${users >= 2 ? `<span class="dlusers"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M15.5 4.8a3.5 3.5 0 0 1 0 6.4M18 14.8c1.9.8 3.1 2.6 3.5 5.2"/></svg><b>${users}</b> <span data-t="dl_users">${T("dl_users")}</span></span>` : ""}</div>
-${meta}<p class="req" data-t="dl_req">${T("dl_req")}</p><p class="req"><a href="${esc(rel ? rel.notes : RELEASES)}" rel="noopener" data-t="dl_all">${T("dl_all")}</a></p></div>
+${meta}<p class="req" data-t="dl_req">${T("dl_req")}</p>
+<ul class="dlchecks">${["ck_free", "ck_local", "ck_noacc", "ck_lang", "ck_upd"].map((k) => `<li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg><span data-t="${k}">${T(k)}</span></li>`).join("")}</ul></div>
 </section>
-<section><h2 data-t="f_t">${T("f_t")}</h2><div class="feats">${feats}</div>
+${sample}
+<section><h2 data-t="f_t">${T("f_t")}</h2>${feats}
 <a class="vcta" href="/variables"><span><b data-t="v_cta_t" data-n="${VARS.length}">${esc(TEXT.en.v_cta_t.replace("{n}", VARS.length))}</b><span data-t="v_cta_d">${T("v_cta_d")}</span></span><span class="vgo"><span data-t="v_cta_go">${T("v_cta_go")}</span> <span class="arr" aria-hidden="true">→</span></span></a></section>
 ${labs}
 <section><h2 data-t="c_t">${T("c_t")}</h2><p class="lead small" data-t="c_lead">${T("c_lead")}</p>
@@ -1133,9 +1378,9 @@ ${labs}
 // 1.17.0: the Variables page (/variables): every variable of the app with one line about it, an example command and what
 // chat would show (with sample values, never anyone's data), a "Try it" box and a search. The list is the app's (the
 // command editor's variable buttons): when a variable is added to the app, add it here too.
-const VAR_GROUPS = ["viewer", "stream", "followers", "first", "world", "event", "adv"];
-const VARS = [["$(user)", "viewer", "The name of the viewer who used the command.", "اسم المشاهد اللي استخدم الأمر.", "!hi", "!hi", "Hi $(user)! Welcome to the stream", "هلا $(user)! حيّاك في البث", ""], ["$(touser)", "viewer", "The name written after the command, or the viewer if there isn't one.", "الاسم المكتوب بعد الأمر، أو المشاهد نفسه لو ما فيه.", "!hug @sam_99", "!hug @sam_99", "$(user) hugs $(touser)", "$(user) يحضن $(touser)", ""], ["$(query)", "viewer", "Everything the viewer typed after the command.", "كل اللي كتبه المشاهد بعد الأمر.", "!say hello chat", "!say hello chat", "$(user) says: $(query)", "$(user) يقول: $(query)", ""], ["$(querystring)", "viewer", "The same text, made safe to put inside a link.", "نفس النص، بس آمن تحطه داخل رابط.", "!google twitch bot", "!google twitch bot", "https://google.com/search?q=$(querystring)", "https://google.com/search?q=$(querystring)", ""], ["$(count)", "viewer", "How many times this command has been used.", "كم مرة انستخدم هالأمر.", "!hydrate", "!hydrate", "Drink water! Reminder number $(count)", "اشرب موية! التذكير رقم $(count)", ""], ["$(count name)", "viewer", "Adds 1 to a named counter and shows it.", "يزيد عدّاد له اسم 1 ويعرضه.", "!death", "!death", "FQPN died again: $(count deaths) deaths", "فقبن مات مرة ثانية: $(count deaths) موتة", "new"], ["$(getcount name)", "viewer", "Shows a named counter without adding to it.", "يعرض عدّاد له اسم بدون ما يزيده.", "!deaths", "!deaths", "Deaths so far: $(getcount deaths)", "عدد الموتات لين الحين: $(getcount deaths)", "new"], ["$(accountage)", "viewer", "How old the viewer's Twitch account is.", "عمر حساب المشاهد في تويتش.", "!age", "!age", "$(user)'s account is $(accountage) old", "عمر حساب $(user): $(accountage)", "new"], ["$(random.chatter)", "viewer", "A random viewer who chatted in the last 30 minutes.", "مشاهد عشوائي كتب في الشات آخر 30 دقيقة.", "!pick", "!pick", "The winner is $(random.chatter)!", "الفائز هو $(random.chatter)!", "new"], ["$(channel)", "stream", "Your channel name.", "اسم قناتك.", "!channel", "!channel", "You're watching $(channel)", "أنت تتابع $(channel)", ""], ["$(game)", "stream", "The game or category you're streaming now.", "اللعبة أو التصنيف اللي تبثه الحين.", "!game", "!game", "Now playing: $(game)", "نلعب الحين: $(game)", ""], ["$(title)", "stream", "Your current stream title.", "عنوان بثك الحالي.", "!title", "!title", "Title: $(title)", "العنوان: $(title)", ""], ["$(uptime)", "stream", "How long you've been live.", "كم صار لك وأنت تبث.", "!uptime", "!uptime", "Live for $(uptime)", "صار لنا $(uptime) على البث", ""], ["$(viewers)", "stream", "How many people are watching right now.", "كم واحد يشاهد الحين.", "!viewers", "!viewers", "$(viewers) people are watching", "فيه $(viewers) يشاهدون الحين", ""], ["$(clip)", "stream", "Makes a clip of the last moments and gives its link.", "يسوي كليب لآخر لحظات ويعطي رابطه.", "!clip", "!clip", "Clip saved: $(clip)", "انحفظ الكليب: $(clip)", "new"], ["$(followers)", "followers", "How many followers your channel has.", "كم متابع عند قناتك.", "!followers", "!followers", "We're $(followers) followers strong!", "صرنا $(followers) متابع!", "new"], ["$(follow)", "followers", "A sentence saying if the viewer follows you.", "جملة تقول إذا المشاهد يتابعك أو لا.", "!follow", "!follow", "$(user) $(follow)", "$(user) $(follow)", ""], ["$(followdate)", "followers", "The date the viewer started following you.", "تاريخ بداية متابعة المشاهد لك.", "!followdate", "!followdate", "$(user) followed on $(followdate)", "$(user) تابع بتاريخ $(followdate)", ""], ["$(followage)", "followers", "How long the viewer has followed you.", "كم صار للمشاهد وهو يتابعك.", "!followage", "!followage", "$(user) has followed for $(followage)", "$(user) يتابعك من $(followage)", ""], ["$(firststreak)", "first", "How many streams in a row the viewer was first in chat.", "كم بث ورا بعض كان المشاهد أول واحد في الشات.", "!first", "!first", "$(user) was first $(firststreak) streams in a row", "$(user) كان الأول $(firststreak) بثوث ورا بعض", "new"], ["$(firststreakpeak)", "first", "The viewer's best \"first in chat\" streak ever.", "أفضل سلسلة «أول واحد» للمشاهد.", "!best", "!best", "$(user)'s best first streak: $(firststreakpeak)", "أفضل سلسلة لـ $(user): $(firststreakpeak)", "new"], ["$(weather city)", "world", "The weather in a city right now.", "الطقس في مدينة الحين.", "!weather", "!weather", "$(weather Riyadh)", "$(weather Riyadh)", "new"], ["$(time city)", "world", "The time in a city right now.", "الوقت الحين في مدينة.", "!time", "!time", "$(time Riyadh)", "$(time Riyadh)", "new"], ["$(streak)", "event", "How many streams in a row they watched (Twitch watch streak or Falkorie's !streak).", "كم بث ورا بعض شاهدوه (سلسلة المشاهدة في تويتش أو !streak في Falkorie).", "Watch streak reply", "رد سلسلة المشاهدة", "$(user) watched $(streak) streams in a row!", "$(user) شاهد $(streak) بثوث ورا بعض!", "event"], ["$(tier)", "event", "The subscription type: Tier 1, 2, 3 or Prime.", "نوع الاشتراك: Tier 1 أو 2 أو 3 أو Prime.", "Subscription reply", "رد الاشتراك", "Thanks $(user) for the $(tier) sub!", "شكراً $(user) على اشتراك $(tier)!", "event"], ["$(months)", "event", "How many months they've subscribed in total.", "كم شهر اشتركوا بالمجموع.", "Subscription reply", "رد الاشتراك", "$(user) subscribed for $(months) months!", "$(user) مشترك من $(months) أشهر!", "event"], ["$(message)", "event", "The message they wrote with their sub, Bits or donation.", "الرسالة اللي كتبوها مع الاشتراك أو البيتس أو التبرع.", "Subscription reply", "رد الاشتراك", "$(user) says: $(message)", "$(user) يقول: $(message)", "event"], ["$(gifts)", "event", "How many subs were gifted at once.", "كم اشتراك انهدى مرة وحدة.", "Gift subs reply", "رد إهداء الاشتراكات", "$(user) gifted $(gifts) subs!", "$(user) أهدى $(gifts) اشتراكات!", "event"], ["$(raider)", "event", "The streamer who raided you.", "الستريمر اللي سوّى لك رِيد.", "Raid reply", "رد الغارة", "Welcome $(raider) and $(viewers) raiders!", "حيّاك $(raider) ومعه $(viewers) مشاهد!", "event"], ["$(level)", "event", "The Hype Train level, or the new level Falkorie announced.", "مستوى قطار الحماس، أو المستوى الجديد اللي أعلنه Falkorie.", "Hype train reply", "رد قطار الحماس", "Hype Train level $(level)!", "قطار الحماس مستوى $(level)!", "event"], ["$(bits)", "event", "How many Bits were cheered.", "كم بيتس انرسلت.", "Bits reply", "رد البيتس", "Thanks $(user) for $(bits) Bits!", "شكراً $(user) على $(bits) بيتس!", "event"], ["$(amount)", "event", "The donation amount.", "مبلغ التبرع.", "Donation reply", "رد التبرع", "$(user) donated $(amount) $(currency)!", "$(user) تبرّع بـ $(amount) $(currency)!", "event"], ["$(currency)", "event", "The donation currency, like USD or SAR.", "عملة التبرع، مثل USD أو SAR.", "Donation reply", "رد التبرع", "$(amount) $(currency), thank you!", "$(amount) $(currency)، شكراً!", "event"], ["$(total)", "event", "Everything this person gave so far.", "كل اللي قدّمه هالشخص لين الحين.", "Bits reply", "رد البيتس", "$(user) has cheered $(total) Bits in total!", "$(user) أرسل $(total) بيتس بالمجموع!", "event,new"], ["$(eval …)", "adv", "Does a little math, like a random number.", "يسوي عملية حسابية، مثل رقم عشوائي.", "!roll", "!roll", "$(user) rolled $(eval Math.floor(Math.random() * 101))", "$(user) طلع له $(eval Math.floor(Math.random() * 101))", ""], ["$(urlfetch link)", "adv", "Puts the text of a public web page in the reply.", "يحط نص صفحة ويب عامة في الرد.", "!quote", "!quote", "$(urlfetch https://example.com/quote)", "$(urlfetch https://example.com/quote)", ""]];      // [variable, group, English, Arabic, example command EN, AR, reply EN, AR, tags]
-const VAR_SAMPLE = {"en": {"user": "FQPN", "touser": "sam_99", "query": "hello chat", "querystring": "twitch%20bot", "count": "42", "count *": "8", "getcount *": "8", "accountage": "2 years, 3 months, 5 days", "random.chatter": "night_owl", "channel": "fqpn_", "game": "Valorant", "title": "Ranked grind!", "uptime": "2h 14m", "viewers": "128", "clip": "https://clips.twitch.tv/…", "followers": "1234", "follow": "followed fqpn_ on March 3, 2024 (1 year, 2 months ago)", "followdate": "March 3, 2024", "followage": "1 year, 2 months, 3 days", "firststreak": "3", "firststreakpeak": "7", "weather *": "{0}: 31°C, clear sky", "time *": "{0}: 3:42 PM", "streak": "12", "tier": "Tier 1", "months": "7", "message": "Keep going!", "gifts": "5", "raider": "StreamerXYZ", "level": "3", "bits": "100", "amount": "12.50", "currency": "USD", "total": "1466", "eval *": "57", "urlfetch *": "(text from the page)"}, "ar": {"user": "فقبن", "touser": "sam_99", "query": "هلا بالشات", "querystring": "twitch%20bot", "count": "42", "count *": "8", "getcount *": "8", "accountage": "سنتين و3 أشهر و5 أيام", "random.chatter": "night_owl", "channel": "fqpn_", "game": "Valorant", "title": "رانكد!", "uptime": "ساعتين و14 دقيقة", "viewers": "128", "clip": "https://clips.twitch.tv/…", "followers": "1234", "follow": "يتابع fqpn_ من 3 مارس 2024 (سنة وشهرين)", "followdate": "3 مارس 2024", "followage": "سنة وشهرين و3 أيام", "firststreak": "3", "firststreakpeak": "7", "weather *": "{0}: 31°م، صافي", "time *": "{0}: 3:42 م", "streak": "12", "tier": "Tier 1", "months": "7", "message": "كمّل!", "gifts": "5", "raider": "StreamerXYZ", "level": "3", "bits": "100", "amount": "12.50", "currency": "SAR", "total": "1466", "eval *": "57", "urlfetch *": "(نص من الصفحة)"}};
+const VAR_GROUPS = ["viewer", "stream", "followers", "first", "stats", "world", "event", "adv"];
+const VARS = [["$(user)", "viewer", "The name of the viewer who used the command.", "اسم المشاهد اللي استخدم الأمر.", "!hi", "!hi", "Hi $(user)! Welcome to the stream", "هلا $(user)! حيّاك في البث", ""], ["$(touser)", "viewer", "The name written after the command, or the viewer if there isn't one.", "الاسم المكتوب بعد الأمر، أو المشاهد نفسه لو ما فيه.", "!hug @sam_99", "!hug @sam_99", "$(user) hugs $(touser)", "$(user) يحضن $(touser)", ""], ["$(query)", "viewer", "Everything the viewer typed after the command.", "كل اللي كتبه المشاهد بعد الأمر.", "!say hello chat", "!say hello chat", "$(user) says: $(query)", "$(user) يقول: $(query)", ""], ["$(querystring)", "viewer", "The same text, made safe to put inside a link.", "نفس النص، بس آمن تحطه داخل رابط.", "!google twitch bot", "!google twitch bot", "https://google.com/search?q=$(querystring)", "https://google.com/search?q=$(querystring)", ""], ["$(count)", "viewer", "How many times this command has been used.", "كم مرة انستخدم هالأمر.", "!hydrate", "!hydrate", "Drink water! Reminder number $(count)", "اشرب موية! التذكير رقم $(count)", ""], ["$(count name)", "viewer", "Adds 1 to a named counter and shows it.", "يزيد عدّاد له اسم 1 ويعرضه.", "!death", "!death", "FQPN died again: $(count deaths) deaths", "فقبن مات مرة ثانية: $(count deaths) موتة", "new"], ["$(getcount name)", "viewer", "Shows a named counter without adding to it.", "يعرض عدّاد له اسم بدون ما يزيده.", "!deaths", "!deaths", "Deaths so far: $(getcount deaths)", "عدد الموتات لين الحين: $(getcount deaths)", "new"], ["$(accountage)", "viewer", "How old the viewer's Twitch account is.", "عمر حساب المشاهد في تويتش.", "!age", "!age", "$(user)'s account is $(accountage) old", "عمر حساب $(user): $(accountage)", "new"], ["$(random.chatter)", "viewer", "A random viewer who chatted in the last 30 minutes.", "مشاهد عشوائي كتب في الشات آخر 30 دقيقة.", "!pick", "!pick", "The winner is $(random.chatter)!", "الفائز هو $(random.chatter)!", "new"], ["$(channel)", "stream", "Your channel name.", "اسم قناتك.", "!channel", "!channel", "You're watching $(channel)", "أنت تتابع $(channel)", ""], ["$(game)", "stream", "The game or category you're streaming now.", "اللعبة أو التصنيف اللي تبثه الحين.", "!game", "!game", "Now playing: $(game)", "نلعب الحين: $(game)", ""], ["$(title)", "stream", "Your current stream title.", "عنوان بثك الحالي.", "!title", "!title", "Title: $(title)", "العنوان: $(title)", ""], ["$(uptime)", "stream", "How long you've been live.", "كم صار لك وأنت تبث.", "!uptime", "!uptime", "Live for $(uptime)", "صار لنا $(uptime) على البث", ""], ["$(viewers)", "stream", "How many people are watching right now.", "كم واحد يشاهد الحين.", "!viewers", "!viewers", "$(viewers) people are watching", "فيه $(viewers) يشاهدون الحين", ""], ["$(clip)", "stream", "Makes a clip of the last moments and gives its link.", "يسوي كليب لآخر لحظات ويعطي رابطه.", "!clip", "!clip", "Clip saved: $(clip)", "انحفظ الكليب: $(clip)", "new"], ["$(followers)", "followers", "How many followers your channel has.", "كم متابع عند قناتك.", "!followers", "!followers", "We're $(followers) followers strong!", "صرنا $(followers) متابع!", "new"], ["$(follow)", "followers", "A sentence saying if the viewer follows you.", "جملة تقول إذا المشاهد يتابعك أو لا.", "!follow", "!follow", "$(user) $(follow)", "$(user) $(follow)", ""], ["$(followdate)", "followers", "The date the viewer started following you.", "تاريخ بداية متابعة المشاهد لك.", "!followdate", "!followdate", "$(user) followed on $(followdate)", "$(user) تابع بتاريخ $(followdate)", ""], ["$(followage)", "followers", "How long the viewer has followed you.", "كم صار للمشاهد وهو يتابعك.", "!followage", "!followage", "$(user) has followed for $(followage)", "$(user) يتابعك من $(followage)", ""], ["$(firststreak)", "first", "How many streams in a row the viewer was first in chat.", "كم بث ورا بعض كان المشاهد أول واحد في الشات.", "!first", "!first", "$(user) was first $(firststreak) streams in a row", "$(user) كان الأول $(firststreak) بثوث ورا بعض", "new"], ["$(firststreakpeak)", "first", "The viewer's best \"first in chat\" streak ever.", "أفضل سلسلة «أول واحد» للمشاهد.", "!best", "!best", "$(user)'s best first streak: $(firststreakpeak)", "أفضل سلسلة لـ $(user): $(firststreakpeak)", "new"], ["$(watchtime)", "stats", "How long the viewer has watched your streams in total. Counted by FQPN's Chat Bot while you're live. Best: import your WizeBot numbers once in the app (Commands › Share › Twitch panel) so the count continues instead of starting from zero.", "كم تابع المشاهد بثوثك من وقت. يحسبه FQPN's Chat Bot وأنت لايف. الأفضل: انقل أرقامك من WizeBot مرة وحدة في البرنامج (الأوامر › مشاركة › بانل تويتش) عشان يكمل العد بدل ما يبدأ من الصفر.", "!watchtime", "!وقتي", "$(user) has watched for $(watchtime)", "$(user) تابعنا $(watchtime)", "new"], ["$(messages)", "stats", "How many messages the viewer has written in your chat in total. Best: import your WizeBot numbers once in the app (Commands › Share › Twitch panel) so the count continues.", "كم رسالة كتب المشاهد في شاتك من أول. الأفضل: انقل أرقامك من WizeBot مرة وحدة في البرنامج (الأوامر › مشاركة › بانل تويتش) عشان يكمل العد.", "!messages", "!رسايلي", "$(user) has written $(messages) messages", "$(user) كتب $(messages) رسالة", "new"], ["$(weather city)", "world", "The weather in a city right now.", "الطقس في مدينة الحين.", "!weather", "!weather", "$(weather Riyadh)", "$(weather Riyadh)", "new"], ["$(time city)", "world", "The time in a city right now.", "الوقت الحين في مدينة.", "!time", "!time", "$(time Riyadh)", "$(time Riyadh)", "new"], ["$(streak)", "event", "How many streams in a row they watched (Twitch watch streak or Falkorie's !streak).", "كم بث ورا بعض شاهدوه (سلسلة المشاهدة في تويتش أو !streak في Falkorie).", "Watch streak reply", "رد سلسلة المشاهدة", "$(user) watched $(streak) streams in a row!", "$(user) شاهد $(streak) بثوث ورا بعض!", "event"], ["$(tier)", "event", "The subscription type: Tier 1, 2, 3 or Prime.", "نوع الاشتراك: Tier 1 أو 2 أو 3 أو Prime.", "Subscription reply", "رد الاشتراك", "Thanks $(user) for the $(tier) sub!", "شكراً $(user) على اشتراك $(tier)!", "event"], ["$(months)", "event", "How many months they've subscribed in total.", "كم شهر اشتركوا بالمجموع.", "Subscription reply", "رد الاشتراك", "$(user) subscribed for $(months) months!", "$(user) مشترك من $(months) أشهر!", "event"], ["$(message)", "event", "The message they wrote with their sub, Bits or donation.", "الرسالة اللي كتبوها مع الاشتراك أو البيتس أو التبرع.", "Subscription reply", "رد الاشتراك", "$(user) says: $(message)", "$(user) يقول: $(message)", "event"], ["$(gifts)", "event", "How many subs were gifted at once.", "كم اشتراك انهدى مرة وحدة.", "Gift subs reply", "رد إهداء الاشتراكات", "$(user) gifted $(gifts) subs!", "$(user) أهدى $(gifts) اشتراكات!", "event"], ["$(raider)", "event", "The streamer who raided you.", "الستريمر اللي سوّى لك رِيد.", "Raid reply", "رد الغارة", "Welcome $(raider) and $(viewers) raiders!", "حيّاك $(raider) ومعه $(viewers) مشاهد!", "event"], ["$(level)", "event", "The Hype Train level, or the new level Falkorie announced.", "مستوى قطار الحماس، أو المستوى الجديد اللي أعلنه Falkorie.", "Hype train reply", "رد قطار الحماس", "Hype Train level $(level)!", "قطار الحماس مستوى $(level)!", "event"], ["$(bits)", "event", "How many Bits were cheered.", "كم بيتس انرسلت.", "Bits reply", "رد البيتس", "Thanks $(user) for $(bits) Bits!", "شكراً $(user) على $(bits) بيتس!", "event"], ["$(amount)", "event", "The donation amount.", "مبلغ التبرع.", "Donation reply", "رد التبرع", "$(user) donated $(amount) $(currency)!", "$(user) تبرّع بـ $(amount) $(currency)!", "event"], ["$(currency)", "event", "The donation currency, like USD or SAR.", "عملة التبرع، مثل USD أو SAR.", "Donation reply", "رد التبرع", "$(amount) $(currency), thank you!", "$(amount) $(currency)، شكراً!", "event"], ["$(total)", "event", "Everything this person gave so far.", "كل اللي قدّمه هالشخص لين الحين.", "Bits reply", "رد البيتس", "$(user) has cheered $(total) Bits in total!", "$(user) أرسل $(total) بيتس بالمجموع!", "event,new"], ["$(eval …)", "adv", "Does a little math, like a random number.", "يسوي عملية حسابية، مثل رقم عشوائي.", "!roll", "!roll", "$(user) rolled $(eval Math.floor(Math.random() * 101))", "$(user) طلع له $(eval Math.floor(Math.random() * 101))", ""], ["$(urlfetch link)", "adv", "Puts the text of a public web page in the reply.", "يحط نص صفحة ويب عامة في الرد.", "!quote", "!quote", "$(urlfetch https://example.com/quote)", "$(urlfetch https://example.com/quote)", ""]];      // [variable, group, English, Arabic, example command EN, AR, reply EN, AR, tags]
+const VAR_SAMPLE = {"en": {"user": "FQPN", "touser": "sam_99", "query": "hello chat", "querystring": "twitch%20bot", "count": "42", "count *": "8", "getcount *": "8", "accountage": "2 years, 3 months, 5 days", "random.chatter": "night_owl", "channel": "fqpn_", "game": "Valorant", "title": "Ranked grind!", "uptime": "2h 14m", "viewers": "128", "clip": "https://clips.twitch.tv/…", "followers": "1234", "follow": "followed fqpn_ on March 3, 2024 (1 year, 2 months ago)", "followdate": "March 3, 2024", "followage": "1 year, 2 months, 3 days", "firststreak": "3", "firststreakpeak": "7", "watchtime": "34 hours, 12 minutes", "messages": "1,250", "weather *": "{0}: 31°C, clear sky", "time *": "{0}: 3:42 PM", "streak": "12", "tier": "Tier 1", "months": "7", "message": "Keep going!", "gifts": "5", "raider": "StreamerXYZ", "level": "3", "bits": "100", "amount": "12.50", "currency": "USD", "total": "1466", "eval *": "57", "urlfetch *": "(text from the page)"}, "ar": {"user": "فقبن", "touser": "sam_99", "query": "هلا بالشات", "querystring": "twitch%20bot", "count": "42", "count *": "8", "getcount *": "8", "accountage": "سنتين و3 أشهر و5 أيام", "random.chatter": "night_owl", "channel": "fqpn_", "game": "Valorant", "title": "رانكد!", "uptime": "ساعتين و14 دقيقة", "viewers": "128", "clip": "https://clips.twitch.tv/…", "followers": "1234", "follow": "يتابع fqpn_ من 3 مارس 2024 (سنة وشهرين)", "followdate": "3 مارس 2024", "followage": "سنة وشهرين و3 أيام", "firststreak": "3", "firststreakpeak": "7", "watchtime": "34 ساعة و12 دقيقة", "messages": "1,250", "weather *": "{0}: 31°م، صافي", "time *": "{0}: 3:42 م", "streak": "12", "tier": "Tier 1", "months": "7", "message": "كمّل!", "gifts": "5", "raider": "StreamerXYZ", "level": "3", "bits": "100", "amount": "12.50", "currency": "SAR", "total": "1466", "eval *": "57", "urlfetch *": "(نص من الصفحة)"}};
 // $(…) → its sample value, innermost first (like the app); unknown ones stay as typed. Used by the page and its script.
 function fillVars(s, S) {
   function one(body) {
@@ -1210,13 +1455,17 @@ function missingBody(login) {
 function listBody(view) {
   const avatar = view.avatar ? `<img class="av" src="${esc(view.avatar)}" alt="" width="56" height="56">` : `<div class="av mark" aria-hidden="true"></div>`;
   const tw = "https://www.twitch.tv/" + esc(view.login);       // 1.12.0: the name and the picture open the channel on Twitch
-  return `<header class="top"><div class="who">${avatar}<div><h1><a class="chname" href="${tw}" target="_blank" rel="noopener"><bdi>${esc(view.display)}</bdi></a></h1><p class="meta" id="count"></p></div></div>${langBtn()}</header>
-${view.leaderboard ? `<nav class="tabs" id="tabs"><button type="button" class="tab on" data-tab="cmds" data-t="commands">${esc(TEXT.en.commands)}</button><button type="button" class="tab" data-tab="lb" data-t="lb_tab">${esc(TEXT.en.lb_tab)}</button></nav>` : ""}
+  const bn = view.banner;                    // 1.18.0: the channel's banner, blending into the page; the language button then moves to the tabs line
+  const lb = bn ? "" : langBtn();
+  const banner = bn ? `<img class="pbanner p${bn.pos}" src="/${esc(view.login)}/banner?v=${esc(bn.v)}" alt="" aria-hidden="true">` : "";
+  return `${banner}<header class="top${bn ? " withbanner" : ""}"><div class="who">${avatar}<div><h1><a class="chname" href="${tw}" target="_blank" rel="noopener"><bdi>${esc(view.display)}</bdi></a></h1><p class="meta" id="count"></p></div></div>${lb}</header>
+${view.leaderboard || view.firsts ? `<nav class="tabs" id="tabs"><button type="button" class="tab on" data-tab="cmds" data-t="commands">${esc(TEXT.en.commands)}</button>${view.leaderboard ? `<button type="button" class="tab" data-tab="lb" data-t="lb_tab">${esc(TEXT.en.lb_tab)}</button>` : ""}${view.firsts ? `<button type="button" class="tab" data-tab="first" data-t="f_tab">${esc(TEXT.en.f_tab)}</button>` : ""}${bn ? langBtn() : ""}</nav>` : (bn ? `<div class="tabs nolb">${langBtn()}</div>` : "")}
 <div id="pane-cmds"><div class="searchbox"><input id="q" type="search" autocomplete="off" spellcheck="false" dir="auto" data-ph="search" aria-label="${esc(TEXT.en.search)}" placeholder="${esc(TEXT.en.search)}"></div>
 <p class="hint" data-t="copy">${esc(TEXT.en.copy)}</p>
 <div id="groups"></div>
 <p class="empty" id="none" hidden></p></div>
 ${view.leaderboard ? `<div id="pane-lb" hidden><div class="subtabs pertabs"><button type="button" class="per-tab on" data-per="" data-t="lb_p_all">${esc(TEXT.en.lb_p_all)}</button><button type="button" class="per-tab" data-per="week" data-t="lb_p_week">${esc(TEXT.en.lb_p_week)}</button><button type="button" class="per-tab" data-per="month" data-t="lb_p_month">${esc(TEXT.en.lb_p_month)}</button></div><div class="subtabs"><button type="button" class="sub-tab on" data-sub="all" data-t="lb_all">${esc(TEXT.en.lb_all)}</button><button type="button" class="sub-tab" data-sub="l">حروف</button><button type="button" class="sub-tab" data-sub="u">رتب</button><button type="button" class="sub-tab" data-sub="e">ايموجي</button><button type="button" class="sub-tab" data-sub="r">عكس</button><button type="button" class="sub-tab" data-sub="m">احسب</button><button type="button" class="sub-tab" data-sub="s">سلم</button><button type="button" class="sub-tab" data-sub="q">سؤال</button><button type="button" class="sub-tab" data-sub="g">لغز</button><button type="button" class="sub-tab" data-sub="t">ترجم</button><button type="button" class="sub-tab" data-sub="o">ضد</button><button type="button" class="sub-tab" data-sub="d">الدخيل</button></div><div class="lb" id="lbrows"></div></div>` : ""}
+${view.firsts ? `<div id="pane-first" hidden><div class="fnow" id="fnow" hidden><span class="fl" aria-hidden="true">🔥</span><div><small data-t="f_now">${esc(TEXT.en.f_now)}</small><b><bdi id="fnown"></bdi></b><p data-t="f_hint">${esc(TEXT.en.f_hint)}</p></div><div class="v"><b id="fnowv"></b></div></div><div class="subtabs"><button type="button" class="f-tab on" data-f="peak" data-t="f_peak">${esc(TEXT.en.f_peak)}</button><button type="button" class="f-tab" data-f="count" data-t="f_count">${esc(TEXT.en.f_count)}</button></div><div class="lb" id="frows"></div></div>` : ""}
 <footer class="foot"><span id="updated"></span><span data-t="made">${esc(TEXT.en.made)}</span></footer>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>`;
 }
@@ -1342,6 +1591,11 @@ a.chname{color:inherit;text-decoration:none;border-bottom:2px solid transparent;
 a.chname:hover,a.chname:focus-visible{border-bottom-color:var(--red2);outline:none}
 .logo{width:48px;height:48px;border-radius:14px;background:#141416;padding:6px;flex:none;box-shadow:0 0 24px -8px var(--red2)}
 .brand{font-size:19px;font-weight:600}
+.top.big{margin-bottom:34px}.top.big .who{gap:18px}
+.top.big .logo{width:76px;height:76px;border-radius:0;padding:0;background:none;box-shadow:none;filter:drop-shadow(0 0 14px rgba(226,67,75,.45))}
+.bname{display:flex;flex-direction:column;line-height:1}.top.big .brand{font-size:36px;font-weight:700;letter-spacing:-.01em}
+.bsub{margin-top:7px;font-size:14px;font-weight:600;letter-spacing:.42em;color:var(--soft)}
+@media (max-width:520px){.top.big .logo{width:54px;height:54px}.top.big .brand{font-size:27px}.bsub{font-size:11px;margin-top:5px}}
 .hero{padding:26px 0 8px}
 .hero h1{font-size:40px;line-height:1.15;max-width:720px}
 .hero .lead{margin:14px 0 22px}
@@ -1354,14 +1608,51 @@ a.chname:hover,a.chname:focus-visible{border-bottom-color:var(--red2);outline:no
 .dl:hover,.dl:focus-visible{filter:brightness(1.15);outline:none}
 .dl:focus-visible{box-shadow:0 0 0 3px color-mix(in srgb,var(--red2) 45%,transparent)}
 .dl svg,.feat svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.smsec h2{margin-bottom:16px}
+.smwin{max-width:760px;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:var(--panel);box-shadow:0 30px 70px -35px rgba(163,18,26,.55)}
+.smbar{display:flex;gap:6px;padding:11px 14px;border-bottom:1px solid var(--line)}.smbar b{width:10px;height:10px;border-radius:50%;background:#2c2c30}.smbar b:first-child{background:var(--red2)}
+.smbody{display:grid;grid-template-columns:64px 1fr}
+.smnav{display:flex;flex-direction:column;align-items:center;gap:12px;padding:18px 0;border-inline-end:1px solid var(--line)}
+.smnav button{width:22px;height:22px;border-radius:6px;border:0;padding:0;background:#2a2a2e;cursor:pointer;transition:background .4s,transform .4s,box-shadow .4s}
+.smnav button:hover{background:#3a3a40}.smnav button.on{background:var(--red2);transform:scale(1.12);box-shadow:0 0 0 4px rgba(163,18,26,.22)}
+.smmain{display:grid;padding:18px 20px}
+.smpane{grid-area:1/1;opacity:0;transform:translateY(8px);transition:opacity .55s ease,transform .55s ease;pointer-events:none}.smpane.on{opacity:1;transform:none;pointer-events:auto}
+.smhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;min-height:34px}.smhead strong{font-size:20px}
+.smhead em{font-style:normal;background:var(--red2);color:#fff;border-radius:9px;padding:6px 12px;font-size:14px;font-weight:600}
+.smrow{display:flex;align-items:center;gap:14px;padding:12px 0;border-top:1px solid var(--line);font-size:15px}
+.smrow code{background:#1b1b1e;border:1px solid var(--line);border-radius:7px;padding:3px 9px;font-size:13px;direction:ltr;unicode-bidi:isolate}.smtx{flex:1;color:var(--soft);min-width:0}
+.smsw{flex:none;width:34px;height:20px;border-radius:99px;background:#333;position:relative}.smsw:after{content:"";position:absolute;top:3px;inset-inline-start:3px;width:14px;height:14px;border-radius:50%;background:#999}
+.smsw.on{background:var(--red2)}.smsw.on:after{inset-inline-start:17px;background:#fff}
+.smev{flex:none;width:64px;font-size:13px;color:var(--mute);font-weight:600}.smrk{flex:none;width:22px;text-align:center;font-size:18px;color:var(--mute)}.smwn{color:var(--soft);font-weight:600;font-size:14px}
+.smtiles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.smtile{border:1px solid var(--line);border-radius:12px;padding:12px 14px}.smtile small{display:block;color:var(--mute);font-size:13px}
+.smtile b{display:flex;align-items:center;gap:7px;font-size:20px;margin-top:4px}.smdot{width:9px;height:9px;border-radius:50%;background:#4ade80;box-shadow:0 0 8px #4ade80}
+.smlbl{margin:14px 0 8px;color:var(--mute);font-size:12px;letter-spacing:.08em;text-transform:uppercase}
+.smctrs{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.smctr{border:1px solid var(--line);border-radius:12px;padding:10px 12px;display:grid;grid-template-columns:auto 1fr;grid-template-areas:"i n" "v v" "c c";align-items:center;gap:4px 8px}
+.smci{grid-area:i;font-size:16px}.smctr small{grid-area:n;color:var(--mute);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.smctr b{grid-area:v;font-size:24px;line-height:1.2;font-variant-numeric:tabular-nums;transition:color .3s}.smctr b.bump{color:var(--red2)}
+.smcb{grid-area:c;display:flex;gap:6px}.smcb i{flex:1;text-align:center;font-style:normal;border:1px solid var(--line);border-radius:7px;line-height:22px;color:var(--soft);font-size:15px}.smcb i:last-child{background:var(--red2);border-color:var(--red2);color:#fff}
+.smov{position:relative;height:100%;min-height:200px;border-radius:12px;background:repeating-conic-gradient(#1a1a1d 0% 25%,#141416 0% 50%) 0 0/18px 18px;overflow:hidden}
+.smpill{position:absolute;top:12px;inset-inline-start:12px;background:rgba(0,0,0,.6);border:1px solid var(--line);border-radius:99px;padding:4px 12px;font-size:12px;color:var(--soft)}.smpill b{color:#fff;margin-inline-start:6px}
+.smchat{position:absolute;bottom:10px;inset-inline:14px;font-size:14px;line-height:1.75;text-shadow:0 1px 3px #000}.smchat p{margin:0}.smchat p[dir=ltr]{text-align:left}.smchat p[dir=rtl]{text-align:right}
+.smpane:nth-child(4){display:flex;flex-direction:column}.smpane:nth-child(4) .smov{flex:1}
+@media (max-width:620px){.smbody{grid-template-columns:1fr}.smnav{flex-direction:row;justify-content:center;border-inline-end:0;border-bottom:1px solid var(--line);padding:12px}
+ .smmain{padding:14px 16px}.smtiles{grid-template-columns:1fr 1fr}.smtile:last-child{display:none}.smctrs{grid-template-columns:1fr 1fr}.smrow{gap:10px;font-size:14px}.smev{width:52px}}
+@media (prefers-reduced-motion:reduce){.smpane,.smnav button{transition:none}}
+.dlchecks{list-style:none;margin:14px 0 0;padding:0;display:grid;grid-template-columns:repeat(2,minmax(0,max-content));gap:12px 40px}
+.dlchecks li{display:flex;align-items:center;gap:10px;color:var(--soft);font-size:15px;white-space:nowrap}
+.dlchecks svg{flex:none;width:20px;height:20px;padding:3px;box-sizing:border-box;border-radius:6px;background:rgba(74,222,128,.12);fill:none;stroke:#4ade80;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
 .dlmeta{margin:6px 0 0;color:var(--soft);font-size:15px}
 .req{margin:0;color:var(--mute);font-size:14px}
 .req a,.foot a{color:var(--soft)}
 .req a:hover,.foot a:hover{color:var(--text)}
 section{margin-top:40px}
 h2{font-size:22px;font-weight:600;margin:0 0 16px}
-.feats{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
-.feat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px}
+.feats{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px}.feats.n2{grid-template-columns:repeat(2,1fr)}.feats.n3{grid-template-columns:repeat(3,1fr)}.feats.n4{grid-template-columns:repeat(4,1fr)}
+@media (max-width:960px){.feats.n4{grid-template-columns:repeat(2,1fr)}}@media (max-width:720px){.feats.n3{grid-template-columns:1fr}}@media (max-width:540px){.feats.n2,.feats.n4{grid-template-columns:1fr}}
+.fsum{color:var(--soft);margin:-6px 0 22px;font-size:15px}.fg{margin:0 0 26px}.fgh{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:0 0 10px}.fgh h3{margin:0;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--red2);font-weight:700}html[lang=ar] .fgh h3{letter-spacing:0;font-size:15px}.fgh span{color:var(--soft);font-size:14px}
+.feat .nb{position:absolute;top:14px;inset-inline-end:14px;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:color-mix(in srgb,var(--red2) 18%,transparent);color:var(--red2);border:1px solid color-mix(in srgb,var(--red2) 40%,transparent)}.feat .fl{display:inline-block;margin-top:10px;font-size:14px;color:var(--red2);text-decoration:none}.feat .fl:hover{text-decoration:underline}.feat.isnew{border-color:color-mix(in srgb,var(--red2) 35%,var(--line))}
+.feat{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px}
 .feat svg{color:var(--red2)}
 .feat h3{margin:10px 0 6px;font-size:17px;font-weight:600}
 .beta{font-size:11px;font-weight:700;color:#d29922;border:1px solid rgba(210,153,34,.55);border-radius:5px;padding:0 6px;margin-inline-start:4px;vertical-align:2px}
@@ -1399,11 +1690,26 @@ table.cmp{width:100%;border-collapse:collapse;font-size:15px;min-width:680px}
 .cmp td.us{color:var(--text);background:color-mix(in srgb,var(--red2) 7%,transparent)}
 .cmp tr.con td.us{color:var(--soft)}
 .cmpnote{color:var(--mute);font-size:14px;margin:10px 2px 0}
-@media (max-width:520px){.hero h1{font-size:30px}.dl{width:100%;justify-content:center}.dlbox{align-items:stretch}.dlrow{flex-direction:column;align-items:stretch}.dlusers{justify-content:center}}
+@media (max-width:520px){.hero h1{font-size:30px}.dl{width:100%;justify-content:center}.dlbox{align-items:stretch}.dlrow{flex-direction:column;align-items:stretch}.dlusers{justify-content:center}.dlchecks{gap:12px 18px}.dlchecks li{white-space:normal;font-size:14px}}
 @media (max-width:520px){h1{font-size:23px}.wrap{padding-left:14px;padding-right:14px}}
 [hidden]{display:none!important}
 .tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:18px;overflow-x:auto;overflow-y:hidden;padding-bottom:1px}
 .tab{background:none;border:0;border-bottom:2px solid transparent;color:var(--mute);padding:10px 16px;font:600 16px 'Outfit','Tajawal',sans-serif;cursor:pointer;margin-bottom:-1px;white-space:nowrap}
+/* 1.18.0: the channel's banner on its public page, blending into the page (no frame) */
+.pbanner{position:absolute;left:0;top:0;width:100%;height:clamp(220px,32vw,420px);object-fit:cover;object-position:center 50%;z-index:0;pointer-events:none;opacity:.92;
+ -webkit-mask-image:linear-gradient(180deg,#000 35%,transparent 100%),linear-gradient(90deg,transparent 0,#000 18%,#000 82%,transparent 100%);-webkit-mask-composite:source-in;
+ mask-image:linear-gradient(180deg,#000 35%,transparent 100%),linear-gradient(90deg,transparent 0,#000 18%,#000 82%,transparent 100%);mask-composite:intersect}
+.pbanner.p0{object-position:center 0}.pbanner.p100{object-position:center 100%}
+body:has(.pbanner){position:relative;--bnh:clamp(220px,32vw,420px);background:radial-gradient(1100px 560px at 82% -90px,var(--glow1),transparent 64%),radial-gradient(900px 480px at 8% -110px,var(--glow2),transparent 62%),var(--bg)}
+body:has(.pbanner)::before{content:"";position:absolute;inset:0;z-index:0;pointer-events:none;background:var(--pat) 0 0/260px 260px repeat;
+ -webkit-mask-image:linear-gradient(180deg,transparent 0,transparent calc(var(--bnh) * .8),#000 calc(var(--bnh) + 40px));mask-image:linear-gradient(180deg,transparent 0,transparent calc(var(--bnh) * .8),#000 calc(var(--bnh) + 40px))}   /* 1.18.0: with a banner, the pattern starts under it */.wrap:has(.pbanner)>*:not(.pbanner){position:relative;z-index:1}
+.top.withbanner{margin-top:clamp(120px,20vw,260px)}
+.top.withbanner .av{width:96px;height:96px;border:4px solid var(--bg);box-shadow:0 8px 30px rgba(0,0,0,.6)}
+.top.withbanner h1{text-shadow:0 2px 12px rgba(0,0,0,.8)}
+.tabs .lang{margin-inline-start:auto;align-self:center;padding:6px 12px;font-size:14px;flex:none}.tabs.nolb{justify-content:flex-end;border-bottom:0;margin-bottom:8px}
+@media (max-width:520px){body:has(.pbanner){--bnh:240px}.pbanner{height:240px;-webkit-mask-image:linear-gradient(180deg,#000 40%,transparent 100%);mask-image:linear-gradient(180deg,#000 40%,transparent 100%)}
+ .top.withbanner{margin-top:120px}.top.withbanner .av{width:72px;height:72px}}
+@media (prefers-color-scheme:light){.top.withbanner h1{text-shadow:none}}
 .tab:hover,.tab:focus-visible{color:var(--text);outline:none}
 .tab.on{color:var(--text);border-bottom-color:var(--red2)}
 .subtabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
@@ -1411,9 +1717,19 @@ table.cmp{width:100%;border-collapse:collapse;font-size:15px;min-width:680px}
 .sub-tab:hover,.sub-tab:focus-visible{border-color:var(--red2);outline:none}
 .sub-tab.on{border-color:var(--red2);color:var(--text);background:color-mix(in srgb,var(--red2) 15%,transparent)}
 .per-tab{border:1px solid var(--line);background:transparent;color:var(--soft);padding:8px 18px;border-radius:999px;font:600 15px 'Outfit','Tajawal',sans-serif;cursor:pointer}.per-tab:hover,.per-tab:focus-visible{border-color:var(--red2);outline:none}.per-tab.on{background:var(--red2);border-color:var(--red2);color:#fff}
+.f-tab{border:1px solid var(--line);background:transparent;color:var(--soft);padding:8px 18px;border-radius:999px;font:600 15px 'Outfit','Tajawal',sans-serif;cursor:pointer}.f-tab:hover,.f-tab:focus-visible{border-color:var(--red2);outline:none}.f-tab.on{background:var(--red2);border-color:var(--red2);color:#fff}
 .lb{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
 .lbrow{display:flex;align-items:center;gap:14px;padding:12px 18px;border-bottom:1px solid var(--line);border-inline-start:3px solid transparent}
 .lbrow:last-child{border-bottom:0}
+.fnow{display:flex;align-items:center;gap:16px;padding:18px 20px;margin-bottom:14px;border:1px solid color-mix(in srgb,var(--red2) 55%,var(--line));border-radius:12px;background:linear-gradient(135deg,color-mix(in srgb,var(--red2) 22%,transparent),transparent 70%),var(--panel)}
+.fnow .fl{font-size:34px;filter:drop-shadow(0 0 10px #ff5a3c)}
+.fnow small{display:block;color:var(--mute);font-size:12px;text-transform:uppercase;letter-spacing:.05em}
+.fnow b{font-size:22px;color:var(--text)}
+.fnow .v{margin-inline-start:auto;text-align:end}
+.fnow .v b{font-size:20px;color:#ffb36b}
+.fnow p{margin:2px 0 0;color:var(--soft);font-size:13px}
+.lbrow .nm small{display:block;color:var(--mute);font-size:12px}
+@media(max-width:600px){.fnow{flex-wrap:wrap}.fnow .v{margin-inline-start:0;width:100%;text-align:start;padding-inline-start:50px}}
 .rk{width:28px;flex:none;text-align:center;font-weight:600;color:var(--mute)}
 .nm{flex:1;min-width:0;overflow-wrap:anywhere;font-weight:500;color:var(--soft)}
 .nm small{display:block;color:var(--mute);font-size:13px;font-weight:400}
@@ -1443,7 +1759,7 @@ var cur="cmds",shownPlayers=0,sub="all",per=(function(){try{var p=new URLSearchP
 function ownCount(){return D.commands.filter(function(c){return !c.builtin&&!c.game}).length}
 function setCount(){
   if(!$("count")||!D)return;
-  var lb=cur==="lb",k=lb?shownPlayers:ownCount(),p=lb?"players":"count",m=k%100;
+  var lb=cur==="lb"||cur==="first",k=lb?shownPlayers:ownCount(),p=lb?"players":"count",m=k%100;
   $("count").textContent=k===1?t(p+"1"):k===2?t(p+"2"):(m>=3&&m<=10)?t(p+"_few",{n:k}):t(p,{n:k})}
 function drawLb(){
   var box=$("lbrows");if(!box||!D||!D.leaderboard)return;box.textContent="";
@@ -1459,10 +1775,25 @@ function drawLb(){
     var w=document.createElement("span");w.className="wn";w.textContent=r.w===1?t("win1"):t("wins",{n:r.w});
     row.appendChild(rk);row.appendChild(nm);row.appendChild(w);box.appendChild(row)})}
 function showTab(tab){
-  if(!$("tabs"))return;cur=tab;
+  if(!$("tabs"))return;if(!$("pane-"+tab))tab="cmds";cur=tab;
   document.querySelectorAll(".tab").forEach(function(x){x.classList.toggle("on",x.getAttribute("data-tab")===tab)});
-  $("pane-cmds").hidden=tab==="lb";$("pane-lb").hidden=tab!=="lb";setCount();
-  try{var base=location.pathname.replace(/\\/leaderboard\\/?$/,"");history.replaceState(null,"",tab==="lb"?base+"/leaderboard":base)}catch(e){}}
+  ["cmds","lb","first"].forEach(function(k){var p=$("pane-"+k);if(p)p.hidden=k!==tab});setCount();
+  try{var base=location.pathname.replace(/\\/(leaderboard|first)\\/?$/,"");history.replaceState(null,"",tab==="lb"?base+"/leaderboard":tab==="first"?base+"/first":base)}catch(e){}}
+/* 1.18.0: First in chat: who has the streak now, the longest streaks, and who was first the most */
+var fsub="peak";
+function fcount(k,pre){var m=k%100;return k===1?t(pre+"1"):k===2?t(pre+"2"):(m>=3&&m<=10)?t(pre+"_few",{n:k}):t(pre,{n:k})}
+function drawFirst(){var box=$("frows");if(!box||!D||!D.firsts)return;box.textContent="";var F=D.firsts;
+  var now=F.now;$("fnow").hidden=!now;if(now){$("fnown").textContent=now.n;$("fnowv").textContent=t("f_row",{s:fcount(now.v,"f_s")})}
+  var rows=(F[fsub]||[]).filter(function(r){return r&&r.v>0}).slice(0,10);
+  var other={};(F[fsub==="peak"?"count":"peak"]||[]).forEach(function(r){other[r.n]=r.v});
+  if(cur==="first"){shownPlayers=rows.length;setCount()}
+  if(!rows.length){var e=document.createElement("p");e.className="empty";e.textContent=t("f_empty");box.appendChild(e);return}
+  rows.forEach(function(r,i){var row=document.createElement("div");row.className="lbrow";
+    var rk=document.createElement("span");rk.className="rk";rk.textContent=String(i+1);
+    var nm=document.createElement("div");nm.className="nm";var b=document.createElement("bdi");b.textContent=r.n;nm.appendChild(b);
+    var o=other[r.n];if(o){var sm=document.createElement("small");sm.textContent=fsub==="peak"?fcount(o,"f_c"):"🔥 "+fcount(o,"f_s");nm.appendChild(sm)}
+    var w=document.createElement("span");w.className="wn";w.textContent=fsub==="peak"?"🔥 "+fcount(r.v,"f_s"):fcount(r.v,"f_c");
+    row.appendChild(rk);row.appendChild(nm);row.appendChild(w);box.appendChild(row)})}
 function chip(c,sub,small){   // 1.13.0: a command with a short example (or what it does) under its name
   var b=document.createElement("button"),i=document.createElement("bdi");b.type="button";b.className="chip"+(sub?" has-ex":"");i.textContent=c.name;
   var top=document.createElement("span");top.className="ct";top.appendChild(i);
@@ -1512,15 +1843,26 @@ function apply(){
   document.querySelectorAll("[data-t]").forEach(function(x){var p={};for(var k in x.dataset)p[k]=x.dataset[k];if(p.d)p.d=when(+p.d,true);x.textContent=t(x.getAttribute("data-t"),p)});
   var q=$("q");if(q){q.placeholder=t("search");q.setAttribute("aria-label",t("search"))}
   var vq=$("vq");if(vq){vq.placeholder=t("v_search");vq.setAttribute("aria-label",t("v_search"));vTry()}
-  var b=$("lang");b.textContent=t("lang");b.lang=lang==="ar"?"en":"ar";draw();drawLb()}
+  var b=$("lang");b.textContent=t("lang");b.lang=lang==="ar"?"en":"ar";draw();drawLb();drawFirst()}
 $("lang").addEventListener("click",function(){lang=lang==="ar"?"en":"ar";try{localStorage.setItem("lang",lang)}catch(e){}apply()});
+(function(){var w=document.getElementById("smwin");if(!w)return;   // 1.18.0: the app sample on the home page
+  var bs=w.querySelectorAll(".smnav button"),ps=w.querySelectorAll(".smpane"),cur=0,hover=false,timer=null,
+    still=window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches;
+  function go(i){cur=(i+ps.length)%ps.length;ps.forEach(function(p,k){p.classList.toggle("on",k===cur)});bs.forEach(function(b,k){b.classList.toggle("on",k===cur)})}
+  function start(){clearInterval(timer);if(!still)timer=setInterval(function(){if(!hover&&!document.hidden)go(cur+1)},3500)}
+  bs.forEach(function(b,k){b.addEventListener("click",function(){go(k);start()})});
+  w.addEventListener("mouseenter",function(){hover=true});w.addEventListener("mouseleave",function(){hover=false});
+  var cs=w.querySelectorAll(".smctr b");if(!still)setInterval(function(){if(cur!==0||document.hidden)return;var c=cs[Math.floor(Math.random()*cs.length)];c.textContent=+c.textContent+1;c.classList.add("bump");setTimeout(function(){c.classList.remove("bump")},450)},1100);
+  start()})();
+
 if($("q"))$("q").addEventListener("input",draw);
 document.querySelectorAll("img.av").forEach(function(im){function swap(){var m=document.createElement("div");m.className="av mark";im.replaceWith(m)}if(im.complete&&!im.naturalWidth)swap();else im.addEventListener("error",swap)});   // no picture: the red mark instead
 if($("tabs")){
   document.querySelectorAll(".tab").forEach(function(x){x.addEventListener("click",function(){showTab(x.getAttribute("data-tab"))})});
   document.querySelectorAll(".sub-tab").forEach(function(x){x.addEventListener("click",function(){sub=x.getAttribute("data-sub");document.querySelectorAll(".sub-tab").forEach(function(y){y.classList.toggle("on",y===x)});drawLb()})});
   document.querySelectorAll(".per-tab").forEach(function(x){x.classList.toggle("on",x.getAttribute("data-per")===per);x.addEventListener("click",function(){per=x.getAttribute("data-per");document.querySelectorAll(".per-tab").forEach(function(y){y.classList.toggle("on",y===x)});drawLb()})});
-  if(D&&D.tab==="lb")showTab("lb");
+  document.querySelectorAll(".f-tab").forEach(function(x){x.addEventListener("click",function(){fsub=x.getAttribute("data-f");document.querySelectorAll(".f-tab").forEach(function(y){y.classList.toggle("on",y===x)});drawFirst()})});
+  if(D&&(D.tab==="lb"||D.tab==="first"))showTab(D.tab);
 }
 apply();
 })();`;

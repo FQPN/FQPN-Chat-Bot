@@ -282,6 +282,24 @@ def _unit(n: int, word: str, lang: str) -> str:
     return f"{n} {word}{'' if n == 1 else 's'}"
 
 
+AR_RE = re.compile(r"[\u0600-\u06FF]")
+
+
+def _rtl(text: str, lang: str) -> str:
+    """1.18.0: an Arabic answer that starts with a number («258 ساعة و16 دقيقة») gets an invisible right-to-left mark in
+    front, or Twitch's chat (left to right) shows its words out of order."""
+    return "\u200f" + text if lang == "ar" and text[:1].isdigit() else text
+
+
+def watch_time(seconds: int, lang: str = "en") -> str:
+    """1.18.0 $(watchtime): '34 hours, 12 minutes' / «34 ساعة و12 دقيقة» («ساعتين»، «3 ساعات»)."""
+    h, m = int(seconds) // 3600, int(seconds) % 3600 // 60
+    if not h and not m:
+        return "أقل من دقيقة" if lang == "ar" else "less than a minute"
+    parts = [_unit(n, w, lang) for n, w in ((h, "hour"), (m, "minute")) if n]
+    return _rtl(" و".join(parts), lang) if lang == "ar" else ", ".join(parts)
+
+
 def follow_age(start: datetime, now: datetime | None = None, lang: str = "en") -> str:
     """The full time between start and now, every part that isn't zero (long form, 1.7.0):
     '7 months, 5 hours, 26 seconds' / '1 year, 2 months, 3 days, 4 hours, 10 minutes, 8 seconds' (Arabic too)."""
@@ -298,7 +316,7 @@ def follow_age(start: datetime, now: datetime | None = None, lang: str = "en") -
     d, secs = rest.days, rest.seconds
     h, mi, s = secs // 3600, secs % 3600 // 60, secs % 60
     parts = [_unit(n, w, lang) for n, w in ((months // 12, "year"), (months % 12, "month"), (d, "day"), (h, "hour"), (mi, "minute"), (s, "second")) if n]
-    return ("، " if lang == "ar" else ", ").join(parts) or ("الآن" if lang == "ar" else "just now")
+    return _rtl(("، " if lang == "ar" else ", ").join(parts), lang) or ("الآن" if lang == "ar" else "just now")
 
 
 @dataclass
@@ -329,6 +347,7 @@ class Context:
     followed_of: Callable | None = None                   # 1.14.0: $(followage name): (account exists, followed at | None)
     first_of: Callable[[str, bool], int] | None = None    # 1.14.0: $(firststreak name) / $(firststreakpeak name)
     world_fetch: Callable[[str], Awaitable[dict]] = world.get_json
+    viewer_stat: Callable[[str | None, str], int] | None = None   # 1.18.0: $(watchtime) / $(messages) (login None = the viewer)
 
     @property
     def args(self) -> list[str]:
@@ -477,6 +496,10 @@ async def expand(template: str, ctx: Context) -> str:
         if key in ("firststreak", "firststreakpeak") and arg.strip():    # 1.14.0: someone else's streak
             other = restore(arg.strip()).lstrip("@").strip().lower()
             return str(ctx.first_of(other, key == "firststreakpeak") if ctx.first_of and other else 0)
+        if key in ("watchtime", "messages"):       # 1.18.0: counted by the app (or continued from WizeBot's import)
+            other = restore(arg.strip()).lstrip("@").strip().lower() if arg.strip() else None
+            n = int(ctx.viewer_stat(other, "t" if key == "watchtime" else "m") or 0) if ctx.viewer_stat else 0
+            return watch_time(n, ctx.lang) if key == "watchtime" else f"{n:,}"
         if key == "firststreak":
             return str(ctx.first_streak() if ctx.first_streak else 0)
         if key == "firststreakpeak":
@@ -524,4 +547,7 @@ async def expand(template: str, ctx: Context) -> str:
             last = b
         out.append(s[last:])
         s = "".join(out)
-    return restore(s)
+    s = restore(s)
+    if s[:1].isdigit() and AR_RE.search(s):      # 1.18.0: «1,250 رسالة» keeps its order in Twitch's chat (see _rtl)
+        s = "\u200f" + s
+    return s
