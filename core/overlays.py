@@ -664,8 +664,11 @@ function drawChat(chat){var el=document.querySelector(".cbox");
 
 var cv=document.getElementById('arena'),ctx=cv.getContext('2d'),CFG={on:false,max:20,grow:'little',crown:true,size:100,names:true,blood:true},DEMO=ADEMO,DPR=1;
 var W=1280,H=720,G=680,U=1;
-function fit(){DPR=Math.min(2,window.devicePixelRatio||1);W=innerWidth||1280;H=innerHeight||720;U=Math.max(W/1280,DEMO?.62:0)*(CFG.size||100)/100;   /* the preview in the app is a small strip: the soldiers there never shrink below readable */ G=H-Math.max(6,14*U);
-  cv.width=Math.round(W*DPR);cv.height=Math.round(H*DPR);ents.forEach(function(e){e.x=Math.min(W-40,Math.max(40,e.x))})}
+function fit(){DPR=Math.min(2,window.devicePixelRatio||1);W=innerWidth||1280;H=innerHeight||720;U=Math.max(Math.min(W/1280,H/720),DEMO?.62:0)*(CFG.size||100)/100;   /* 1.19.1: by the smaller side, so an ultrawide or very wide source doesn't make giants */   /* the preview in the app is a small strip: the soldiers there never shrink below readable */ G=H*(DEMO?100:(+CFG.ground||100))/100-Math.max(6,14*U);   /* 1.19.1: where the ground line sits (Overlays > Arena > Where they walk) */
+  cv.width=Math.round(W*DPR);cv.height=Math.round(H*DPR);ents.forEach(function(e){e.x=Math.min(RX(),Math.max(LX(),e.x))})}
+/* 1.19.1: the stretch of the line the soldiers walk (left and right edge, % of the width) */
+function LX(){return W*Math.max(0,Math.min(80,+CFG.left||0))/100+40}
+function RX(){var r=CFG.right==null?100:+CFG.right;return Math.max(LX()+60,W*Math.max(20,Math.min(100,r))/100-40)}
 var COLORS=['#ff6b85','#ffb02e','#ffe14d','#7be37b','#2fd6c3','#4db8ff','#8f9cff','#c08cff','#ff7ce0','#ff8a4d'];
 var PALS=[['#4d6b3a','#2b3d20','#8a9a5b'],['#c2a878','#86693f','#e6d6ad'],['#7d8590','#474d57','#b9c0ca'],['#33507a','#1c2f4d','#6f8fbf'],
   ['#d5dae2','#8f9aab','#ffffff'],['#3b3b49','#1d1d26','#5d5d74'],['#2f6b62','#18403a','#62a898'],['#7a5a3a','#4a3421','#a98a62'],['#59663a','#7a5a3a','#262e1a']];
@@ -685,7 +688,7 @@ function find(n){return alive().filter(function(e){return e.key===n})[0]}
 function spawn(name,key,color){
   key=key||name;if(find(key))return;var al=alive();if(al.length>=(CFG.max||20))gone(al.slice().sort(function(a,b){return a.wins-b.wins||a.born-b.born})[0]);var i=n0++;
   var e={name:name,key:key,born:T,color:readable(color)||COLORS[i%COLORS.length],pal:PALS[(i*4)%PALS.length],ptype:PT[i%3],skin:SKINS[(i*5)%SKINS.length],seed:Math.floor(Math.random()*1e6),
-    x:rnd(70,W-70),dir:Math.random()<.5?-1:1,sp:rnd(14,32),s:1,ts:1,wins:0,wt:0,shield:0,fall:G+80,vy:0,turn:rnd(1,4),kb:0,ph:rnd(0,6),a:1,swing:0,dress:0,p:rnd(0,6),land:0,fv:n0%3,cdA:0,cdP:0,ky:0,
+    x:rnd(LX()+30,Math.max(LX()+31,RX()-30)),dir:Math.random()<.5?-1:1,sp:rnd(14,32),s:1,ts:1,wins:0,wt:0,shield:0,fall:G+80,vy:0,turn:rnd(1,4),kb:0,ph:rnd(0,6),a:1,swing:0,dress:0,p:rnd(0,6),land:0,fv:n0%3,cdA:0,cdP:0,ky:0,
     bx:BUILD[0][0],by:BUILD[0][1],hurt:0,by_:null,tn:0,tdir:0,rest:0,look:0,leaving:0,flash:0};
   ents.push(e);chat(name,e.color,'!spawn');
 }
@@ -713,6 +716,10 @@ function finish(b){     /* the jerk is over: now he goes down */
   a.wins++;a.wt=T;a.ts=CFG.grow=='off'?1:CFG.grow=='lot'?Math.min(2.4,1+a.wins*.2):Math.min(1.45,1+a.wins*.07);
   floats.push({x:a.x,y:G-108*a.s*U,t:'KO!',c:'#ffd84d',life:1.3});
 }
+function newGoal(e){var L=LX(),R=RX(),o=alive().filter(function(x){return x!==e&&x.fall<=0&&!x.leaving}),x;
+  if(o.length&&Math.random()<.25)x=o[Math.floor(Math.random()*o.length)].x+rnd(-15,15);
+  else{var lo=e.x-L,hi=R-e.x;x=Math.random()<hi/(lo+hi)?rnd(e.x+(R-L)*.35,R):rnd(L,e.x-(R-L)*.35);if(!(x>=L&&x<=R))x=rnd(L,R)}   /* mostly far away, toward the side with more room, so the whole line gets used */
+  return Math.min(R,Math.max(L,x))}
 function startTurn(e){if(e.tn>0||e.leaving)return;e.tn=TURN;e.tdir=-e.dir}
 function king(){return alive().filter(function(e){return e.wins>0}).sort(function(a,b){return b.wins-a.wins||a.wt-b.wt})[0]}
 function step(dt){
@@ -730,12 +737,14 @@ function step(dt){
     if(e.rest>0){e.rest-=dt;
       if(e.look>0&&(e.look-=dt)<=0)startTurn(e);                    /* a look around while he stands */
       var tgt=Math.round(e.p/6.2832)*6.2832;e.p+=(tgt-e.p)*Math.min(1,dt*7);return}   /* so he walks off again from a clean stride */
-    e.turn-=dt;
-    if(e.turn<0){if(Math.random()<.42){e.rest=rnd(1.2,3.4);e.look=e.rest*rnd(.3,.55);e.turn=e.rest+rnd(1.5,3.5)}
-      else{e.turn=rnd(2,6);if(Math.random()<.65)startTurn(e)}}
+    e.turn-=dt;   /* 1.19.1: each soldier walks to a spot somewhere along the whole line (often to another soldier, so fights happen), stops a while, picks the next one */
+    var reach=e.goal!=null&&Math.abs(e.goal-e.x)<10;
+    if(e.turn<0||reach||e.goal==null){
+      if(reach&&Math.random()<.45){e.rest=rnd(1.2,3.4);e.look=e.rest*rnd(.3,.55);e.goal=null;e.turn=e.rest+rnd(1,2)}
+      else{e.goal=newGoal(e);e.turn=Math.abs(e.goal-e.x)/Math.max(1,e.sp*U)+rnd(3,6);if((e.goal-e.x)*e.dir<0)startTurn(e)}}   /* time enough to get there */
     if(e.dress>0){e.dress-=dt;if(e.dress<=0)burst(e.x,G-50*e.s*U,'#cfd4de',8)}
     else if(e.swing<=0){var dx=e.sp*U*(e.shield>T?.6:1)*dt;e.x+=e.dir*dx;e.p+=dx*6.2832/(42*e.s*U)}
-    if(e.x<40){e.x=40;if(e.dir<0)startTurn(e)}if(e.x>W-40){e.x=W-40;if(e.dir>0)startTurn(e)}
+    if(e.x<LX()){e.x=LX();e.goal=null;if(e.dir<0)startTurn(e)}if(e.x>RX()){e.x=RX();e.goal=null;if(e.dir>0)startTurn(e)}
   });
   ents=ents.filter(function(e){return e.a>0});
   parts.forEach(function(p){p.vy+=(p.g===0?120:900)*dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt});parts=parts.filter(function(p){return p.life>0});
@@ -933,7 +942,7 @@ if(DEMO)setInterval(function(){if(!CFG.on||document.hidden)return;var n=alive().
 var SEEN=null,BOOT=null;
 window.ARENA_AFTER=function(){return SEEN==null?999999999:SEEN};
 window.ARENA_FEED=function(a){if(!a||CBONLY||CHATONLY||(EDIT&&!DEMO))return;
-  var c=a.cfg||{},was=CFG.size;CFG=c;if(DEMO)CFG.on=true;if(was!==CFG.size)fit();
+  var c=a.cfg||{},was=[CFG.size,CFG.ground,CFG.left,CFG.right].join();CFG=c;if(DEMO)CFG.on=true;if(was!==[CFG.size,CFG.ground,CFG.left,CFG.right].join())fit();
   if(!CFG.on){ents=[];parts=[];floats=[]}
   if(BOOT!==a.boot||SEEN==null){BOOT=a.boot;SEEN=a.last;return}
   (a.events||[]).forEach(function(ev){if(ev.id<=SEEN)return;SEEN=ev.id;if(!CFG.on)return;

@@ -24,9 +24,12 @@ DEFAULTS = {
     "size": 100,                # percent
     "names": True,
     "blood": True,
+    "ground": 100,              # 1.19.1: where the soldiers stand, % from the top of the overlay (100 = the bottom edge)
+    "left": 0,                  # 1.19.1: the stretch they walk, % of the width (left edge ... right edge)
+    "right": 100,
 }
 CHOICES = {"who": ("everyone", "sub", "vip", "mod"), "grow": ("off", "little", "lot")}
-RANGES = {"cooldown": (0, 10), "max": (5, 40), "size": (50, 200), "idle": (0, 180)}
+RANGES = {"cooldown": (0, 10), "max": (5, 40), "size": (50, 200), "idle": (0, 180), "ground": (10, 100), "left": (0, 80), "right": (20, 100)}
 BOOLS = ("on", "crown", "names", "blood")
 CMDS = ("cmd_spawn", "cmd_attack", "cmd_protect")
 CMD_MAX = 25
@@ -62,6 +65,9 @@ def validate(data) -> dict:
                 out[k] = max(lo, min(hi, int(float(data[k]))))
         except (TypeError, ValueError):
             pass
+    if out["right"] < out["left"] + 20:      # at least a fifth of the width to walk in
+        out["right"] = min(100, out["left"] + 20)
+        out["left"] = out["right"] - 20
     for k in CMDS:
         out[k] = _cmd(data.get(k), DEFAULTS[k])
     low = [out[k].lower() for k in CMDS]

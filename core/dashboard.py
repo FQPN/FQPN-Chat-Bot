@@ -1577,7 +1577,7 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             after = 0
         if acfg["on"]:
             arena.ARENA.sweep(acfg)                 # 1.19.0: soldiers of viewers who have gone quiet walk off
-        ar = dict(arena.ARENA.view(after), cfg={k: acfg[k] for k in ("on", "max", "grow", "crown", "size", "names", "blood")})
+        ar = dict(arena.ARENA.view(after), cfg={k: acfg[k] for k in ("on", "max", "grow", "crown", "size", "names", "blood", "ground", "left", "right")})
         return web.json_response({"counters": [dict(r, icon=overlays.icon_for(r["name"]), pos=pos.get("c:" + r["name"])) for r in rows],
                                   "chat": chat, "arena": ar,
                                   "first": first, "lang": lang, "has_first_cmd": bool(cmds), "order": counters_mod.order(store),
