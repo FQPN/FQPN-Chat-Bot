@@ -10,7 +10,88 @@ permissions:
   contents: write
 
 jobs:
+  # 1.19.0 Voice on AMD graphics cards: whisper.cpp's own Releases page has no engine for AMD cards (Vulkan) on Windows, so
+  # this job builds it ONCE from whisper.cpp's source and keeps it on this project's Releases page (as a "pre-release"
+  # named amd-voice-engine-..., so the app's update check never mistakes it for a new version). Later releases find it
+  # there and skip the build. If anything here fails, the installer is still built: that version just doesn't offer the
+  # "Use my graphics card" switch on AMD cards.
+  amd-engine:
+    runs-on: windows-latest
+    continue-on-error: true
+    outputs:
+      url: ${{ steps.info.outputs.url }}
+      sha: ${{ steps.info.outputs.sha }}
+      size: ${{ steps.info.outputs.size }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      WHISPER_REF: v1.9.1                              # the same whisper.cpp version as the other engines (core/voice.py)
+      ENGINE_TAG: amd-voice-engine-1.9.1
+      ENGINE_FILE: whisper-vulkan-bin-x64.zip
+    steps:
+      - name: Is the AMD engine already on the Releases page?
+        id: have
+        shell: bash
+        run: |
+          mkdir -p out
+          if gh release download "$ENGINE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$ENGINE_FILE" --dir out; then
+            echo "found=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=no" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Get whisper.cpp's source
+        if: steps.have.outputs.found == 'no'
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/whisper.cpp
+          ref: ${{ env.WHISPER_REF }}
+          path: whisper
+
+      - name: Install the Vulkan tools
+        if: steps.have.outputs.found == 'no'
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          cache: true
+
+      - name: Build the engine for AMD cards
+        if: steps.have.outputs.found == 'no'
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:VULKAN_SDK\Bin;$env:PATH"
+          cmake -S whisper -B whisper\build -DGGML_VULKAN=1 -DWHISPER_BUILD_TESTS=OFF
+          if ($LASTEXITCODE) { throw "cmake could not set up the build" }
+          cmake --build whisper\build --config Release -j 4
+          if ($LASTEXITCODE) { throw "the build failed" }
+          New-Item -ItemType Directory -Force pack\Release | Out-Null
+          Copy-Item whisper\build\bin\Release\whisper-server.exe pack\Release\ -ErrorAction Stop
+          Copy-Item whisper\build\bin\Release\*.dll pack\Release\
+          Get-ChildItem pack\Release | Format-Table Name, Length
+          Push-Location pack
+          7z a -tzip "..\out\$env:ENGINE_FILE" Release
+          if ($LASTEXITCODE) { throw "could not pack the engine" }
+          Pop-Location
+
+      - name: Keep the engine on the Releases page
+        if: steps.have.outputs.found == 'no'
+        shell: bash
+        run: |
+          gh release create "$ENGINE_TAG" "out/$ENGINE_FILE" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
+            --title "Voice engine for AMD graphics cards" \
+            --notes "Not an app version. The speech engine (whisper.cpp $WHISPER_REF, built with Vulkan from its official source) that FQPN's Chat Bot downloads when you turn on \"Use my graphics card\" on an AMD card."
+
+      - name: Note the engine's link, fingerprint and size
+        id: info
+        shell: bash
+        run: |
+          f="out/$ENGINE_FILE"
+          test -s "$f"
+          echo "url=https://github.com/$GITHUB_REPOSITORY/releases/download/$ENGINE_TAG/$ENGINE_FILE" >> "$GITHUB_OUTPUT"
+          echo "sha=$(sha256sum "$f" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "size=$(stat -c %s "$f")" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: amd-engine
+    if: ${{ !cancelled() }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -37,6 +118,18 @@ jobs:
       - name: Put the version number into the app
         shell: bash
         run: printf 'VERSION = "%s"\n' "$VERSION" > core/version.py
+
+      # 1.19.0: the AMD speech engine's link (from the job above) goes into the app. Without it the app is built as before.
+      - name: Put the AMD voice engine's link into the app
+        if: ${{ needs.amd-engine.outputs.url != '' && needs.amd-engine.outputs.sha != '' }}
+        shell: bash
+        env:
+          E_URL: ${{ needs.amd-engine.outputs.url }}
+          E_SHA: ${{ needs.amd-engine.outputs.sha }}
+          E_SIZE: ${{ needs.amd-engine.outputs.size }}
+        run: |
+          printf 'VULKAN = {"url": "%s", "sha256": "%s", "size": %s}\n' "$E_URL" "$E_SHA" "${E_SIZE:-0}" > core/voicegpu.py
+          cat core/voicegpu.py
 
       - name: Install the bot's libraries
         run: pip install -r requirements.txt
@@ -105,9 +198,16 @@ jobs:
           name: installer
           path: Output/*.exe
 
+      # 1.19.0: the Releases page shows this version's What's new (English and Arabic), and the app's update pop-up
+      # reads it from there, so people see what is new before they press Update now.
+      - name: Write the release notes from the app's What's new
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: python tools/release_notes.py "$VERSION" > release_notes.md
+
       - name: Put the installer on the Releases page
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: Output/*.exe
-          generate_release_notes: true
+          body_path: release_notes.md

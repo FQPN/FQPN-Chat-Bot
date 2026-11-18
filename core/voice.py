@@ -33,6 +33,8 @@ from pathlib import Path
 from . import voiceparse as VP
 from .voiceoverlay import OVERLAY
 
+from .voicegpu import VULKAN
+
 log = logging.getLogger("voice")
 
 WINDOWS = sys.platform == "win32"
@@ -63,6 +65,37 @@ GPU_SIZE = 278_557_654
 def has_nvidia() -> bool:
     """An NVIDIA graphics card with its driver (the driver puts nvcuda.dll in System32)."""
     return WINDOWS and (Path(os.environ.get("SystemRoot") or r"C:\Windows") / "System32" / "nvcuda.dll").is_file()
+_AMD = None
+def has_amd() -> bool:
+    """1.19.0: an AMD graphics card whose driver can run Vulkan (Windows keeps every display adapter in the registry;
+    AMD's cards carry the vendor number 1002; the driver puts vulkan-1.dll in System32)."""
+    global _AMD
+    if _AMD is None:
+        _AMD = False
+        if WINDOWS and (Path(os.environ.get("SystemRoot") or r"C:\Windows") / "System32" / "vulkan-1.dll").is_file():
+            try:
+                import winreg
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}") as k:
+                    for i in range(winreg.QueryInfoKey(k)[0]):
+                        try:
+                            with winreg.OpenKey(k, winreg.EnumKey(k, i)) as sub:
+                                if "ven_1002" in str(winreg.QueryValueEx(sub, "MatchingDeviceId")[0]).lower():
+                                    _AMD = True
+                        except OSError:
+                            continue
+            except Exception:
+                log.exception("Voice: could not look for an AMD graphics card")
+    return _AMD
+def gpu_kind() -> str:
+    """Which graphics-card engine this PC can use: "nvidia", "amd" (only when this build carries the AMD engine's link) or ""."""
+    if has_nvidia():
+        return "nvidia"
+    return "amd" if VULKAN.get("url") and VULKAN.get("sha256") and has_amd() else ""
+def gpu_engine() -> tuple:
+    """(link, fingerprint, size) of the graphics-card engine for this PC."""
+    if gpu_kind() == "amd":
+        return VULKAN["url"], VULKAN["sha256"], int(VULKAN.get("size") or 0)
+    return GPU_URL, GPU_SHA256, GPU_SIZE
 HF = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/"
 ENGINE_SIZE = 8_000_000
 MODEL_SIZE = 190_000_000         # (for the progress bar until the real size is known)
@@ -234,7 +267,7 @@ class Voice:
         return (key,) + MODELS[key]
 
     def use_gpu(self) -> bool:
-        return bool(self.prefs().get("voice_gpu")) and has_nvidia() and not self.gpu_failed
+        return bool(self.prefs().get("voice_gpu")) and bool(gpu_kind()) and not self.gpu_failed
 
     def engine_dir(self) -> Path:
         return voice_dir() / ("engine-gpu" if self.use_gpu() else "engine")
@@ -252,7 +285,7 @@ class Voice:
 
     def view(self) -> dict:
         p = self.status.get("pending")
-        out = dict(self.status, windows=WINDOWS, size=self._size(), nvidia=has_nvidia(), gpu_failed=self.gpu_failed)
+        out = dict(self.status, windows=WINDOWS, size=self._size(), nvidia=has_nvidia(), gpu=gpu_kind(), gpu_mb=round(gpu_engine()[2] / 1e6), gpu_failed=self.gpu_failed)
         out["pending"] = ({k: v for k, v in p.items() if k not in ("intent", "event")} if p else None)
         return out
 
@@ -308,7 +341,7 @@ class Voice:
         if self._downloading():
             return
         self.dl_cancel.clear()
-        self.eng_size = GPU_SIZE if self.use_gpu() else ENGINE_SIZE
+        self.eng_size = gpu_engine()[2] if self.use_gpu() else ENGINE_SIZE
         self.status.update(engine="downloading", done=0, total=self.eng_size + self.model()[3], error="")
         self.dl_thread = threading.Thread(target=self._download, name="voice-download", daemon=True)
         self.dl_thread.start()
@@ -339,7 +372,7 @@ class Voice:
         d = voice_dir()
         try:
             gpu = self.use_gpu()
-            url, sha, esize, edir = (GPU_URL, GPU_SHA256, GPU_SIZE, d / "engine-gpu") if gpu else (ENGINE_URL, ENGINE_SHA256, ENGINE_SIZE, d / "engine")
+            url, sha, esize, edir = (*gpu_engine(), d / "engine-gpu") if gpu else (ENGINE_URL, ENGINE_SHA256, ENGINE_SIZE, d / "engine")
             self.eng_size = esize
             edir.mkdir(parents=True, exist_ok=True)
             if not (edir / "whisper-server.exe").is_file():
@@ -354,8 +387,8 @@ class Voice:
                     raise ValueError("The speech engine download was damaged. Try again.")
                 with zipfile.ZipFile(zpath) as z:
                     for info in z.infolist():
-                        name = info.filename.rsplit("/", 1)[-1]
-                        if gpu:      # the graphics-card build: the engine, its parts and NVIDIA's (64-bit) runtime
+                        name = info.filename.replace("\\", "/").rsplit("/", 1)[-1]
+                        if gpu:      # the graphics-card build (NVIDIA or AMD): the engine, its parts and NVIDIA's (64-bit) runtime
                             keep = (name.endswith(".dll") and name != "cudart32_110.dll") or name == "whisper-server.exe"
                         else:
                             keep = name in ENGINE_FILES or (name.startswith("ggml-cpu") and name.endswith(".dll"))

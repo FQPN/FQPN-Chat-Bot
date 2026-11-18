@@ -42,7 +42,8 @@ def defaults() -> dict:
     # 1.14.0: random_cmd «لعبه؟» starts a round of a random game (among the ones switched on)
     return {"shared": {"wins_cmd": ["!فوز", "!wins"], "top_cmd": ["!الأوائل", "!top"], "random_cmd": ["لعبه؟", "لعبة؟"],
                        "list_cmd": ["العاب؟", "ألعاب؟", "!العاب", "games?"],      # 1.15.0 (owner): lists the games that are on
-                       "rounds_per_stream": 0, "cooldown_seconds": 0, "enabled": True},      # 1.14.0: enabled = the main switch
+                       "rounds_per_stream": 0, "cooldown_seconds": 0, "enabled": True,      # 1.14.0: enabled = the main switch
+                       "auto_random_minutes": 0},      # 1.19.0: a random game (of the ones on) every N minutes; 0 = off
             "letters": {"enabled": False, "start_cmd": ["حروف؟", "!حروف"], "approve_cmd": ["!صح"],
                         "who_starts": "everyone", "round_seconds": 60, "auto_minutes": 0, "categories": list(CATEGORIES), "announce": True,
                         "letters": DEFAULT_LETTERS, "words": {c: [] for c in CATEGORIES}},

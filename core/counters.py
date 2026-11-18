@@ -146,6 +146,37 @@ def first_on(store) -> bool:
     return (store.get("counter_overlay") or {}).get("first", True) is not False
 
 
+FIRST_STYLES = ("pill", "bow", "neon", "podium", "ticket", "terminal", "royal", "tape", "arcade", "line")   # 1.19.0
+FIRST_TEXT_MAX = 40
+
+
+def _one_line(v) -> str:
+    """One line of your own text, or "" to use the app's own wording."""
+    return re.sub(r"\s+", " ", str(v if v is not None else "")).strip()[:FIRST_TEXT_MAX]
+
+
+def first_look(store) -> dict:
+    """1.19.0 (Overlays > First in chat): which of the ten looks, and the two lines of text you can write yourself.
+    An empty text means the app's own wording, in whichever language the app is in."""
+    ov = store.get("counter_overlay") or {}
+    style = ov.get("first_style")
+    return {"style": style if style in FIRST_STYLES else FIRST_STYLES[0],
+            "who": _one_line(ov.get("first_who")), "label": _one_line(ov.get("first_label"))}
+
+
+def set_first_look(store, style=None, who=None, label=None) -> None:
+    ov = dict(store.get("counter_overlay") or {})
+    if style is not None:
+        if style not in FIRST_STYLES:
+            raise CounterError("That isn't one of the looks.")
+        ov["first_style"] = style
+    if who is not None:
+        ov["first_who"] = _one_line(who)
+    if label is not None:
+        ov["first_label"] = _one_line(label)
+    store.save("counter_overlay", ov)
+
+
 def set_first(store, on: bool) -> None:
     keys = [k for k in order(store) if k != "first"]
     store.save("counter_overlay", dict(store.get("counter_overlay") or {}, first=bool(on)))
@@ -205,6 +236,9 @@ def act(store, action: str, body: dict, validate_commands=None, clash=None) -> N
         return
     if action == "first":                  # 1.17.0: First in chat on the overlay, or not
         set_first(store, body.get("show"))
+        return
+    if action == "first_look":             # 1.19.0: its look, and your own two texts
+        set_first_look(store, body.get("style"), body.get("who"), body.get("label"))
         return
     if action == "pos" and body.get("key") == "chat":     # 1.18.0: the Chat box: its place and its width and height
         from . import chatbox

@@ -110,7 +110,7 @@ _MODW = r"(?:mod|mods|moderator|مود|مودريتر|موديريتر|مودر�
 LEADS = [
     # 1.18.0: the Chat box overlay hidden / shown on stream («خبّي الشات», «ورّ الشات»)
     ("hidechat", [r"hide( the)? chat( box)?", r"(خب|خبي|خبى|اخفي|اخف|سكر|طفي) (ال)?(شات|تشات|chat)( بوكس)?( من البث| عن البث)?"]),
-    ("showchat", [r"(show|unhide)( the)? chat( box)?", r"(ور|وري|اعرض|رجع|طلع|افتح|اظهر) (ال)?(شات|تشات|chat)( بوكس)?( على البث| علي البث| في البث)?"]),
+    ("showchat", [r"(show|unhide|turn on)( the)? chat( box)?", r"(ور|وري|اعرض|رجع|طلع|افتح|اظهر|شغل|شغلي|فعل) (ال)?(شات|تشات|chat)( بوكس)?( على البث| علي البث| في البث)?"]),
     # 1.18.0: chat cleared, a command run, someone ignored / no longer ignored by the bot
     ("clear", [r"clear( the)? chat", r"(امسح|نظف|نضف|كلير|فضي|فرمت|امسحي) (ال)?(شات|تشات|chat)( كله| كامل)?"]),
     ("unignore", [r"(un ?ignore|stop ignoring|dont ignore)", r"(فك|شيل|الغي|وقف) (ال)?(تجاهل|تطنيش)( عن| من)?", r"(لا تتجاهل|لا تطنش|رجع)"]),
@@ -170,7 +170,13 @@ ANYWHERE = [
 ]
 _DROP = {"عط", "عطه", "اعط", "اعطي", "عطي", "حط", "ل", "على", "علي", "عن", "حق", "give", "to", "for", "him", "her", "the", "user",
          "a", "an", "لمده", "مده", "ذا", "هذا", "اللي", "يوزر", "الولد", "واحد", "ابي", "نبي", "like", "about", "around",
-         "تقريبا", "حوالي", "بس", "فقط", "just"}
+         "تقريبا", "حوالي", "بس", "فقط", "just",
+         "سو", "سوي", "ضيف", "خل", "خلي", "make"}      # 1.19.0: «سو تايم اوت لفقبن» left «سو» stuck to the name
+
+# 1.19.0: taking it away, said anywhere in the sentence («شيل فقبن في اي بي», «ارفع المود عن فقبن»). Without this the
+# removal words were ignored and «شيل فقبن vip» GAVE him VIP.
+_RM_W = {"شيل", "سحب", "اسحب", "نزل", "فك", "احذف", "ارفع", "نزع", "انزع", "الغي", "remove", "take"}
+_RM_TO = {"vip": "unvip", "mod": "unmod", "ban": "unban"}
 
 GAME_WORDS = {      # every way a game gets called: the short name, the card's name, English, and what the engine mishears
     "letters": ["letters", "letter", "the letters game", "huroof", "horoof", "hurof", "حروف", "الحروف", "حرف", "حروب",
@@ -323,7 +329,25 @@ def parse(text: str):
                     if k and len(said) >= k:
                         out["reply"] = " ".join(said[-k:]).rstrip(".。")
                 return out
-    return _anywhere(t)
+    return _run_short(t) or _anywhere(t)
+
+
+_RUN_SHORT = re.compile(r"^(?:run|use|trigger|do|open|شغل|شغلي|شغ|نفذ|استخدم)\s+")
+
+
+def _run_short(t: str):
+    """1.19.0: the short way: "run discord", «شغل ديسكورد» — the word «امر» / "command" isn't needed any more.
+    Only looked at after every other phrase said no, so a game still wins («شغل حروف» stays the letters game), and
+    never when what follows is itself a command ("run clear chat")."""
+    m = _RUN_SHORT.match(t)
+    if not m:
+        return None
+    name = _strip(t[m.end():].strip(), "the", "ال", "امر", "الامر", "كوماند", "اسمه", "حق", "لي", "لنا")
+    if not name or len(name.split()) > 3:
+        return None
+    if any(rx.match(name) for _, pats in _LEADS for rx in pats) or game_of(name):
+        return None
+    return {"act": "runcmd", "name": name.lstrip("!")}
 
 
 def said_after(original: str, t: str, end: int) -> str:
@@ -398,13 +422,17 @@ def _who(name: str) -> str:
 
 def _anywhere(t: str):
     """The action word somewhere else in the sentence: «سامي تايم اوت عشر دقايق», "give sami a timeout"."""
+    took = any(w in _RM_W for w in t.split())          # 1.19.0: «شيل فقبن vip» takes it away, it doesn't give it
     for act, keys in ANYWHERE:
         for k in keys:
             m = re.search(r"(?:^|\s)" + re.escape(norm(k)) + r"(?:\s|$)", t)
             if not m:
                 continue
             rest = (t[:m.start()] + " " + t[m.end():]).split()
-            out = _finish(act, " ".join(rest))
+            a = act
+            if took and a in _RM_TO:
+                a, rest = _RM_TO[a], [w for w in rest if w not in _RM_W]
+            out = _finish(a, " ".join(rest))
             if out and out.get("who"):
                 out["who"] = _who(out["who"])
                 if out["who"]:
@@ -488,12 +516,21 @@ def _finish(act: str, rest: str):
         return {"act": "say", "text": rest} if rest else None
     if act == "game":
         rest = _GAME_LEAD.sub("", rest + " ").strip() or rest
-        if rest in {norm(x) for x in ("random", "random game", "any game", "a random game", "عشوائية", "اي لعبة", "لعبة عشوائية", "أي شي", "اي وحده", "عشوائية", "عشوائي",
-                                         "اي شي", "any", "random one", "anything", "اي لعبه", "على كيفك", "انت اختار")}:
+        if rest in _RANDOM or _dealef(rest) in _RANDOM:     # 1.19.0: «أي لعبة» is heard as «أي اللعبة», so «ال» is ignored here
             return {"act": "game", "game": "random"}
         g = game_of(rest)
         return {"act": "game", "game": g} if g else None
     return None
+
+
+_RANDOM = {norm(x) for x in ("random", "random game", "any game", "a random game", "عشوائية", "اي لعبة", "لعبة عشوائية",
+                             "أي شي", "اي وحده", "عشوائي", "اي شي", "any", "random one", "anything", "اي لعبه",
+                             "على كيفك", "انت اختار", "اي واحده", "اللي تبي", "اي شيء")}
+
+
+def _dealef(s: str) -> str:
+    """The same words without «ال» in front of them, so «أي اللعبة» reads as «أي لعبة»."""
+    return " ".join(w[2:] if len(w) > 4 and w.startswith("ال") else w for w in s.split())
 
 
 _ADD_W = {"زيد", "زود", "ضيف", "اضف", "زد", "كثر", "add", "plus", "increase", "up"}

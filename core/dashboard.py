@@ -22,6 +22,8 @@ from .store import EmptySaveRefused, Store
 
 log = logging.getLogger("twitchbot.dashboard")
 
+ART_FILES = ("bow.png", "flower.png", "spark.png")   # 1.19.0: the only pictures the overlay serves
+
 
 def _more_scopes(extra=("channel:manage:vips", "channel:manage:moderators", "moderator:read:chatters")) -> None:
     """1.18.0 (Voice: VIP / mod): two more Twitch permissions asked at login (and "who is in the chat" for the Twitch panel's watch time). An account that logged in before keeps
@@ -69,7 +71,7 @@ PAGE = Path(__file__).resolve().parent / "dashboard.html"
 ICON = Path(__file__).resolve().parent.parent / "icon.ico"   # next to main.py (and inside the installed program folder)
 PERMISSIONS = ("everyone", "subscriber", "vip", "moderator", "broadcaster")
 SECTIONS = ("commands", "timers", "greetings", "events", "blocklist", "settings", "ui", "prefs", "stream", "moderation", "games", "game_wins",
-            "voice_fixes", "chatbox", "public_banner")      # 1.18.0: Voice spelling fixes, the Chat box overlay
+            "voice_fixes", "chatbox", "public_banner", "arena")      # 1.18.0: Voice spelling fixes, the Chat box overlay
 _LOGIN = re.compile(r"[a-z0-9_]{1,25}")
 
 
@@ -907,13 +909,21 @@ def validate(section: str, data, prefix: str = "!"):
                 "shared": dict(found["shared"],
                                rounds_per_stream=int(_number(sh.get("rounds_per_stream", 0), "Rounds per stream", 0, minigames.MAX_ROUNDS)),
                                cooldown_seconds=int(_number(sh.get("cooldown_seconds", 0), "Cooldown between rounds", 0, minigames.MAX_COOLDOWN)),
-                               enabled=_bool(sh.get("enabled", True), "All mini games"))}
+                               enabled=_bool(sh.get("enabled", True), "All mini games"),
+                               auto_random_minutes=int(_number(sh.get("auto_random_minutes", 0), "Random game every", 0, 240)))}
 
     if section == "public_banner":         # 1.18.0: the public page's banner (a picture made small by the page first)
         from . import publiclist
         try:
             return publiclist.banner_check(data)
         except ValueError as e:
+            raise ValidationError(str(e))
+
+    if section == "arena":                 # 1.19.0: Overlays > Arena (core/arena.py checks every key)
+        from . import arena
+        try:
+            return arena.validate(data)
+        except arena.ArenaError as e:
             raise ValidationError(str(e))
 
     if section == "chatbox":               # 1.18.0: the Chat box overlay's settings (core/chatbox.py checks every key)
@@ -1027,6 +1037,8 @@ def validate(section: str, data, prefix: str = "!"):
         if isinstance(days, bool) or days not in (0, 7, 30, 90):
             raise ValidationError("Choose how long to keep the logs.")
         return {
+            "boot_anim": _bool(data.get("boot_anim", True), "Start-up animation"),      # 1.19.0
+            "boot_sound": _bool(data.get("boot_sound", True), "Start-up sound"),
             "startup": _bool(data.get("startup", False), "Run on startup"),
             "start_minimized": _bool(data.get("start_minimized", False), "Start minimized"),
             "on_close": on_close,
@@ -1128,6 +1140,7 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             "event_problems": dict(getattr(bot, "event_problems", {}) or {}) if bot else {},
             "counters": counters_mod.view(store),        # 1.15.0 (owner): Counters (Dashboard card, Commands > Custom > Counters)
             "overlay_first": counters_mod.first_on(store),   # 1.17.0: First in chat on the overlay
+            "overlay_first_look": counters_mod.first_look(store),   # 1.19.0: its look + your own two texts
             "overlay_order": counters_mod.order(store),       # 1.17.0: the order they were switched on (new ones at the bottom)
             "overlay_has_first": any(isinstance(c, dict) and c.get("action") == "pinfirst" and c.get("enabled", True) is not False
                                      for c in (store.get("commands") or {}).values()),
@@ -1498,6 +1511,16 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
         from . import overlays
         return web.Response(text=overlays.OVERLAY_HTML, content_type="text/html", headers={"Cache-Control": "no-store"})
 
+    async def art_file(request):
+        """1.19.0: the overlay's pictures (the ribbon, the bow, the blossom). Only these, only from core/art."""
+        name = str(request.match_info.get("name", ""))
+        if name not in ART_FILES:
+            raise web.HTTPNotFound()
+        path = Path(__file__).resolve().parent / "art" / name
+        if not path.is_file():
+            raise web.HTTPNotFound()
+        return web.FileResponse(path, headers={"Cache-Control": "public, max-age=86400"})
+
     async def overlay_data(request):
         """1.17.0: what the overlay shows (it asks about once a second)."""
         from . import overlays, pinfirst
@@ -1529,6 +1552,7 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
         pos = counters_mod.positions(store)
         if first:
             first["pos"] = pos.get("first")
+            first.update(counters_mod.first_look(store))    # 1.19.0: which look, and your own two texts
         chat = None
         if request.query.get("chat") or request.query.get("cb"):    # 1.18.0: the Chat box: its own link (/chat) and its preview
             from . import chatbox
@@ -1545,11 +1569,33 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
                 chat = {"cfg": cb, "box": chatbox.box_of(store), "items": items, "now": time.time(), "ver": chatbox.BUF.ver,
                         "samples": chatbox.samples(lang) if request.query.get("edit") else None,
                         "burls": chatbox.badge_samples() if request.query.get("edit") else None}
+        from . import arena                  # 1.19.0: the Arena: its settings + what happened since the overlay last asked
+        acfg = arena.cfg_of(store)
+        try:
+            after = int(request.query.get("ar", "0") or 0)
+        except ValueError:
+            after = 0
+        if acfg["on"]:
+            arena.ARENA.sweep(acfg)                 # 1.19.0: soldiers of viewers who have gone quiet walk off
+        ar = dict(arena.ARENA.view(after), cfg={k: acfg[k] for k in ("on", "max", "grow", "crown", "size", "names", "blood")})
         return web.json_response({"counters": [dict(r, icon=overlays.icon_for(r["name"]), pos=pos.get("c:" + r["name"])) for r in rows],
-                                  "chat": chat,
+                                  "chat": chat, "arena": ar,
                                   "first": first, "lang": lang, "has_first_cmd": bool(cmds), "order": counters_mod.order(store),
                                   "accent": str((store.get("ui") or {}).get("accent") or "#9a1118"),
                                   "v": overlays.VERSION})
+
+    async def arena_test(request):
+        """1.19.0: Overlays > Arena: «Drop 5 test soldiers» / «Clear the field» (made-up viewers, nothing in your Twitch chat)."""
+        from . import arena
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if isinstance(body, dict) and body.get("what") == "clear":
+            arena.ARENA.clear()
+        else:
+            arena.ARENA.test(5)
+        return web.json_response({"ok": True})
 
     async def chatbox_test(request):
         """1.18.0: «Send test messages»: made-up lines in the Chat box only (never in your Twitch chat)."""
@@ -1891,6 +1937,9 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
         section = request.match_info["section"]
         if section not in SECTIONS:
             raise web.HTTPNotFound()
+        if section == "arena":             # 1.19.0: every setting filled in
+            from . import arena
+            return web.json_response(arena.cfg_of(store))
         if section == "chatbox":           # 1.18.0: every setting filled in (a new install has none saved yet)
             from . import chatbox
             return web.json_response(chatbox.cfg_of(store))
@@ -2104,7 +2153,9 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
     app.router.add_get("/chat", overlay_page)                          # 1.18.0: the Chat box, its own Browser Source (any scene, any size)
     app.router.add_get("/overlay/counters", overlay_page)              #   (the first name it had while testing)
     app.router.add_get("/api/overlay", overlay_data)
+    app.router.add_get("/art/{name}", art_file)                        # 1.19.0: the overlay's pictures
     app.router.add_post("/api/chatbox/test", chatbox_test)             # 1.18.0
+    app.router.add_post("/api/arena/test", arena_test)                 # 1.19.0
     app.router.add_get("/api/panel", panel_view)                       # 1.18.0: the Twitch panel
     app.router.add_post("/api/panel/{action}", panel_action)
     app.router.add_get("/api/history", history_view)                   # 1.16.0 (owner): Command history and undo

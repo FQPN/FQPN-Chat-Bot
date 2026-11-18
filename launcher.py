@@ -482,6 +482,12 @@ def run() -> None:
                 r = r[0] if r else None
             return str(r) if r else None
         desktop.save_dialog = _save_dialog
+        # 1.19.0: the start-up animation plays its sound without a click first. (The variable replaces the window's own
+        # extra arguments, so pywebview's one is repeated here; anything already set on this PC is kept.)
+        _wv = os.environ.get("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "")
+        if "--autoplay-policy" not in _wv:
+            os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = " ".join(
+                x for x in (_wv or "--disable-features=ElasticOverscroll", "--autoplay-policy=no-user-gesture-required") if x)
         # private_mode=False + storage_path keeps the dashboard's theme/language between launches
         # On Windows the window must be the Edge (WebView2) one: the old built-in engine cannot show this dashboard properly.
         webview.start(shell.start_tray, (hidden,), private_mode=False, storage_path=str(home / "webview"),

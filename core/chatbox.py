@@ -26,14 +26,14 @@ DEFAULT_BOX = [1.5, 44.0, 24.0, 52.0]   # x, y, width, height in % of the screen
 SPAM_SECONDS = 20                   # the same message again within this many seconds: one line with a count
 ECHO_SECONDS = 60
 
-STYLES = ("neon", "classic", "bubbles", "glass", "cards", "fade")
+STYLES = ("neon", "classic", "bubbles", "glass", "cards", "fade", "bow", "ribbon")   # 1.19.0
 FONTS_EN = ("same", "outfit", "inter", "poppins", "montserrat", "nunito", "lexend", "fredoka")   # 1.18.0: the English font ("same": the Arabic one)
 FONTS = ("tajawal", "cairo", "plex", "kufi", "almarai", "readex", "rubik", "changa", "messiri", "baloo", "lalezar", "noto")
 DEFAULTS = {
     "on": False, "hidden": False,
     # Look
-    "style": "neon", "size": 22, "font": "tajawal", "font_en": "same", "glow": "soft", "outline": "thin", "shadow": "soft", "bg": "none",
-    "name_color": "twitch", "pics": False, "names": "display",
+    "style": "neon", "size": 22, "font": "tajawal", "font_en": "same", "glow": "soft", "outline": "thin", "shadow": "soft", "bg": "none", "tilt": "off",
+    "name_color": "twitch", "pics": False, "names": "display", "divider": "off",   # 1.19.0: a small pattern under every message
     # Layout ("shape": a box of lines, or one line where messages move sideways)
     "shape": "box", "flow": "bottom", "max": 8, "spacing": 1.5, "lines": 3, "anim": "slide", "hide_after": 30, "fade_old": True,
     # What shows
@@ -49,7 +49,9 @@ DEFAULTS = {
 }
 CHOICES = {
     "style": STYLES, "font": FONTS, "font_en": FONTS_EN, "glow": ("off", "soft", "strong"), "outline": ("off", "thin", "thick"),
-    "shadow": ("off", "soft", "strong"), "bg": ("none", "soft", "dark"), "name_color": ("twitch", "accent", "white"),
+    "tilt": ("off", "left", "right"),   # 1.19.0: turned a little, so it reads as 3D
+    "divider": ("off", "stitch", "wave", "jewel", "hearts"),   # 1.19.0: the pattern under each message
+    "shadow": ("off", "soft", "strong"), "bg": ("none", "soft", "dark"), "name_color": ("twitch", "accent", "white", "rose"),   # 1.19.0: rose, for the Bow style
     "names": ("display", "login", "both"), "flow": ("bottom", "top"), "anim": ("slide", "fade", "pop", "none"),
     "commands": ("with", "answer", "hide"), "shared": ("mark", "hide"), "links": ("show", "word", "hide"),
     "deleted": ("gone", "note"), "shape": ("box", "line"), "own_colors_who": ("everyone", "subs", "vips"),

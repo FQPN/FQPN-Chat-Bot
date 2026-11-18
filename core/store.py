@@ -102,6 +102,8 @@ DEFAULTS = {
         "chat_reset_who": "moderator",   # who can: "moderator" (mods and the streamer) or "broadcaster" (the streamer only)
     },
     "prefs": {   # how the installed app behaves (Settings > App, Notifications, Logs and data)
+        "boot_anim": True,         # 1.19.0: the start-up animation when the app opens
+        "boot_sound": True,        # 1.19.0: ... and its sound
         "startup": False,          # start with Windows
         "start_minimized": False,  # when started with Windows, go to the tray instead of showing the window
         "on_close": "quit",        # "quit" or "tray"
@@ -173,6 +175,7 @@ DEFAULTS = {
     "falkorie_streak_seen": {"session": "", "users": []},   # 1.18.0: who got a Falkorie streak reply this stream
     "voice_fixes": {"items": []},
     "chatbox": {},
+    "arena": {},                 # 1.19.0: Overlays > Arena (core/arena.py fills in every setting)
     "public_banner": {"data": "", "pos": 50},   # 1.18.0: the public page's banner (base64 picture; its own file)                         # 1.18.0: the Chat box overlay's settings (core/chatbox.py fills in the rest)           # 1.18.0: Voice spelling fixes: yours and the learned ones (core/voice.py)
     "chat_colors": {},                      # 1.18.0: the name colors viewers chose with !color (core/chatbox.py)
     "chat_colors_live": {},                 # 1.18.0: when the stream was last seen live (!color resets 30 min after)

@@ -88,7 +88,7 @@ def fetch_latest() -> dict:
         if e.code == 304 and _CACHE["info"] is not None:
             return _CACHE["info"]          # the same release as last time
         raise
-    info = {"version": str(rel.get("tag_name", "")).lstrip("v"), "notes": str(rel.get("body") or "")[:2000],
+    info = {"version": str(rel.get("tag_name", "")).lstrip("v"), "notes": str(rel.get("body") or "")[:20000],
             "asset": pick_asset(rel)}
     _CACHE.update(etag=etag, info=info)
     return info

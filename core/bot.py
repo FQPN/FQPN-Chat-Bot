@@ -21,6 +21,7 @@ from twitchio.ext import commands
 from . import followdates
 from . import viewerstats
 from . import chatbox
+from . import arena
 from . import auth, botauth, botsay, counters as counters_mod, chatstats, gamesearch, events, giveaway, greetings, logsafe, manage, minigames, moderation, notify, pinfirst, publiclist, blocks
 from .manage import CommandError
 from .store import Store
@@ -1559,6 +1560,17 @@ class TwitchBot(commands.Bot):
         except Exception:
             log.exception("Pin first message failed")
 
+        try:      # 1.19.0: the Arena (Overlays > Arena): !spawn / !attack / !protect. The bot says nothing in chat for them.
+            acfg = arena.cfg_of(self.store)
+            if acfg["on"]:
+                arena.ARENA.seen(chatter.name)      # 1.19.0: writing anything keeps their soldier on the field
+                col = getattr(chatter, "color", None)
+                shade = chatbox.own_color(self.store, str(chatter.id)) or (str(getattr(col, "html", "") or "") if col is not None else "")
+                if arena.ARENA.command(acfg, text, chatter.name, user, shade, level):
+                    return
+        except Exception:
+            log.exception("Arena failed")
+
         # Built-in commands always start with "!"
         if text.startswith(manage.BUILTIN_PREFIX):
             name, _, rest = text[len(manage.BUILTIN_PREFIX):].partition(" ")
@@ -2292,7 +2304,7 @@ class TwitchBot(commands.Bot):
 
     def _game_auto(self) -> None:
         """Automatic rounds while live: each game every N minutes of its own (its settings; 0 = off), counted from that
-        game's last round. Never two rounds at once, and at least a minute after any round ended (no rounds back to back)."""
+        game's last round — or, 1.19.0, one random game every N minutes (All games), which then stands in for those. Never two rounds at once, and at least a minute after any round ended (no rounds back to back)."""
         if not getattr(self, "is_live", False) or self.store.get("settings").get("paused"):
             return
         if self.round is not None and not self.round.over:
@@ -2303,6 +2315,21 @@ class TwitchBot(commands.Bot):
         if self._round_block() is not None:             # the round limit or the cooldown (All games) applies here too
             return
         last = self._auto_started()
+        # 1.19.0: «a random game every N minutes» (All games). While it is on, the games' own timers wait.
+        rand = int(self._game_cfg("shared").get("auto_random_minutes") or 0)
+        if rand:
+            if now - max(last.values()) < rand * 60:
+                return
+            on = [g for g in minigames.GAME_KEYS if self._game_cfg(g).get("enabled")]
+            prev = getattr(self, "_auto_prev", None)
+            pool = [g for g in on if g != prev] or on            # never the same game twice in a row (unless it is the only one)
+            if pool:
+                game = random.choice(pool)
+                self._auto_prev = game
+                last[game] = now
+                self._last_round_end = now
+                asyncio.create_task(self._game_start(game, self._game_cfg(game)))
+            return
         due = []
         for game in minigames.GAME_KEYS:
             cfg = self._game_cfg(game)
