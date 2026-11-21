@@ -461,6 +461,7 @@ def _voice_prefs(data: dict) -> dict:
         "voice_model": data.get("voice_model") if data.get("voice_model") in ("small", "turbo", "best") else "small",
         "voice_gpu": _bool(data.get("voice_gpu", False), "Use the graphics card"),
         "voice_style": data.get("voice_style") if data.get("voice_style") in ("capsule", "orb", "wave", "card") else "orb",
+        "labs_radar": _bool(data.get("labs_radar", False), "Labs: Game Radar"),   # 1.20.0 (beta): off until switched on
         "labs_voice": _bool(data.get("labs_voice", bool(data.get("voice", False))), "Labs: Voice commands"),   # (had Voice on: kept)
         "hotkeys_on": _bool(data.get("hotkeys_on", False), "Hotkeys"),
         "hotkeys": _hotkeys(data.get("hotkeys")),
@@ -727,6 +728,7 @@ def validate(section: str, data, prefix: str = "!"):
             "commands_url": url,
             "disabled_builtins": sorted(set(off)),
             "separate_bot": _bool(data.get("separate_bot", False), "Use a separate bot account"),
+            "bot_as_viewer": _bool(data.get("bot_as_viewer", False), "Treat the bot account like a viewer"),   # 1.20.0
             "bot_sends": _bot_sends(data.get("bot_sends")),       # 1.15.0 (owner): what the bot account sends
             "public_list": _bool(data.get("public_list", False), "Public command list"),
             "public_leaderboard": _bool(data.get("public_leaderboard", True), "Games leaderboard on the public page"),
@@ -916,6 +918,13 @@ def validate(section: str, data, prefix: str = "!"):
         from . import publiclist
         try:
             return publiclist.banner_check(data)
+        except ValueError as e:
+            raise ValidationError(str(e))
+
+    if section == "game_radar":            # 1.20.0: Game Radar's list (core/gameradar.py)
+        from . import gameradar
+        try:
+            return gameradar.clean(data)
         except ValueError as e:
             raise ValidationError(str(e))
 
@@ -1145,6 +1154,7 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             "overlay_has_first": any(isinstance(c, dict) and c.get("action") == "pinfirst" and c.get("enabled", True) is not False
                                      for c in (store.get("commands") or {}).values()),
             "voice": _voice_brief(),                      # 1.17.0 (beta): a voice question waiting for yes / no
+            "radar": _radar_brief(),                      # 1.20.0: Game Radar: the game open now, a question waiting
             "avatar": state.get("avatar") if account else None,
             "lost": bool(state.get("lost")),
             "health": health_info(state),
@@ -1264,7 +1274,11 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
         """1.13.0: make a new editor link (a new password, shown once) or cancel it."""
         try:
             if request.match_info["action"] == "create":
-                return web.json_response(await editor.create(store, state.get("account") or ""))
+                try:
+                    hours = int((await request.json()).get("hours", 0))
+                except Exception:
+                    hours = 0
+                return web.json_response(await editor.create(store, state.get("account") or "", hours=hours))
             if request.match_info["action"] == "cancel":
                 await editor.cancel(store)
                 return web.json_response({"ok": True})
@@ -1397,6 +1411,11 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             b = await _backup_read(request)
         except backup.BackupError as e:
             return web.json_response({"error": str(e)}, status=400)
+        return _restore_parsed(b)
+
+    def _restore_parsed(b):
+        """1.14.0 (1.20.0: also used by Cloud backup): save the current setup aside, then restore the parts that pass."""
+        from . import backup
         safety = backup.file_name("FQPN-Chat-Bot-before-restore", minutes=True)
         try:
             (store.dir / safety).write_text(backup.dumps(_backup_now()), encoding="utf-8")
@@ -1425,6 +1444,127 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
         res = backup.restore(store, b, lambda n, d: validate(n, keep_tour_flag(n, d, store)), side_effects)
         log.info("Backup restored (%d parts; skipped: %s); the setup before is %s", len(res["restored"]), res["skipped"], safety)
         return web.json_response(dict(res, safety=safety, summary=backup.summary(b)))
+
+    # ---------- 1.20.0: Cloud backup (Settings > App) ----------
+
+    def _cloud_view(extra=None):
+        from . import cloudbackup as C
+        s = C.settings(store)
+        bot = state.get("bot")
+        out = {"target": s["target"], "mode": s["mode"], "folder": s["folder"], "email": s["email"], "asked": bool(s["asked"]),
+               "last": s["last"], "error": s["error"], "error_detail": s.get("error_detail") or "", "connected": s["target"] == "drive" and bool(C.load_refresh()),
+               "live": bool(getattr(bot, "is_live", False)), "folder_picker": desktop.folder_dialog is not None,
+               "signing_in": bool(C.PENDING.get("state")), "keep": C.KEEP}
+        out.update(extra or {})
+        return web.json_response(out)
+
+    async def _cloud_found():
+        """After connecting: a backup of this channel that this PC never made (a new PC) is offered right away."""
+        from . import cloudbackup as C
+        if (C.settings(store).get("last") or None) is not None:
+            return None
+        try:
+            got = await C.history(store, str(state.get("account") or ""))
+        except C.CloudError:
+            return None
+        return got[0] if got else None
+
+    async def cloud_view(request):
+        return _cloud_view()
+
+    async def cloud_action(request):
+        from . import cloudbackup as C, backup
+        action = request.match_info["action"]
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        login = str(state.get("account") or "")
+        try:
+            if action == "asked":
+                C.save_settings(store, asked=True)
+            elif action == "mode":
+                C.save_settings(store, mode="manual" if body.get("mode") == "manual" else "auto")
+            elif action == "drive_connect":
+                import webbrowser
+                if body.get("mode") in ("auto", "manual"):
+                    C.save_settings(store, mode=body["mode"])
+                link = C.start_signin()
+                await asyncio.to_thread(webbrowser.open, link)
+                return _cloud_view({"link": link})
+            elif action == "drive_check":
+                done = await C.check_signin()
+                if done is None:
+                    return web.json_response({"waiting": True})
+                email = await C.drive_email()
+                C.save_settings(store, target="drive", email=email, asked=True, error="", drive_folder="", last=None)
+                return _cloud_view({"found": await _cloud_found()})
+            elif action == "drive_cancel":
+                C.PENDING.clear()
+            elif action == "folder":
+                folder = ""
+                if desktop.folder_dialog is not None:
+                    folder = await asyncio.get_running_loop().run_in_executor(None, desktop.folder_dialog) or ""
+                elif isinstance(body.get("folder"), str):          # (running in a browser, from source)
+                    folder = body["folder"].strip()
+                if not folder:
+                    return _cloud_view({"cancelled": True})
+                from pathlib import Path
+                if not Path(folder).is_dir():
+                    raise C.CloudError("missing", folder)
+                if body.get("mode") in ("auto", "manual"):
+                    C.save_settings(store, mode=body["mode"])
+                old = C.settings(store)
+                if old["target"] == "drive":
+                    await C.disconnect()
+                C.save_settings(store, target="folder", folder=folder[:400], email="", asked=True, error="", last=None)
+                return _cloud_view({"found": await _cloud_found()})
+            elif action == "disconnect":
+                if C.settings(store)["target"] == "drive":
+                    await C.disconnect()
+                C.save_settings(store, target="", email="", error="", drive_folder="", last=None)
+            elif action == "now":
+                await C.back_up(store, _backup_now(), login, "now")
+            elif action == "history":
+                return _cloud_view({"history": await C.history(store, login)})
+            elif action == "restore":
+                text = await C.fetch(store, str(body.get("id") or ""))
+                try:
+                    b = backup.read(text)
+                except backup.BackupError as e:
+                    return web.json_response({"error": str(e)}, status=400)
+                try:                                  # the setup before goes to the cloud too (a restore can be undone from any PC)
+                    await C.back_up(store, _backup_now(), login, "before")
+                except C.CloudError:
+                    pass
+                return _restore_parsed(b)
+            else:
+                raise web.HTTPNotFound()
+        except C.CloudError as e:
+            return web.json_response({"error": e.code, "detail": e.detail}, status=400)
+        return _cloud_view()
+
+    async def cloud_loop(app_):
+        """1.20.0: the automatic Cloud backup (every minute: back up once nothing changed for 5 minutes; never while live)."""
+        from . import cloudbackup as C
+        await asyncio.sleep(30)
+        while True:
+            try:
+                bot = state.get("bot")
+                await C.AUTO.tick(store, _backup_now, str(state.get("account") or ""), bool(getattr(bot, "is_live", False)))
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("Cloud backup tick failed")
+            await asyncio.sleep(C.TICK)
+
+    async def cloud_start(app_):
+        app_["cloud_task"] = asyncio.create_task(cloud_loop(app_))
+
+    async def cloud_stop(app_):
+        t = app_.get("cloud_task")
+        if t:
+            t.cancel()
 
     async def test_commands(request):
         """1.14.0: every command the Test chat can try (as the test sees them: your real ones plus any test-only change)."""
@@ -1561,6 +1701,8 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
                 bot = state.get("bot")
                 owner = str(((getattr(bot, "account", None) or {}).get("login")) or "") if bot is not None else ""
                 writer = str(((getattr(bot, "bot_account", None) or {}).get("login")) or "") if bot is not None and getattr(bot, "separate", False) else ""
+                if (store.get("settings") or {}).get("bot_as_viewer"):
+                    writer = ""          # 1.20.0: a person on the bot account shows like any viewer (the app's own messages are still marked as the bot's)
                 try:
                     items = chatbox.view(store, cb, bot, owner, writer)
                 except Exception:
@@ -1577,7 +1719,7 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
             after = 0
         if acfg["on"]:
             arena.ARENA.sweep(acfg)                 # 1.19.0: soldiers of viewers who have gone quiet walk off
-        ar = dict(arena.ARENA.view(after), cfg={k: acfg[k] for k in ("on", "max", "grow", "crown", "size", "names", "blood", "ground", "left", "right")})
+        ar = dict(arena.ARENA.view(after), cfg={k: acfg[k] for k in ("on", "kind", "speed", "max", "grow", "crown", "size", "names", "blood", "ground", "left", "right")})   # 1.20.0: + kind (soldiers or bears)
         return web.json_response({"counters": [dict(r, icon=overlays.icon_for(r["name"]), pos=pos.get("c:" + r["name"])) for r in rows],
                                   "chat": chat, "arena": ar,
                                   "first": first, "lang": lang, "has_first_cmd": bool(cmds), "order": counters_mod.order(store),
@@ -1807,6 +1949,98 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
                 state["publist_wake"].set()
             return web.json_response({"done": done, "commands": store.get("commands"), "timers": store.get("timers")})
         raise web.HTTPNotFound()
+
+    def _radar_on():
+        return bool((store.get("prefs") or {}).get("labs_radar"))
+
+    def _radar_brief():
+        from .gameradar import RADAR
+        if not _radar_on():
+            return None
+        try:
+            return RADAR.view(full=False)
+        except Exception:
+            log.exception("Game Radar view failed")
+            return None
+
+    async def radar_view(request):
+        """1.20.0: the Game Radar page: the game open now, the switch, the list of games."""
+        from .gameradar import RADAR
+        RADAR.store = store
+        if _radar_on():
+            RADAR.start()                  # (switched on just now: no need to wait for the next tick)
+        return web.json_response(dict(RADAR.view(), on=_radar_on()))
+
+    async def radar_action(request):
+        from . import gameradar
+        R = gameradar.RADAR
+        R.store = store
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        body = body if isinstance(body, dict) else {}
+        action = request.match_info["action"]
+        exe = str(body.get("exe") or "")[:120]
+        if action == "switch":
+            if body.get("mode") not in gameradar.SWITCH_MODES:
+                return web.json_response({"error": "bad mode"}, status=400)
+            R.set_switch(body["mode"])
+        elif action == "edit":
+            fields = {k: str(body[k]) for k in ("name", "cat", "en", "ar") if isinstance(body.get(k), str)}
+            if not R.edit(exe, fields):
+                return web.json_response({"error": "no program"}, status=400)
+            if isinstance(body.get("desc"), str):      # one description: the other language is translated from it
+                await asyncio.get_running_loop().run_in_executor(None, R.describe, exe.strip().lower(), body["desc"])
+        elif action == "notgame":
+            R.not_a_game(exe)
+        elif action == "unignore":
+            R.unignore(exe)
+        elif action == "later":
+            R.later()
+        elif action == "demo":                     # a demo: use Twitch's "Games + Demos" (yes) or keep the game's own
+            R.answer_demo(bool(body.get("yes")))
+        elif action == "programs":
+            loop = asyncio.get_running_loop()
+            return web.json_response({"programs": await loop.run_in_executor(None, R.programs)})
+        elif action in ("answer", "now"):          # "Switch?" answered, or the page's "Switch to X" button
+            g = R.answer_prompt(bool(body.get("yes"))) if action == "answer" else R.current()
+            bot = state.get("bot")
+            if g:
+                if not (bot and getattr(bot, "connected", False)):
+                    return web.json_response({"error": "offline"}, status=409)
+                await gameradar.switch(bot, g)
+        else:
+            raise web.HTTPNotFound()
+        return web.json_response(R.view())
+
+    async def radar_loop(app_):
+        """Game Radar (Labs, beta): scanning runs on its own thread while it's switched on; this follows it with the Twitch
+        category every few seconds. Switched off, nothing is scanned and $(gameinfo) says nothing is open."""
+        from . import gameradar
+        R = gameradar.RADAR
+        R.store = store
+        while True:
+            try:
+                R.store = store
+                if _radar_on():
+                    R.start()
+                    await gameradar.tick(state.get("bot"))
+                elif R.running():
+                    R.stop()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("Game Radar tick failed")
+            await asyncio.sleep(5)
+
+    async def radar_start(app_):
+        app_["radar_task"] = asyncio.create_task(radar_loop(app_))
+
+    async def radar_stop(app_):
+        t = app_.get("radar_task")
+        if t:
+            t.cancel()
 
     async def voice_view(request):
         """1.17.0 (beta): Settings > Voice: the download, the speech engine, the last thing heard, a waiting question."""
@@ -2143,6 +2377,10 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
     app.router.add_post("/api/backup/save", backup_save)      # 1.14.0: Backup & restore (Settings > App)
     app.router.add_post("/api/backup/check", backup_check)
     app.router.add_post("/api/backup/restore", backup_restore)
+    app.router.add_get("/api/cloud", cloud_view)                       # 1.20.0: Cloud backup
+    app.router.add_post("/api/cloud/{action}", cloud_action)
+    app.on_startup.append(cloud_start)
+    app.on_cleanup.append(cloud_stop)
     app.router.add_post("/api/test/{action}", test_action)
     app.router.add_get("/api/giveaway", giveaway_view)      # 1.13.0: Giveaways
     app.router.add_post("/api/titlebar", titlebar_set)      # 1.13.0: the window's top bar in the app's colors
@@ -2187,6 +2425,10 @@ def create_app(store: Store, state: dict, port: int | None = None) -> web.Applic
     app.router.add_post("/api/update/install", update_install)
     app.router.add_post("/api/notify/test", notify_test)
     app.router.add_post("/api/publist/sync", publist_sync)
+    app.router.add_get("/api/radar", radar_view)                       # 1.20.0: Game Radar
+    app.router.add_post("/api/radar/{action}", radar_action)
+    app.on_startup.append(radar_start)
+    app.on_cleanup.append(radar_stop)
     app.router.add_get("/api/{section}", read)
     app.router.add_put("/api/{section}", write)
     return app

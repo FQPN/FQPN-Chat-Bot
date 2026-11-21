@@ -22,6 +22,9 @@ from . import followdates
 from . import viewerstats
 from . import chatbox
 from . import arena
+from . import gameradar
+from . import tokenrenew
+tokenrenew.install()          # 1.20.0: one renewal per Twitch renewal key, app-wide (TwitchIO's and the app's own)
 from . import auth, botauth, botsay, counters as counters_mod, chatstats, gamesearch, events, giveaway, greetings, logsafe, manage, minigames, moderation, notify, pinfirst, publiclist, blocks
 from .manage import CommandError
 from .store import Store
@@ -323,9 +326,15 @@ class TwitchBot(commands.Bot):
             log.exception("Could not count a chat message")
             return False
 
+    def _bot_viewer(self) -> bool:
+        """1.20.0 (Bot account page): what a person types on the bot account counts like any viewer's message. The app's
+        own messages from that account (replies, timers, greetings) are recognised as its own and never count."""
+        return bool((self.store.get("settings") or {}).get("bot_as_viewer"))
+
     def _not_counted(self, uid: str, login: str) -> bool:
         """1.18.0: the channel itself, the bot that writes here and known bots never get messages or watch time."""
-        return (not uid or uid in (str(self.owner_id or ""), str(getattr(self, "writer_id", "") or ""))
+        me = str(getattr(self, "writer_id", "") or "")
+        return (not uid or uid == str(self.owner_id or "") or (uid == me and not self._bot_viewer())
                 or login in greetings.KNOWN_BOTS)
 
     def _count_viewer(self, payload) -> None:
@@ -342,8 +351,9 @@ class TwitchBot(commands.Bot):
 
     WATCH_EVERY = 300          # 1.18.0: seconds between looks at who is in the chat (only while live)
 
-    async def _chatters(self):
-        """Everyone in the chat right now [(uid, login, name)], or None (with self.watch_problem set). Needs the channel
+    async def _in_chat_now(self):
+        """1.20.0: renamed from _chatters, which the list of recent chatters (self._chatters, a dict) hid: watch time
+        failed every 5 minutes with "'dict' object is not callable" and never counted. Everyone in the chat right now [(uid, login, name)], or None (with self.watch_problem set). Needs the channel
         login's "moderator:read:chatters" permission (an older login: log out and in once)."""
         data = auth.load_token() or {}
         if data.get("scopes") and "moderator:read:chatters" not in (data.get("scopes") or []):
@@ -393,7 +403,7 @@ class TwitchBot(commands.Bot):
                 if time.time() - last < self.WATCH_EVERY:
                     continue
                 last = time.time()
-                people = await self._chatters()
+                people = await self._in_chat_now()
                 if people is None:
                     vs.offline()                    # (a missed look isn't counted as watch time later)
                     continue
@@ -468,8 +478,14 @@ class TwitchBot(commands.Bot):
                 await owner.send_announcement(moderator=writer, message=body, color=color)
                 self._log_bot(body, payload, why, user)
                 return
-            except Exception:
-                log.exception("Announcement failed (reconnect Twitch to grant the permission); sending as a normal message")
+            except Exception as e:
+                st = getattr(e, "status", None)
+                if st == 429 or "Too many announcements" in str(e):      # 1.20.0: Twitch's limit, not a missing permission
+                    log.warning("Twitch allows only a few announcements in a row: this one is sent as a normal message")
+                elif st in (401, 403):
+                    log.warning("Announcement refused (reconnect Twitch to grant the permission): sent as a normal message")
+                else:
+                    log.exception("Announcement failed; sending as a normal message")
             text = body
 
         text = text[:500]
@@ -800,6 +816,7 @@ class TwitchBot(commands.Bot):
             followed_of=self._followed_of,
             first_of=lambda login, peak: (pinfirst.peak_of if peak else pinfirst.streak_of)(self.store.get("first_state"), login),
             viewer_stat=lambda login, kind: self._viewer_stat(login, kind, chatter, user),
+            playing=gameradar.RADAR.current,
         )
 
     # ---------- 1.13.0 variables ----------
@@ -807,7 +824,7 @@ class TwitchBot(commands.Bot):
     def _saw_chatter(self, chatter) -> None:
         """Remembers who wrote lately (never the bot itself): $(random.chatter) picks one of the last 30 minutes."""
         login = str(getattr(chatter, "name", "") or "").lower()
-        if not login or str(getattr(chatter, "id", "")) == self.writer_id:
+        if not login or (str(getattr(chatter, "id", "")) == self.writer_id and not self._bot_viewer()):
             return
         now = time.time()
         self._chatters[login] = (now, str(getattr(chatter, "display_name", None) or login))
@@ -886,7 +903,7 @@ class TwitchBot(commands.Bot):
             return False
         chatter = payload.chatter
         login = str(getattr(chatter, "name", "") or "").lower()
-        if not login or str(getattr(chatter, "id", "")) == self.writer_id:
+        if not login or (str(getattr(chatter, "id", "")) == self.writer_id and not self._bot_viewer()):
             return False
         is_owner = str(getattr(chatter, "id", "")) == str(self.owner_id or "") or bool(getattr(chatter, "broadcaster", False))
         commands = self.store.get("commands") or {}
@@ -1494,9 +1511,11 @@ class TwitchBot(commands.Bot):
                 except Exception:
                     log.exception("Moderation failed")
             return
-        if (self.separate or self.sender is not None) and str(getattr(payload.chatter, "id", "")) == self.writer_id:
+        if (self.separate or self.sender is not None) and str(getattr(payload.chatter, "id", "")) == self.writer_id \
+                and not self._bot_viewer():
             self._cb_add(payload, bot=True)
-            return      # whatever the bot account writes is never treated as a command
+            return      # whatever the bot account writes is never treated as a command (1.20.0: unless "like a normal viewer" is on;
+                        # its own replies were already caught above as the app's echo)
         try:            # 1.17.1: the Falkorie bot says someone reached a level or shows their streak: an Events reply
             f = events.falkorie(getattr(payload.chatter, "name", ""), clean_chat(payload.text))
             if f:
@@ -1560,13 +1579,18 @@ class TwitchBot(commands.Bot):
         except Exception:
             log.exception("Pin first message failed")
 
-        try:      # 1.19.0: the Arena (Overlays > Arena): !spawn / !attack / !protect. The bot says nothing in chat for them.
+        try:      # 1.19.0: the Arena (Overlays > Arena): !spawn / !attack / !protect. The bot says nothing in chat for them (1.20.0: except !arena, the list of commands).
             acfg = arena.cfg_of(self.store)
             if acfg["on"]:
                 arena.ARENA.seen(chatter.name)      # 1.19.0: writing anything keeps their soldier on the field
                 col = getattr(chatter, "color", None)
                 shade = chatbox.own_color(self.store, str(chatter.id)) or (str(getattr(col, "html", "") or "") if col is not None else "")
-                if arena.ARENA.command(acfg, text, chatter.name, user, shade, level):
+                said = arena.ARENA.command(acfg, text, chatter.name, user, shade, level)
+                if said == "help":      # 1.20.0: !arena: the bot lists every Arena command in chat
+                    lang = "ar" if (self.store.get("ui") or {}).get("language") == "ar" else "en"
+                    await self._send(arena.Arena.help_text(acfg, lang), payload, why="arena:help")
+                    return
+                if said:
                     return
         except Exception:
             log.exception("Arena failed")
@@ -1855,6 +1879,21 @@ class TwitchBot(commands.Bot):
         except Exception:
             log.exception("Game change failed")
             await self._send(self._bt("Couldn't change the game. Reconnect Twitch to grant the new permission."), payload)
+
+    async def radar_category(self, name: str) -> dict:
+        """1.20.0 Game Radar: the Twitch category becomes this game. Says nothing in chat.
+        {"ok": True, "name": Twitch's name} or {"ok": False, "why": "notfound" | "reconnect"}."""
+        game = await self._find_game(" ".join(str(name or "").split())[:100])
+        if game is None:
+            return {"ok": False, "why": "notfound"}
+        try:
+            await self.create_partialuser(self.owner_id).modify_channel(game_id=game[0])
+        except Exception:
+            log.exception("Game Radar: category change failed")
+            return {"ok": False, "why": "reconnect"}
+        self._chan_ts = 0
+        log.info("Game Radar: Twitch category is now %s", game[1])
+        return {"ok": True, "name": game[1]}
 
     async def _find_game(self, query: str):
         """(id, name) of the game people mean, or None. The exact name first (any capitals); otherwise Twitch's own search,

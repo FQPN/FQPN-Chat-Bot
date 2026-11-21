@@ -78,12 +78,12 @@ ANNOUNCE_RE = re.compile(r"^/announce(?:blue|green|orange|purple)?\s+", re.IGNOR
 SAMPLES = {   # 1.13.0: what a reply looks like on the public page: variables become example values, in the app's language
     "en": {"user": "viewer", "touser": "sam", "query": "…", "querystring": "…", "count": "7", "getcount": "7", "game": "(the game)", "title": "(the stream title)",
            "uptime": "2h 15m", "viewers": "120", "followers": "(the follower count)", "follow": "1 year, 2 months", "followage": "1 year, 2 months",
-           "followdate": "Jan 5, 2025", "accountage": "3 years, 4 months", "random.chatter": "(a random viewer)", "firststreak": "3", "firststreakpeak": "7", "watchtime": "34 hours, 12 minutes", "messages": "1,250",
+           "followdate": "Jan 5, 2025", "accountage": "3 years, 4 months", "random.chatter": "(a random viewer)", "firststreak": "3", "firststreakpeak": "7", "watchtime": "34 hours, 12 minutes", "messages": "1,250", "gameinfo": "Playing (the game) — (its description)", "gamename": "(the game)",
            "weather": "(the weather in {a})", "time": "(the time in {a})", "eval": "(a calculated value)", "urlfetch": "(text from a website)",
            "act_game": "(moderators change the stream's game with it)", "act_title": "(moderators change the stream title with it)", "clip": "(a clip link)"},
     "ar": {"user": "مشاهد", "touser": "سامي", "query": "…", "querystring": "…", "count": "7", "getcount": "7", "game": "(اللعبة)", "title": "(عنوان البث)",
            "uptime": "2س 15د", "viewers": "120", "followers": "(عدد المتابعين)", "follow": "سنة وشهران", "followage": "سنة وشهران",
-           "followdate": "5 يناير 2025", "accountage": "3 سنوات و4 أشهر", "random.chatter": "(مشاهد عشوائي)", "firststreak": "3", "firststreakpeak": "7", "watchtime": "34 ساعة و12 دقيقة", "messages": "1,250",
+           "followdate": "5 يناير 2025", "accountage": "3 سنوات و4 أشهر", "random.chatter": "(مشاهد عشوائي)", "firststreak": "3", "firststreakpeak": "7", "watchtime": "34 ساعة و12 دقيقة", "messages": "1,250", "gameinfo": "يلعب (اللعبة) — (وصفها)", "gamename": "(اللعبة)",
            "weather": "(الطقس في {a})", "time": "(الوقت في {a})", "eval": "(قيمة محسوبة)", "urlfetch": "(نص من موقع)",
            "act_game": "(يغيّر به المشرفون لعبة البث)", "act_title": "(يغيّر به المشرفون عنوان البث)", "clip": "(رابط كليب)"},
 }

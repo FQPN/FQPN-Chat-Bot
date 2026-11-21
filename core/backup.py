@@ -15,7 +15,8 @@ FORMAT = 1                      # the file layout; a newer one is refused ("upda
 # What a backup holds (store names). The giveaway part is its settings only (never a running giveaway or its entries).
 PARTS = ["commands", "timers", "events", "greetings", "blocklist", "moderation", "games", "game_wins", "counters",
          "stream", "giveaway", "settings", "prefs", "ui", "follow_dates", "voice_fixes", "chatbox", "public_banner",
-         "viewer_stats", "chat_colors"]     # 1.18.0 (Twitch panel): each viewer's messages and watch time     # 1.18.0: + first follow dates, Voice spelling fixes
+         "viewer_stats", "chat_colors", "game_radar",
+         "arena", "counter_overlay", "counter_meta", "event_totals", "panel"]   # 1.20.0: also the Arena, the counters on stream, {total} amounts and the Twitch panel switch     # 1.18.0 (Twitch panel): each viewer's messages and watch time     # 1.18.0: + first follow dates, Voice spelling fixes
 MAX_BYTES = 5_000_000
 
 
@@ -109,6 +110,9 @@ def restore(store, backup: dict, validate, apply_side_effects=None) -> dict:
                 done.append(name)
                 continue
             if name == "viewer_stats":          # 1.18.0: merged, each number the bigger one (nothing is lost)
+                if raw == {}:                   # 1.20.0: no numbers yet in that backup: nothing to merge (it isn't "skipped")
+                    done.append(name)
+                    continue
                 if not isinstance(raw, dict) or not isinstance(raw.get("users"), dict):
                     raise ValueError("viewer_stats")
                 data = merge_viewer_stats(store.get("viewer_stats") or {}, raw)
@@ -122,6 +126,18 @@ def restore(store, backup: dict, validate, apply_side_effects=None) -> dict:
                 from . import chatbox
                 data = chatbox.clean_colors(raw)
                 store.save(name, data, allow_empty=True)
+                done.append(name)
+                continue
+            if name in ("counter_overlay", "counter_meta", "event_totals", "panel"):   # 1.20.0: plain settings, checked for shape
+                if not isinstance(raw, dict):
+                    raise ValueError(name)
+                if name == "event_totals":
+                    raw = {str(k)[:20]: {str(u)[:80]: v for u, v in list(m.items())[:200000]
+                                         if isinstance(v, (int, float)) and not isinstance(v, bool)}
+                           for k, m in raw.items() if isinstance(m, dict)}
+                if name == "panel":
+                    raw = {"on": bool(raw.get("on"))}
+                store.save(name, raw, allow_empty=True)
                 done.append(name)
                 continue
             if name == "counters":

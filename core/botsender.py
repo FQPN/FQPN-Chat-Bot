@@ -19,7 +19,7 @@ from collections import deque
 
 import aiohttp
 
-from . import accounts, auth, safefile
+from . import accounts, auth, safefile, tokenrenew
 
 log = logging.getLogger("twitchbot.botsender")
 HELIX = "https://api.twitch.tv/helix/"
@@ -27,6 +27,12 @@ WINDOW = 30.0
 LIMIT_USER, LIMIT_MOD = 20, 100
 MAX_WAIT = 15.0            # wait at most this long for a free send slot, then give up (never pile up minutes of replies)
 MOD_TTL = 120.0            # how long "is the bot a moderator there?" is trusted
+
+
+class _Refused(Exception):
+    def __init__(self, status):
+        super().__init__(("Invalid refresh token: " if status in (400, 401) else "") + f"renewal refused ({status})")   # (the words bot.py looks for)
+        self.status = status
 
 
 class SendError(Exception):
@@ -85,13 +91,25 @@ class BotSender:
             return data["access_token"]
 
     async def _renew(self, refresh_token: str, scopes=None):
-        """(status, new login data or None). One renewal with Twitch."""
-        status, resp = await self._call("POST", auth.TOKEN_URL, form={"client_id": auth.CLIENT_ID, "grant_type": "refresh_token",
-                                                                      "refresh_token": refresh_token})
-        if status != 200 or not resp.get("access_token"):
-            return status, None
-        return status, {"access_token": resp["access_token"], "refresh_token": resp.get("refresh_token", refresh_token),
-                        "expires_at": self.clock() + int(resp.get("expires_in", 0)), "scopes": resp.get("scope", scopes or [])}
+        """(status, new login data or None). One renewal with Twitch. 1.20.0: through tokenrenew, so a key the channel's
+        running bot (TwitchIO) is renewing at the same moment is never sent to Twitch a second time."""
+        got = {}
+
+        async def fetch():
+            status, resp = await self._call("POST", auth.TOKEN_URL, form={"client_id": auth.CLIENT_ID, "grant_type": "refresh_token",
+                                                                          "refresh_token": refresh_token})
+            got["status"] = status
+            if status != 200 or not isinstance(resp, dict) or not resp.get("access_token"):
+                raise _Refused(status)
+            return resp
+        try:
+            resp = await tokenrenew.renew(refresh_token, fetch)
+        except _Refused as e:
+            return e.status, None
+        except Exception:
+            return got.get("status", 400) or 400, None   # (another part's renewal with this key was refused)
+        return 200, {"access_token": resp["access_token"], "refresh_token": resp.get("refresh_token", refresh_token),
+                     "expires_at": self.clock() + int(resp.get("expires_in", 0)), "scopes": resp.get("scope") or scopes or []}
 
     def _old_copies(self) -> list:
         """Older files that may hold this bot's login: each channel's bot_token.json (before 1.12.0 / copied when the bot

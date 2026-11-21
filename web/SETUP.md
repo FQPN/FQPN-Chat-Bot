@@ -107,3 +107,34 @@ How it works: the app opens `fqpnbot.com/nightbot/start` in the browser with a l
 yes on Nightbot, the website swaps Nightbot's answer for a key and keeps it for at most 10 minutes (in the table
 `nightbot_auth`, only the hash of the code); the app picks it up once, reads the commands and timers, and gives the key
 back to Nightbot. Nothing is kept.
+
+## 1.20.0: Cloud backup to Google Drive (Settings → App → Cloud backup)
+"A folder on this PC" works without any setup. "Google Drive" needs a Google app, because Google's sign-in uses a secret
+key that must only live in Cloudflare. One time:
+
+1. Open <https://console.cloud.google.com/> and sign in with the Google account that will own the app.
+2. Top bar → project picker → **New project** → Name: `FQPN Chat Bot` → **Create**, and make sure it's selected.
+3. Menu → **APIs & Services** → **Library** → search **Google Drive API** → **Enable**.
+4. Menu → **APIs & Services** → **OAuth consent screen** (or **Google Auth Platform**) → **Get started**:
+   - App name: `FQPN's Chat Bot`, support email: yours → Audience: **External** → contact email: yours → **Create**.
+   - **Data access** → **Add or remove scopes** → tick `.../auth/drive.file` ("See, edit, create, and delete only the
+     specific Google Drive files you use with this app") → **Update** → **Save**.
+   - **Audience** → **Publish app** (so every streamer can sign in, not only test users). `drive.file` is a
+     non-sensitive permission, so Google doesn't ask for a review.
+5. **Clients** (or **Credentials** → **Create credentials** → **OAuth client ID**) → Application type: **Web application** →
+   Name: `fqpnbot.com` → Authorized redirect URIs → **Add URI**: `https://fqpnbot.com/gdrive/callback` (exactly) → **Create**.
+6. Copy the **Client ID** and the **Client secret** straight into Cloudflare → Workers & Pages → the worker → **Settings**
+   → **Variables and Secrets**:
+   - Type **Text**, name `GOOGLE_CLIENT_ID`, value = the Client ID.
+   - Type **Secret**, name `GOOGLE_CLIENT_SECRET`, value = the Client secret.
+   → **Deploy**.
+7. Paste the new `worker.js` into the worker (Edit code → paste → Deploy), as with every website update.
+
+Never put the Client secret anywhere else (not in the app, not on GitHub, not in a chat). If it ever leaks: Google Cloud
+→ the client → **Add secret** / delete the old one, and replace `GOOGLE_CLIENT_SECRET` in Cloudflare.
+
+How it works: the app opens `fqpnbot.com/gdrive/start` in the browser with a long random code; after the streamer says
+yes on Google, the website swaps Google's answer for the keys and keeps them for at most 10 minutes (table `gdrive_auth`,
+only the hash of the code); the app picks them up once. Every hour the app asks `fqpnbot.com/api/gdrive/refresh` for a
+fresh key: the website adds the secret, passes Google's answer on and keeps nothing. With `drive.file` the app can only
+see the backup files it made itself (folder "FQPN's Chat Bot backups" in the streamer's Drive), nothing else.

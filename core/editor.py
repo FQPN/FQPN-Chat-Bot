@@ -2,7 +2,8 @@
 
 The app makes the link: a 256-bit secret for the URL and a NEW password every time (shown to the streamer once). Only their
 SHA-256 hashes go to the website, with a private copy of the commands for the editor page. One link at a time: a new one,
-Cancel, 24 hours, or 5 wrong passwords end it.
+Cancel, its time running out, or 5 wrong passwords end it. 1.20.0: the streamer picks how long it works: until they
+cancel it (the default), 7 days or 24 hours.
 While a link is active, the Syncer (one per channel) takes the waiting edits from the website every few seconds, checks each
 with the app's OWN rules (the same as a save from the dashboard), saves it, writes it in the Logs (who / what), tells the
 website applied or refused (with the reason), and sends the new copy. Shortcuts (game / title) and commands with special
@@ -20,6 +21,8 @@ from . import auth, publiclist
 log = logging.getLogger("twitchbot.editor")
 ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"        # no 0/O, 1/I/L: easy to read out and type
 LINK_HOURS = 24
+HOURS_CHOICES = (0, 168, 24)          # 1.20.0: 0 = until the streamer cancels it (the default), 7 days, 24 hours
+RESEND = 600                          # 1.20.0: an unchanged copy is sent again only every 10 min (it was every minute)
 # 1.13.0: the editor uses the app's OWN pages. These tools can be changed through the link; the rest of the app is not there
 # (login, bot accounts, donations, app settings, support, users). Logs are shown, read-only. From "settings" only the
 # built-in commands' on/off can change.
@@ -83,7 +86,11 @@ def full_copy(store) -> dict:
         logs["counts"] = store.activity.counts()
     except Exception:
         logs["counts"] = {}
-    return {"sections": sections, "digests": {n: digest(sections[n]) for n in EDITABLE + ("settings",)}, "logs": logs}
+    digests = {n: digest(sections[n]) for n in EDITABLE + ("settings",)}
+    # 1.20.0: two fingerprints so the editor's page knows WHAT changed: "rev" (the tools: reload them) and "logrev" (only
+    # the Logs). A new log line or going live no longer reloads (and redraws) every tool under the editor's fingers.
+    head = {t: (logs.get(t) or [None])[0] for t in ("activity", "moderation", "bot")}
+    return {"sections": sections, "digests": digests, "logs": logs, "rev": digest(digests)[:16], "logrev": digest(head)[:16]}
 
 
 def clean_status(st: dict) -> dict:
@@ -102,6 +109,16 @@ def page_html() -> str:
     return (Path(__file__).resolve().parent / "dashboard.html").read_text(encoding="utf-8")
 
 
+_PAGE_SHA = {}
+
+
+def page_sha() -> str:
+    """The page's fingerprint, worked out once per app start (the file only changes with an app update)."""
+    if "v" not in _PAGE_SHA:
+        _PAGE_SHA["v"] = sha256(page_html())
+    return _PAGE_SHA["v"]
+
+
 def state_of(store) -> dict:
     st = dict(store.get("editor_state") or {})
     if st.get("active") and float(st.get("expires") or 0) <= time.time():
@@ -109,8 +126,10 @@ def state_of(store) -> dict:
     return st
 
 
-async def create(store, login: str, send=None) -> dict:
-    """A new link + password (the old link ends at once). Returns {url, password, expires}; raises EditorError."""
+async def create(store, login: str, send=None, hours: int = 0) -> dict:
+    """A new link + password (the old link ends at once). Returns {url, password, expires, forever}; raises EditorError.
+    hours: 0 = until the streamer cancels it (1.20.0, the default), 168 = 7 days, 24 = 24 hours."""
+    hours = hours if hours in HOURS_CHOICES else 0
     token = auth.load_token() or {}
     if not token.get("access_token") or not login:
         raise EditorError("Connect Twitch first.")
@@ -120,7 +139,7 @@ async def create(store, login: str, send=None) -> dict:
     password = new_password()
     salt = secrets.token_hex(16)
     body = {"token_hash": sha256(secret), "pw_salt": salt, "pw_hash": sha256(salt + password),
-            "commands": snapshot(store.get("commands"))}
+            "commands": snapshot(store.get("commands")), "hours": hours}
     code, resp, _ = await (send or publiclist.http_send)("PUT", token["access_token"], body, path="/api/editor/link")
     if code != 200:
         raise EditorError(resp.get("error") or ("The website can't be reached." if code == 0 else f"The website answered {code}."))
@@ -128,10 +147,12 @@ async def create(store, login: str, send=None) -> dict:
     if code2 != 200:
         raise EditorError(resp2.get("error") or "The website couldn't take the app's page.")
     url = f"{publiclist.SITE}/{login}/edit/{secret}"
-    expires = int(resp.get("expires") or time.time() + LINK_HOURS * 3600)
-    store.save("editor_state", {"active": True, "url": url, "expires": expires, "made": int(time.time()), "applied": 0})
-    log.info("Made an editor link (ends in %d h)", LINK_HOURS)
-    return {"url": url, "password": password, "expires": expires}
+    expires = int(resp.get("expires") or time.time() + (hours or LINK_HOURS) * 3600)
+    forever = hours == 0 and bool(resp.get("forever", expires - time.time() > 5 * 365 * 86400))
+    store.save("editor_state", {"active": True, "url": url, "expires": expires, "forever": forever, "made": int(time.time()),
+                                "applied": 0, "page": page_sha()})
+    log.info("Made an editor link (%s)", "until cancelled" if forever else f"ends in {hours or LINK_HOURS} h")
+    return {"url": url, "password": password, "expires": expires, "forever": forever}
 
 
 async def cancel(store, send=None) -> None:
@@ -271,7 +292,12 @@ class Syncer:
             status = {}
         d = digest([copy_["digests"], len(copy_["logs"].get("activity") or []), (copy_["logs"].get("activity") or [{}])[0] if copy_["logs"].get("activity") else None,
                     status.get("live"), status.get("connected")])
-        if d != self.sent_digest or self.clock() - getattr(self, "sent_at", 0) > 60:     # the editor's copy follows the app
+        page = page_sha()
+        if (self.store.get("editor_state") or {}).get("page") != page:     # 1.20.0: the app was updated: the editor gets its new page
+            cp, _, _ = await self.send("PUT", token, {"html": page_html()}, path="/api/editor/page")
+            if cp == 200:
+                self.store.save("editor_state", dict(self.store.get("editor_state") or {}, page=page))
+        if d != self.sent_digest or self.clock() - getattr(self, "sent_at", 0) > RESEND:     # the editor's copy follows the app
             copy_["status"] = status
             copy_["commands"] = snapshot(self.store.get("commands"))      # (the older, commands-only form)
             c2, _, _ = await self.send("PUT", token, copy_, path="/api/editor/data")

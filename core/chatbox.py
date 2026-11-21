@@ -400,11 +400,11 @@ class ChatBuffer:
                 "cmd": str(text or "").lstrip().startswith("!"), "answers": [], "deleted": False, "dup_of": None,
                 "guess": None, "echo_of": None, "tb": [str(x) for x in tb][:8]}
         key = _norm(text)
-        if key and not item["cmd"] and not bot:          # the same thing again from someone else: a spam copy
+        if key and not item["cmd"] and not bot:          # 1.20.0: the same thing again from the SAME person: a spam copy (different people always get their own line)
             for old in reversed(self.items):
                 if now - old["t"] > SPAM_SECONDS:
                     break
-                if old.get("dup_of") is None and not old["bot"] and not old["cmd"] and _norm(old["text"]) == key:   # (the same person again too)
+                if old.get("dup_of") is None and not old["bot"] and not old["cmd"] and old["login"] == item["login"] and _norm(old["text"]) == key:
                     item["dup_of"] = old["id"]
                     break
         if bot:

@@ -348,6 +348,7 @@ class Context:
     first_of: Callable[[str, bool], int] | None = None    # 1.14.0: $(firststreak name) / $(firststreakpeak name)
     world_fetch: Callable[[str], Awaitable[dict]] = world.get_json
     viewer_stat: Callable[[str | None, str], int] | None = None   # 1.18.0: $(watchtime) / $(messages) (login None = the viewer)
+    playing: Callable[[], dict | None] | None = None              # 1.20.0: Game Radar, the game open on the PC ($(gameinfo))
 
     @property
     def args(self) -> list[str]:
@@ -472,6 +473,10 @@ async def expand(template: str, ctx: Context) -> str:
             if when is None:
                 return "(no such account)" if ctx.lang != "ar" else "(لا يوجد حساب بهذا الاسم)"
             return follow_age(when, lang=ctx.lang)
+        if key in ("gameinfo", "gamename"):           # 1.20.0: Game Radar (the game open on the streamer's PC)
+            from . import gameradar
+            g = ctx.playing() if ctx.playing else None
+            return gameradar.info_text(g, ctx.lang) if key == "gameinfo" else gameradar.name_text(g, ctx.lang)
         if key == "random.chatter":
             return (ctx.random_chatter() if ctx.random_chatter else "") or ctx.user
         if key == "clip":                  # 1.15.0 (owner): makes a Twitch clip of the last moments and gives its link

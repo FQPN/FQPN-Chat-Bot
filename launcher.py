@@ -308,6 +308,14 @@ class Shell:
             log.exception("Could not show the window")
         threading.Thread(target=self.page_visible, args=(True,), daemon=True).start()
         threading.Thread(target=self.bring_on_screen, daemon=True).start()
+        def _front():                   # 1.20.0: from the tray or a second launch: really in front, not behind other windows
+            try:
+                from core import winpos
+                time.sleep(0.2)
+                winpos.bring_to_front(WINDOW_TITLE, wait=2)
+            except Exception:
+                log.exception("Could not bring the window to the front")
+        threading.Thread(target=_front, daemon=True).start()
 
     def moved_handler(self):
         """pywebview's "moved" event (1.9.1): fires many times while dragging, so only one check runs at a time; it waits
@@ -357,6 +365,14 @@ class Shell:
     def start_tray(self, started_hidden: bool = False):
         """Runs on a helper thread once the window exists."""
         from core import desktop, notify
+        if not started_hidden:          # 1.20.0: open in front of the other windows, like other apps
+            def _front():
+                try:
+                    from core import winpos
+                    winpos.bring_to_front(WINDOW_TITLE)
+                except Exception:
+                    log.exception("Could not bring the window to the front")
+            threading.Thread(target=_front, daemon=True).start()
         try:      # keeps the window reachable: never lost off the screen after minimizing, the tray, or a monitor change
             from core import winpos
             winpos.start_watching(WINDOW_TITLE, stop=lambda: self.quitting)
@@ -482,6 +498,12 @@ def run() -> None:
                 r = r[0] if r else None
             return str(r) if r else None
         desktop.save_dialog = _save_dialog
+        def _folder_dialog():                         # 1.20.0: Cloud backup > "A folder on this PC": Windows' own folder picker
+            r = shell.window.create_file_dialog(webview.FOLDER_DIALOG)
+            if isinstance(r, (list, tuple)):
+                r = r[0] if r else None
+            return str(r) if r else None
+        desktop.folder_dialog = _folder_dialog
         # 1.19.0: the start-up animation plays its sound without a click first. (The variable replaces the window's own
         # extra arguments, so pywebview's one is repeated here; anything already set on this PC is kept.)
         _wv = os.environ.get("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "")

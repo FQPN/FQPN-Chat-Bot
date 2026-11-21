@@ -150,6 +150,7 @@ async function handle(req, env) {
     return ["/api/editor/link", "/api/editor/page", "/api/editor/data", "/api/editor/changes", "/api/editor/ack"].includes(path) ? editorOwner(req, env, url) : editorGuest(req, env, url);
   }
   if (path === "/nightbot/start" || path === "/nightbot/callback" || path === "/api/nightbot/token") return nightbot(req, env, url);   // 1.17.0
+  if (path === "/gdrive/start" || path === "/gdrive/callback" || path === "/api/gdrive/token" || path === "/api/gdrive/refresh") return gdrive(req, env, url);   // 1.20.0: Cloud backup
   if (req.method !== "GET" && req.method !== "HEAD") return json({ error: "Method not allowed." }, 405, { Allow: "GET" });
   if (path === "/") return page(homeBody(url.origin, await latest(), await userCount(env)), "FQPN's Chat Bot · Twitch moderation chat bot", 200, 600);
   if (path === "/variables" || path === "/variables/") return page(varsBody(), "Variables · FQPN's Chat Bot: Twitch bot variables in Arabic and English", 200, 600, { vars: 1 });   // 1.17.0
@@ -508,13 +509,15 @@ function legalBody(kind) {                 // 1.18.0: the privacy policy and ter
       "The Twitch panel shows, for one channel: viewers' Twitch names, their public Twitch profile pictures, and their numbers (watch time, chat messages, mini game wins, First in chat). These come from the streamer's app, which counts them from the channel's own chat.",
       "The panel collects nothing from viewers. It asks Twitch which channel it is on, to show that channel's leaderboard. If a viewer presses \"Show my place\", Twitch tells the panel their user ID inside their own browser so their row can be highlighted; it is not sent anywhere or stored.",
       "The leaderboards are kept on fqpnbot.com (Cloudflare) until the streamer switches the panel off in the app, which removes them. No ads, no trackers, and nothing is sold or shared.",
+      "Cloud backup with Google Drive (only if the streamer turns it on): the app asks Google for the drive.file permission, so it can only see and change the backup files it made itself, in the folder \"FQPN's Chat Bot backups\" in the streamer's own Drive, never any other file. The backups go straight from the streamer's PC to their Drive; fqpnbot.com only helps with the sign-in and keeps nothing (the sign-in code is deleted within 10 minutes). Backups never hold Twitch logins or keys. Disconnecting in the app removes the app's access. FQPN's Chat Bot's use of information received from Google APIs adheres to the Google API Services User Data Policy, including the Limited Use requirements.",
       "Questions or a request to remove your name: write to the streamer of the channel, or to FQPN on Twitch (twitch.tv/fqpn_)."], ar: [
       "تشمل هذي الصفحة برنامج FQPN's Chat Bot على ويندوز، وموقع fqpnbot.com، وبانل FQPN Leaderboard في تويتش.",
       "البرنامج يشتغل على جهاز الستريمر ويحفظ بياناته عنده. ما يرسل لـ fqpnbot.com إلا اللي يشغّله الستريمر: قائمة الأوامر، بانر الصفحة، وترتيب بانل تويتش.",
       "بانل تويتش يعرض لقناة وحدة: أسماء المشاهدين في تويتش، صورهم العامة، وأرقامهم (وقت المشاهدة، الرسائل، الفوز بالألعاب، أول في الشات). تجي من برنامج الستريمر اللي يحسبها من شات القناة نفسها.",
       "البانل ما يجمع شي من المشاهدين. يسأل تويتش هو في أي قناة عشان يعرض ترتيبها. ولو ضغط المشاهد «اعرض مكاني»، تويتش يعطي البانل رقم حسابه داخل متصفحه بس عشان يبيّن صفه، وما ينرسل لأي مكان ولا ينحفظ.",
       "الترتيب محفوظ في fqpnbot.com (Cloudflare) لين يطفّي الستريمر البانل من البرنامج، وقتها ينحذف. ما فيه إعلانات ولا تتبّع، ولا ينباع ولا ينشارك شي.",
-      "لأي سؤال أو طلب حذف اسمك: كلّم ستريمر القناة، أو FQPN في تويتش (twitch.tv/fqpn_)."] },
+      "النسخ السحابي في Google Drive (بس إذا شغّله الستريمر): البرنامج يطلب من Google صلاحية ⁦drive.file⁩، يعني يشوف ويعدّل بس ملفات النسخ اللي سوّاها هو، في مجلد ⁦\"FQPN's Chat Bot backups\"⁩ في درايف الستريمر نفسه، وأبداً أي ملف ثاني. النسخ تروح مباشرة من جهاز الستريمر لدرايفه؛ fqpnbot.com يساعد بس في تسجيل الدخول وما يحفظ شي (رمز الدخول ينحذف خلال 10 دقايق). النسخ ما فيها أبداً تسجيل دخول تويتش أو مفاتيح. الفصل من البرنامج يشيل صلاحية البرنامج.",
+      "لأي سؤال أو طلب حذف اسمك: كلّم ستريمر القناة، أو FQPN في تويتش ⁦(twitch.tv/fqpn_)⁩."] },
     terms: { t: "Terms of use", ta: "شروط الاستخدام", en: [
       "FQPN's Chat Bot, fqpnbot.com and the FQPN Leaderboard panel are free to use.",
       "They are provided as they are, without any guarantee. We do our best to keep them working, but they may change, pause or stop.",
@@ -651,12 +654,24 @@ async function support(req, env) {
 
 // ---- Editor link (1.13.0): someone the streamer trusts edits the commands from a secret link + password
 // The app makes the link (a 256-bit secret in the URL) and a new password each time; the website only keeps their SHA-256
-// hashes (never the link or the password). One link per channel, it ends after 24 h, when the app cancels it, or after 5
-// wrong passwords. The edits wait here; the streamer's app takes them, checks them with its own rules, saves them and says
+// hashes (never the link or the password). One link per channel, it ends when the app cancels it, after 5 wrong passwords,
+// or when its time runs out (1.20.0: the streamer picks 24 h, 7 days, or no end date: "until I cancel it"). The edits wait here; the streamer's app takes them, checks them with its own rules, saves them and says
 // which were applied or refused. The commands the editor sees are a private copy the app uploads (not the public page).
-const ED = { maxHours: 24, attempts: 5, pending: 100, perHour: 120, name: 40, response: 500, aliases: 10, cooldown: 86400,
+const ED = { maxHours: 24, forever: 10 * 365 * 86400, attempts: 5, pending: 100, perHour: 120, name: 40, response: 500, aliases: 10, cooldown: 86400,
              pageMax: 1800000, dataMax: 1500000, putMax: 600000 };
 // 1.13.0: the editor works on the APP'S OWN page (uploaded by the app with the link), on these tools; the rest isn't there
+// 1.20.0: the app looks for edits every few seconds and says so here at most every 30 s; quiet for longer = the app is closed.
+// While it is closed the website keeps the editor's latest copy itself, so editing goes on with no waiting; the app takes it all when it opens.
+const ED_SEEN_WRITE = 30, ED_SEEN_ON = 75;
+async function edAppOn(db, login, now) {
+  const r = await db.prepare("SELECT at FROM editor_seen WHERE login = ?").bind(login).first();
+  return !!(r && now - r.at <= ED_SEEN_ON);
+}
+function edOverlay(full, pending) {      // the copy the editor sees = the app's copy + the edits still waiting for the app
+  if (!full || typeof full !== "object" || Array.isArray(full) || !full.sections) return full;
+  for (const p of pending) { try { full.sections[p.name] = JSON.parse(p.cmd); } catch { /* (skip a broken one) */ } }
+  return full;
+}
 const ED_SECTIONS = ["commands", "timers", "greetings", "events", "blocklist", "moderation", "games", "settings"];
 async function sha256hex(s) {
   const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(s)));
@@ -676,6 +691,7 @@ async function edTables(db) {
     db.prepare("CREATE TABLE IF NOT EXISTS editor_changes (id INTEGER PRIMARY KEY AUTOINCREMENT, login TEXT NOT NULL, token_hash TEXT NOT NULL, at INTEGER NOT NULL, editor TEXT, op TEXT NOT NULL, name TEXT NOT NULL, old_name TEXT, cmd TEXT, status TEXT NOT NULL, note TEXT)"),
     db.prepare("CREATE INDEX IF NOT EXISTS editor_changes_login ON editor_changes(login, status)"),
     db.prepare("CREATE TABLE IF NOT EXISTS editor_page (login TEXT PRIMARY KEY, html TEXT NOT NULL, updated INTEGER NOT NULL)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS editor_seen (login TEXT PRIMARY KEY, at INTEGER NOT NULL)"),     // 1.20.0: when the app last looked for edits
   ]);
 }
 
@@ -705,14 +721,15 @@ async function editorOwner(req, env, url) {        // the streamer's app: PUT/DE
     if (!/^[0-9a-f]{64}$/.test(th) || !/^[0-9a-f]{32}$/.test(salt) || !/^[0-9a-f]{64}$/.test(ph)) return json({ error: "The link couldn't be read." }, 400);
     const snap = edSnapshot(body);
     if (!snap) return json({ error: "The commands couldn't be read." }, 400);
-    const expires = now + ED.maxHours * 3600;
+    const hours = [0, 24, 168].includes(body?.hours) ? body.hours : ED.maxHours;     // (an older app sends no "hours": 24 h)
+    const expires = hours === 0 ? now + ED.forever : now + hours * 3600;
     await db.batch([       // a new link replaces the old one at once (its sessions and waiting edits end with it)
       db.prepare("INSERT OR REPLACE INTO editor_links (login, user_id, token_hash, pw_salt, pw_hash, expires, attempts, created) VALUES (?, ?, ?, ?, ?, ?, 0, ?)").bind(who.login, who.userId, th, salt, ph, expires, now),
       db.prepare("INSERT OR REPLACE INTO editor_data (login, data, updated) VALUES (?, ?, ?)").bind(who.login, JSON.stringify(snap), now),
       db.prepare("DELETE FROM editor_sessions WHERE login = ?").bind(who.login),
       db.prepare("DELETE FROM editor_changes WHERE login = ? AND token_hash != ?").bind(who.login, th),
     ]);
-    return json({ ok: true, login: who.login, expires });
+    return json({ ok: true, login: who.login, expires, forever: hours === 0 });
   }
   if (path === "/api/editor/page" && req.method === "PUT") {
     const raw = await req.text();
@@ -726,7 +743,8 @@ async function editorOwner(req, env, url) {        // the streamer's app: PUT/DE
   if (path === "/api/editor/link" && req.method === "DELETE") {
     await db.batch([db.prepare("DELETE FROM editor_page WHERE login = ?").bind(who.login),
                     db.prepare("DELETE FROM editor_links WHERE login = ?").bind(who.login), db.prepare("DELETE FROM editor_sessions WHERE login = ?").bind(who.login),
-                    db.prepare("DELETE FROM editor_data WHERE login = ?").bind(who.login), db.prepare("DELETE FROM editor_changes WHERE login = ?").bind(who.login)]);
+                    db.prepare("DELETE FROM editor_data WHERE login = ?").bind(who.login), db.prepare("DELETE FROM editor_changes WHERE login = ?").bind(who.login),
+                    db.prepare("DELETE FROM editor_seen WHERE login = ?").bind(who.login)]);
     return json({ ok: true });
   }
   const link = await db.prepare("SELECT * FROM editor_links WHERE login = ?").bind(who.login).first();
@@ -737,11 +755,15 @@ async function editorOwner(req, env, url) {        // the streamer's app: PUT/DE
     let body; try { body = JSON.parse(raw); } catch { body = null; }
     const snap = edSnapshot(body);
     if (!snap) return json({ error: "The commands couldn't be read." }, 400);
-    const full = body && typeof body.sections === "object" && body.sections ? { commands: snap, sections: body.sections, digests: body.digests || {}, logs: body.logs || {}, status: body.status || {} } : snap;
+    const rev = (v) => /^[0-9a-f]{8,64}$/.test(String(v || "")) ? String(v) : "";      // 1.20.0: what changed (tools / logs)
+    let full = body && typeof body.sections === "object" && body.sections ? { commands: snap, sections: body.sections, digests: body.digests || {}, logs: body.logs || {}, status: body.status || {}, rev: rev(body.rev), logrev: rev(body.logrev) } : snap;
+    const waiting = (await db.prepare("SELECT name, cmd FROM editor_changes WHERE login = ? AND token_hash = ? AND status = 'pending' AND op = 'put' ORDER BY id").bind(who.login, link.token_hash).all()).results || [];
+    if (waiting.length) { full = edOverlay(full, waiting); if (full.rev !== undefined) full.rev = (full.rev || "r") + "w" + waiting.length; }   // (an edit not taken yet stays on the editor's page)
     await db.prepare("INSERT OR REPLACE INTO editor_data (login, data, updated) VALUES (?, ?, ?)").bind(who.login, JSON.stringify(full), now).run();
     return json({ ok: true });
   }
   if (path === "/api/editor/changes" && req.method === "GET") {
+    await db.prepare("INSERT INTO editor_seen (login, at) VALUES (?, ?) ON CONFLICT(login) DO UPDATE SET at = excluded.at WHERE excluded.at - editor_seen.at >= ?").bind(who.login, now, ED_SEEN_WRITE).run();
     const rows = (await db.prepare("SELECT id, at, editor, op, name, old_name, cmd FROM editor_changes WHERE login = ? AND token_hash = ? AND status = 'pending' ORDER BY id LIMIT 50").bind(who.login, link.token_hash).all()).results || [];
     return json({ ok: true, active: true, expires: link.expires, changes: rows.map((r) => r.op === "put"
       ? { id: r.id, at: r.at, editor: r.editor, op: "put", section: r.name, base: r.old_name || "", data: r.cmd ? JSON.parse(r.cmd) : null }
@@ -789,12 +811,19 @@ async function editorGuest(req, env, url) {        // the editor's page: passwor
   const ses = /^[0-9a-f]{64}$/.test(sid) ? await db.prepare("SELECT * FROM editor_sessions WHERE id_hash = ?").bind(await sha256hex(sid)).first() : null;
   if (!ses || ses.login !== login || ses.token_hash !== link.token_hash || ses.expires <= now) return json({ error: "session" }, 401);
   if (path === "/api/editor/state" && req.method === "GET") {
-    const data = await db.prepare("SELECT data, updated FROM editor_data WHERE login = ?").bind(login).first();
     const recent = (await db.prepare("SELECT id, at, editor, op, name, status, note FROM editor_changes WHERE login = ? AND token_hash = ? ORDER BY id DESC LIMIT 30").bind(login, link.token_hash).all()).results || [];
+    // 1.20.0: the page says which copy it has (?have=updated): if the app sent nothing newer, a small answer (no copy, no logs)
+    const have = Number(url.searchParams.get("have") || 0);
+    if (have) {
+      const u = await db.prepare("SELECT updated FROM editor_data WHERE login = ?").bind(login).first();
+      if (u && u.updated === have) return json({ ok: true, same: true, app_on: await edAppOn(db, login, now), updated: u.updated, expires: link.expires, forever: link.expires - now > 5 * 365 * 86400, changes: recent, me: ses.name, login });
+    }
+    const data = await db.prepare("SELECT data, updated FROM editor_data WHERE login = ?").bind(login).first();
     const d = data ? JSON.parse(data.data) : [];
     const full = Array.isArray(d) ? { commands: d } : d;
     return json({ ok: true, commands: full.commands || [], sections: full.sections || null, digests: full.digests || {}, logs: full.logs || {}, status: full.status || {},
-                  updated: data ? data.updated : 0, expires: link.expires, changes: recent, me: ses.name, login });
+                  rev: full.rev || "", logrev: full.logrev || "", updated: data ? data.updated : 0, app_on: await edAppOn(db, login, now), expires: link.expires,
+                  forever: link.expires - now > 5 * 365 * 86400, changes: recent, me: ses.name, login });
   }
   if (path === "/api/editor/change" && req.method === "POST") {
     if (body?.op === "put") {               // a whole tool, saved on the app's own page
@@ -802,14 +831,29 @@ async function editorGuest(req, env, url) {        // the editor's page: passwor
       if (!ED_SECTIONS.includes(section)) return json({ error: "This can't be changed through the editor link." }, 400);
       const data = JSON.stringify(body.data ?? null);
       if (data.length > ED.putMax) return json({ error: "Too much data in one change." }, 413);
-      const base = /^[0-9a-f]{64}$/.test(String(body.base || "")) ? String(body.base) : "";
+      let base = /^[0-9a-f]{64}$/.test(String(body.base || "")) ? String(body.base) : "";
+      const appOn = await edAppOn(db, login, now);
+      const same = appOn ? [] : (await db.prepare("SELECT id, old_name FROM editor_changes WHERE login = ? AND token_hash = ? AND status = 'pending' AND op = 'put' AND name = ? ORDER BY id").bind(login, link.token_hash, section).all()).results || [];
+      if (same.length) {     // 1.20.0: the app is closed: this save replaces the waiting one for the same tool (it already holds it), from the app's same starting point
+        base = same[0].old_name || "";
+        await db.batch(same.map((x) => db.prepare("DELETE FROM editor_changes WHERE id = ? AND login = ? AND status = 'pending'").bind(x.id, login)));
+      }
       const pending = await db.prepare("SELECT COUNT(*) AS n FROM editor_changes WHERE login = ? AND status = 'pending'").bind(login).first();
       if (pending && pending.n >= ED.pending) return json({ error: "Too many changes are waiting for the app. Try again when it has taken them." }, 429);
       const hour = await db.prepare("SELECT COUNT(*) AS n FROM editor_changes WHERE login = ? AND at > ?").bind(login, now - 3600).first();
       if (hour && hour.n >= ED.perHour) return json({ error: "Too many changes this hour. Try again later." }, 429);
       const r = await db.prepare("INSERT INTO editor_changes (login, token_hash, at, editor, op, name, old_name, cmd, status) VALUES (?, ?, ?, ?, 'put', ?, ?, ?, 'pending')")
         .bind(login, link.token_hash, now, ses.name, section, base || null, data).run();
-      return json({ ok: true, id: r.meta?.last_row_id ?? null });
+      const cur = await db.prepare("SELECT data, updated FROM editor_data WHERE login = ?").bind(login).first();     // the website's copy follows at once (a reload, or another editor, sees it)
+      if (cur) {
+        let d = null; try { d = JSON.parse(cur.data); } catch { d = null; }
+        if (d && !Array.isArray(d) && d.sections) {
+          d.sections[section] = body.data ?? null; d.rev = (d.rev || "r") + "e";
+          if (d.rev.length > 200) d.rev = "e" + now;
+          await db.prepare("UPDATE editor_data SET data = ?, updated = ? WHERE login = ?").bind(JSON.stringify(d), Math.max(now, cur.updated + 1), login).run();
+        }
+      }
+      return json({ ok: true, id: r.meta?.last_row_id ?? null, app_on: appOn });
     }
     const op = body?.op === "delete" ? "delete" : body?.op === "set" ? "set" : "";
     const name = cleanCmdName(body?.name), old = body?.old_name ? cleanCmdName(body.old_name) : "";
@@ -875,7 +919,7 @@ async function api(path,body){var h={"X-Editor-Login":L,"X-Editor-Token":TK,"X-E
   return {ok:r.ok,status:r.status,d:d}}
 function gone(){box.innerHTML='<div class="miss"><h2>'+esc2(t("ed_gone_t"))+'</h2><p>'+esc2(t("ed_gone_d"))+'</p></div>';clearInterval(poll)}
 function err(id,msg){var e=$(id);e.textContent=msg||"";e.hidden=!msg}
-function left(){if(!ST)return;var s=ST.expires-Date.now()/1000,h=Math.floor(s/3600),m=Math.max(0,Math.floor(s%3600/60));$("edexp").textContent=s<=0?t("ed_gone_t"):h>0?t("ed_left_h",{h:h,m:m}):t("ed_left_m",{m:m})}
+function left(){if(!ST)return;var s=ST.expires-Date.now()/1000,h=Math.floor(s/3600),m=Math.max(0,Math.floor(s%3600/60));$("edexp").textContent=s<=0?t("ed_gone_t"):s>5*365*86400?t("ed_forever"):h>0?t("ed_left_h",{h:h,m:m}):t("ed_left_m",{m:m})}
 $("edlogin").addEventListener("submit",async function(e){e.preventDefault();err("ederr","");
   var r=await api("/api/editor/session",{name:$("edname").value,password:$("edpw").value});
   if(r.ok){SID=r.d.session;try{sessionStorage.setItem("ed:"+TK,SID)}catch(e){}location.replace(location.pathname.replace(/\\/$/,"")+"/app");return}
@@ -1033,6 +1077,73 @@ async function nightbot(req, env, url) {
   return row.token ? json({ status: "ok", token: row.token }) : json({ status: "error", error: row.error || "denied" });
 }
 
+/* ===== 1.20.0: "Cloud backup" to the streamer's own Google Drive =====
+   Google's sign-in needs a secret key that must never be inside the app, so (like Sign in with Nightbot) this website
+   does the steps that need it. The app makes a long random code (state), opens /gdrive/start?state=… in the browser and
+   asks /api/gdrive/token?state=… every 2 seconds. After the streamer says yes on Google, /gdrive/callback swaps Google's
+   code for the keys and keeps them for the app for at most 10 minutes; the app gets them once, then they're deleted here.
+   Later the app asks /api/gdrive/refresh for a fresh 1-hour key (POST, its own long-term key in the body): this website
+   adds the secret and passes Google's answer on. Nothing is kept for that. Only the hash of a state is ever stored.
+   The permission asked is drive.file: the app can only see and change the files IT made (its backups), nothing else.
+   Setup: GOOGLE_CLIENT_ID (Text) and GOOGLE_CLIENT_SECRET (Secret) in the worker's Variables and Secrets. */
+async function gdrive(req, env, url) {
+  const db = env.DB, now = Math.floor(Date.now() / 1000), path = url.pathname;
+  const ready = !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
+  const redirect = url.origin + "/gdrive/callback";
+  const say = (en, ar, status = 200) => page(`<section class="hero"><h1>${esc(en)}</h1><p class="lead" dir="rtl" lang="ar">${esc(ar)}</p></section>`, "Google Drive · FQPN's Chat Bot", status, 0);
+  if (path === "/api/gdrive/refresh") {
+    if (req.method !== "POST") return json({ error: "Method not allowed." }, 405, { Allow: "POST" });
+    if (!ready) return json({ error: "not_setup" }, 503);
+    const body = await req.json().catch(() => ({}));
+    const rt = String(body?.refresh_token || "");
+    if (!rt || rt.length > 512 || /\s/.test(rt)) return json({ error: "bad_token" }, 400);
+    const r = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ client_id: env.GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET, grant_type: "refresh_token", refresh_token: rt }) });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.access_token) return json({ error: data.error === "invalid_grant" ? "revoked" : "google " + r.status }, r.status === 400 ? 401 : 502);
+    return json({ access_token: data.access_token, expires_in: Number(data.expires_in) || 3600 });
+  }
+  await db.prepare("CREATE TABLE IF NOT EXISTS gdrive_auth (state_hash TEXT PRIMARY KEY, data TEXT, error TEXT, created INTEGER NOT NULL)").run();
+  await db.prepare("DELETE FROM gdrive_auth WHERE created < ?").bind(now - 600).run();
+  const state = String(url.searchParams.get("state") || "");
+  const okState = /^[A-Za-z0-9_-]{32,128}$/.test(state);
+  if (path === "/gdrive/start") {
+    if (!ready) return say("Google Drive backup isn't set up on this website yet.", "النسخ إلى Google Drive غير مفعّل في الموقع بعد.", 503);
+    if (!okState) return say("This link isn't complete. Start again from the app.", "الرابط ناقص. ابدأ من جديد من البرنامج.", 400);
+    const q = new URLSearchParams({ response_type: "code", client_id: env.GOOGLE_CLIENT_ID, redirect_uri: redirect, state,
+      scope: "https://www.googleapis.com/auth/drive.file", access_type: "offline", prompt: "consent", include_granted_scopes: "false" });
+    return new Response(null, { status: 302, headers: { Location: "https://accounts.google.com/o/oauth2/v2/auth?" + q.toString(), "Cache-Control": "no-store" } });
+  }
+  if (path === "/gdrive/callback") {
+    if (!okState) return say("This link isn't complete. Start again from the app.", "الرابط ناقص. ابدأ من جديد من البرنامج.", 400);
+    const h = await sha256hex("gd:" + state);
+    const code = url.searchParams.get("code");
+    if (!code) {
+      await db.prepare("INSERT OR REPLACE INTO gdrive_auth (state_hash, data, error, created) VALUES (?, NULL, ?, ?)").bind(h, "denied", now).run();
+      return say("Google Drive wasn't connected. You can close this tab.", "ما انربط Google Drive. تقدر تقفل هذي الصفحة.");
+    }
+    const r = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ client_id: env.GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET, grant_type: "authorization_code", redirect_uri: redirect, code }) });
+    const data = r.ok ? await r.json().catch(() => ({})) : {};
+    if (!data.access_token || !data.refresh_token) {
+      await db.prepare("INSERT OR REPLACE INTO gdrive_auth (state_hash, data, error, created) VALUES (?, NULL, ?, ?)").bind(h, "google " + r.status, now).run();
+      return say("Google didn't accept the sign-in. Try again from the app.", "Google ما قبل تسجيل الدخول. حاول مرة ثانية من البرنامج.", 502);
+    }
+    const keep = JSON.stringify({ access_token: data.access_token, refresh_token: data.refresh_token, expires_in: Number(data.expires_in) || 3600 });
+    await db.prepare("INSERT OR REPLACE INTO gdrive_auth (state_hash, data, error, created) VALUES (?, ?, NULL, ?)").bind(h, keep, now).run();
+    return say("Google Drive is connected ✓ Go back to the app.", "انربط Google Drive ✓ ارجع للبرنامج.");
+  }
+  // /api/gdrive/token: the app asks for the keys (once)
+  if (req.method !== "GET") return json({ error: "Method not allowed." }, 405, { Allow: "GET" });
+  if (!ready) return json({ status: "error", error: "not_setup" });
+  if (!okState) return json({ error: "Bad state." }, 400);
+  const h = await sha256hex("gd:" + state);
+  const row = await db.prepare("SELECT data, error FROM gdrive_auth WHERE state_hash = ?").bind(h).first();
+  if (!row) return json({ status: "waiting" });
+  await db.prepare("DELETE FROM gdrive_auth WHERE state_hash = ?").bind(h).run();
+  return row.data ? json({ status: "ok", ...JSON.parse(row.data) }) : json({ status: "error", error: row.error || "denied" });
+}
+
 function json(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), {
     status,
@@ -1102,7 +1213,7 @@ const TEXT = {
     ed_in_t: "Sign in to edit", ed_in_d: "The streamer gave you this link and a password. Your name is shown to the streamer next to each change.",
     ed_name: "Your name", ed_pw: "Password", ed_go: "Open the editor", ed_wrong: "Wrong password. {n} tries left.", ed_locked: "Too many wrong passwords: this link is locked. Ask the streamer for a new one.",
     ed_need_name: "Write your name.", ed_net: "The website can't be reached. Try again.",
-    ed_left_h: "Link ends in {h} h {m} min", ed_left_m: "Link ends in {m} min",
+    ed_left_h: "Link ends in {h} h {m} min", ed_left_m: "Link ends in {m} min", ed_forever: "No end date: works until the streamer cancels it",
     ed_how: "Your changes go to the streamer's app, which checks them and applies them within seconds while it runs (or as soon as it opens).",
     ed_add: "Add command", ed_add_t: "New command", ed_edit_t: "Edit {n}", ed_cmd: "Command", ed_resp: "Reply", ed_who: "Who can use it", ed_cd: "Wait between uses (seconds)",
     ed_al: "Extra names (separate with commas)", ed_on: "Switched on", ed_save: "Send the change", ed_cancel: "Cancel", ed_edit: "Edit", ed_del: "Delete",
@@ -1149,7 +1260,10 @@ const TEXT = {
     f15_t: "Hotkeys", f15_d: "One key, even in the middle of a game: +1 to your deaths counter, send !discord, start a mini game. Combos like Ctrl + Shift + F5 or Mouse 4 + Q work too.",
     lab_t: "Labs", lab_s: "New features you can try before they're finished. Switch them on in the app, under Settings → Labs. They can change, or be removed in a future update.",
     lab_v1: "Works in Arabic and English", lab_v2: "Runs on your PC: your voice never leaves it", lab_v3: "Free speech engine, about 200 MB, downloaded the first time",
-    lab_how: "How to try it", lab_s1: "Update to 1.17.0 or newer", lab_s2: "Open Settings → Labs", lab_s3: "Switch on Voice commands",
+    lab_how: "How to try it", lab_s1: "Update to the newest version", lab_s2: "Open Settings → Labs", lab_s3: "Switch on Voice commands or Game Radar",
+    lab_gr_t: "Game Radar", lab_gr_d: "The app sees which game you open. $(gameinfo) tells chat what you're playing, and your Twitch category can follow the game.",
+    lab_g1: "Knows 84 games, plus Steam, Epic, Battle.net, EA, Ubisoft, Xbox and more", lab_g2: "Twitch category: off, ask me, or automatic", lab_g3: "Write a description once: the other language is translated",
+    lab_gst: "Status: in testing since 1.20.0",
     lab_st: "Status: in testing since 1.17.0", lab_soon: "More soon", lab_soon_d: "New beta features show up here and in the app first.",
     s_t: "Install in a minute",
     s1: "Download the installer above.",
@@ -1195,7 +1309,7 @@ const TEXT = {
     ed_in_t: "سجّل الدخول للتعديل", ed_in_d: "أعطاك صاحب القناة هذا الرابط وكلمة مرور. يظهر اسمك لصاحب القناة بجانب كل تعديل.",
     ed_name: "اسمك", ed_pw: "كلمة المرور", ed_go: "افتح المحرّر", ed_wrong: "كلمة مرور خاطئة. بقيت {n} محاولات.", ed_locked: "كلمات مرور خاطئة كثيرة: هذا الرابط مقفل. اطلب رابطًا جديدًا من صاحب القناة.",
     ed_need_name: "اكتب اسمك.", ed_net: "لا يمكن الوصول إلى الموقع. حاول مرة أخرى.",
-    ed_left_h: "ينتهي الرابط بعد {h} س {m} د", ed_left_m: "ينتهي الرابط بعد {m} د",
+    ed_left_h: "ينتهي الرابط بعد {h} س {m} د", ed_left_m: "ينتهي الرابط بعد {m} د", ed_forever: "بدون تاريخ انتهاء: يشتغل لين يلغيه الستريمر",
     ed_how: "تعديلاتك تذهب إلى تطبيق صاحب القناة، الذي يتحقق منها ويطبّقها خلال ثوانٍ ما دام يعمل (أو حالما يُفتح).",
     ed_add: "إضافة أمر", ed_add_t: "أمر جديد", ed_edit_t: "تعديل {n}", ed_cmd: "الأمر", ed_resp: "الرد", ed_who: "من يستطيع استخدامه", ed_cd: "الانتظار بين الاستخدامات (ثوانٍ)",
     ed_al: "أسماء إضافية (افصل بينها بفواصل)", ed_on: "مفعّل", ed_save: "أرسل التعديل", ed_cancel: "إلغاء", ed_edit: "تعديل", ed_del: "حذف",
@@ -1241,7 +1355,10 @@ const TEXT = {
     f15_t: "اختصارات الكيبورد", f15_d: "زر واحد، حتى وأنت في نص اللعبة: +1 لعداد الموتات، يرسل !discord، يبدأ لعبة. وتقدر تسوي كومبو مثل \u2066Ctrl + Shift + F5\u2069 أو \u2066Mouse 4 + Q\u2069.",
     lab_t: "المختبر", lab_s: "ميزات جديدة تقدر تجربها قبل ما تكتمل. شغّلها من التطبيق، في الإعدادات ← المختبر. ممكن تتغير، أو تنشال في تحديث جاي.",
     lab_v1: "يفهم عربي وإنجليزي", lab_v2: "يشتغل على جهازك: صوتك ما يطلع منه", lab_v3: "محرك كلام مجاني، حوالي 200 ميقا، ينزل أول مرة",
-    lab_how: "كيف تجربه", lab_s1: "حدّث إلى 1.17.0 أو أحدث", lab_s2: "افتح الإعدادات ← المختبر", lab_s3: "شغّل الأوامر الصوتية",
+    lab_how: "كيف تجربه", lab_s1: "حدّث لآخر إصدار", lab_s2: "افتح الإعدادات ← المختبر", lab_s3: "شغّل الأوامر الصوتية أو رادار اللعبة",
+    lab_gr_t: "رادار اللعبة", lab_gr_d: "البرنامج يعرف وش اللعبة اللي تفتحها. ⁦$(gameinfo)⁩ يقول للشات وش تلعب، وتصنيف تويتش يقدر يمشي مع اللعبة.",
+    lab_g1: "يعرف 84 لعبة، وألعاب ستيم وإيبك وباتل نت وEA ويوبيسوفت وإكس بوكس وغيرها", lab_g2: "تصنيف تويتش: لا، اسألني، أو تلقائي", lab_g3: "تكتب الوصف مرة وحدة: يترجم للغة الثانية",
+    lab_gst: "الحالة: تحت التجربة من 1.20.0",
     lab_st: "الحالة: تحت التجربة من 1.17.0", lab_soon: "قريب أكثر", lab_soon_d: "الميزات التجريبية الجديدة تطلع هنا وفي التطبيق أول.",
     s_t: "التثبيت في دقيقة",
     s1: "حمّل المثبّت من الأعلى.",
@@ -1297,6 +1414,7 @@ const ICONS = {   // small line icons for the feature cards (inline SVG: nothing
   f14: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
   f15: '<rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/>',
   lab: '<path d="M9 3h6M10 3v6L4.5 18.5A2 2 0 0 0 6.2 21.5h11.6a2 2 0 0 0 1.7-3L14 9V3"/><path d="M7 15h10"/>',
+  radar: '<path d="M19.1 4.9A10 10 0 1 0 22 12"/><path d="M16.2 7.8A6 6 0 1 0 18 12"/><path d="M12 12l7-7"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="15.5" cy="15" r="1" fill="currentColor"/>',
 };
 const T = (k) => esc(TEXT.en[k]);
 const BOTS = ["Nightbot", "StreamElements", "WizeBot"];     // the comparison's columns (names only: nothing loaded from them)
@@ -1327,10 +1445,12 @@ function homeBody(origin, rel, users = 0) {
   const nFeat = FEAT_GROUPS.reduce((a, g) => a + g.length, 0);
   const feats = `<p class="fsum" data-t="f_sum" data-n="${nFeat}" data-v="${FEAT_NEW_IN}">${esc(TEXT.en.f_sum.replace("{n}", nFeat).replace("{v}", FEAT_NEW_IN))}</p>` + FEAT_GROUPS.map((g, i) =>
     `<div class="fg"><div class="fgh"><h3 data-t="g${i + 1}_t">${T("g" + (i + 1) + "_t")}</h3><span data-t="g${i + 1}_d">${T("g" + (i + 1) + "_d")}</span></div><div class="feats n${g.length}">${g.map(card).join("")}</div></div>`).join("");
-  // 1.17.0: Labs: beta features (off in the app until switched on in Settings → Labs). Voice commands is the first.
+  // 1.17.0: Labs: beta features (off in the app until switched on in Settings → Labs). Voice commands, and 1.20.0: Game Radar.
   const labs = `<section id="labs"><h2 class="lbhead">${icon("lab")}<span data-t="lab_t">${T("lab_t")}</span></h2><p class="lead small" data-t="lab_s">${T("lab_s")}</p>
-<div class="lbgrid"><div class="lbcard main"><div class="lbtop"><span class="lbic">${icon("f14")}</span><h3><span data-t="f14_t">${T("f14_t")}</span> <span class="beta" data-t="beta">${T("beta")}</span></h3></div>
+<div class="lbgrid"><div class="lbcol"><div class="lbcard main"><div class="lbtop"><span class="lbic">${icon("f14")}</span><h3><span data-t="f14_t">${T("f14_t")}</span> <span class="beta" data-t="beta">${T("beta")}</span></h3></div>
 <p data-t="f14_d">${T("f14_d")}</p><ul class="lbpts">${[1, 2, 3].map((n) => `<li data-t="lab_v${n}">${T("lab_v" + n)}</li>`).join("")}</ul><p class="lbst" data-t="lab_st">${T("lab_st")}</p></div>
+<div class="lbcard main"><div class="lbtop"><span class="lbic">${icon("radar")}</span><h3><span data-t="lab_gr_t">${T("lab_gr_t")}</span> <span class="beta" data-t="beta">${T("beta")}</span></h3></div>
+<p data-t="lab_gr_d">${T("lab_gr_d")}</p><ul class="lbpts">${[1, 2, 3].map((n) => `<li data-t="lab_g${n}">${T("lab_g" + n)}</li>`).join("")}</ul><p class="lbst" data-t="lab_gst">${T("lab_gst")}</p></div></div>
 <div class="lbcard"><h3 data-t="lab_how">${T("lab_how")}</h3><ol class="lbsteps">${[1, 2, 3].map((n) => `<li><span class="num" aria-hidden="true">${n}</span><span data-t="lab_s${n}">${T("lab_s" + n)}</span></li>`).join("")}</ol>
 <div class="lbsoon"><b data-t="lab_soon">${T("lab_soon")}</b><p data-t="lab_soon_d">${T("lab_soon_d")}</p></div></div></div></section>`;
   // 1.18.0: a simple drawing of the app that switches between its sections by itself (the squares switch it too)
@@ -1379,8 +1499,8 @@ ${labs}
 // chat would show (with sample values, never anyone's data), a "Try it" box and a search. The list is the app's (the
 // command editor's variable buttons): when a variable is added to the app, add it here too.
 const VAR_GROUPS = ["viewer", "stream", "followers", "first", "stats", "world", "event", "adv"];
-const VARS = [["$(user)", "viewer", "The name of the viewer who used the command.", "اسم المشاهد اللي استخدم الأمر.", "!hi", "!hi", "Hi $(user)! Welcome to the stream", "هلا $(user)! حيّاك في البث", ""], ["$(touser)", "viewer", "The name written after the command, or the viewer if there isn't one.", "الاسم المكتوب بعد الأمر، أو المشاهد نفسه لو ما فيه.", "!hug @sam_99", "!hug @sam_99", "$(user) hugs $(touser)", "$(user) يحضن $(touser)", ""], ["$(query)", "viewer", "Everything the viewer typed after the command.", "كل اللي كتبه المشاهد بعد الأمر.", "!say hello chat", "!say hello chat", "$(user) says: $(query)", "$(user) يقول: $(query)", ""], ["$(querystring)", "viewer", "The same text, made safe to put inside a link.", "نفس النص، بس آمن تحطه داخل رابط.", "!google twitch bot", "!google twitch bot", "https://google.com/search?q=$(querystring)", "https://google.com/search?q=$(querystring)", ""], ["$(count)", "viewer", "How many times this command has been used.", "كم مرة انستخدم هالأمر.", "!hydrate", "!hydrate", "Drink water! Reminder number $(count)", "اشرب موية! التذكير رقم $(count)", ""], ["$(count name)", "viewer", "Adds 1 to a named counter and shows it.", "يزيد عدّاد له اسم 1 ويعرضه.", "!death", "!death", "FQPN died again: $(count deaths) deaths", "فقبن مات مرة ثانية: $(count deaths) موتة", "new"], ["$(getcount name)", "viewer", "Shows a named counter without adding to it.", "يعرض عدّاد له اسم بدون ما يزيده.", "!deaths", "!deaths", "Deaths so far: $(getcount deaths)", "عدد الموتات لين الحين: $(getcount deaths)", "new"], ["$(accountage)", "viewer", "How old the viewer's Twitch account is.", "عمر حساب المشاهد في تويتش.", "!age", "!age", "$(user)'s account is $(accountage) old", "عمر حساب $(user): $(accountage)", "new"], ["$(random.chatter)", "viewer", "A random viewer who chatted in the last 30 minutes.", "مشاهد عشوائي كتب في الشات آخر 30 دقيقة.", "!pick", "!pick", "The winner is $(random.chatter)!", "الفائز هو $(random.chatter)!", "new"], ["$(channel)", "stream", "Your channel name.", "اسم قناتك.", "!channel", "!channel", "You're watching $(channel)", "أنت تتابع $(channel)", ""], ["$(game)", "stream", "The game or category you're streaming now.", "اللعبة أو التصنيف اللي تبثه الحين.", "!game", "!game", "Now playing: $(game)", "نلعب الحين: $(game)", ""], ["$(title)", "stream", "Your current stream title.", "عنوان بثك الحالي.", "!title", "!title", "Title: $(title)", "العنوان: $(title)", ""], ["$(uptime)", "stream", "How long you've been live.", "كم صار لك وأنت تبث.", "!uptime", "!uptime", "Live for $(uptime)", "صار لنا $(uptime) على البث", ""], ["$(viewers)", "stream", "How many people are watching right now.", "كم واحد يشاهد الحين.", "!viewers", "!viewers", "$(viewers) people are watching", "فيه $(viewers) يشاهدون الحين", ""], ["$(clip)", "stream", "Makes a clip of the last moments and gives its link.", "يسوي كليب لآخر لحظات ويعطي رابطه.", "!clip", "!clip", "Clip saved: $(clip)", "انحفظ الكليب: $(clip)", "new"], ["$(followers)", "followers", "How many followers your channel has.", "كم متابع عند قناتك.", "!followers", "!followers", "We're $(followers) followers strong!", "صرنا $(followers) متابع!", "new"], ["$(follow)", "followers", "A sentence saying if the viewer follows you.", "جملة تقول إذا المشاهد يتابعك أو لا.", "!follow", "!follow", "$(user) $(follow)", "$(user) $(follow)", ""], ["$(followdate)", "followers", "The date the viewer started following you.", "تاريخ بداية متابعة المشاهد لك.", "!followdate", "!followdate", "$(user) followed on $(followdate)", "$(user) تابع بتاريخ $(followdate)", ""], ["$(followage)", "followers", "How long the viewer has followed you.", "كم صار للمشاهد وهو يتابعك.", "!followage", "!followage", "$(user) has followed for $(followage)", "$(user) يتابعك من $(followage)", ""], ["$(firststreak)", "first", "How many streams in a row the viewer was first in chat.", "كم بث ورا بعض كان المشاهد أول واحد في الشات.", "!first", "!first", "$(user) was first $(firststreak) streams in a row", "$(user) كان الأول $(firststreak) بثوث ورا بعض", "new"], ["$(firststreakpeak)", "first", "The viewer's best \"first in chat\" streak ever.", "أفضل سلسلة «أول واحد» للمشاهد.", "!best", "!best", "$(user)'s best first streak: $(firststreakpeak)", "أفضل سلسلة لـ $(user): $(firststreakpeak)", "new"], ["$(watchtime)", "stats", "How long the viewer has watched your streams in total. Counted by FQPN's Chat Bot while you're live. Best: import your WizeBot numbers once in the app (Commands › Share › Twitch panel) so the count continues instead of starting from zero.", "كم تابع المشاهد بثوثك من وقت. يحسبه FQPN's Chat Bot وأنت لايف. الأفضل: انقل أرقامك من WizeBot مرة وحدة في البرنامج (الأوامر › مشاركة › بانل تويتش) عشان يكمل العد بدل ما يبدأ من الصفر.", "!watchtime", "!وقتي", "$(user) has watched for $(watchtime)", "$(user) تابعنا $(watchtime)", "new"], ["$(messages)", "stats", "How many messages the viewer has written in your chat in total. Best: import your WizeBot numbers once in the app (Commands › Share › Twitch panel) so the count continues.", "كم رسالة كتب المشاهد في شاتك من أول. الأفضل: انقل أرقامك من WizeBot مرة وحدة في البرنامج (الأوامر › مشاركة › بانل تويتش) عشان يكمل العد.", "!messages", "!رسايلي", "$(user) has written $(messages) messages", "$(user) كتب $(messages) رسالة", "new"], ["$(weather city)", "world", "The weather in a city right now.", "الطقس في مدينة الحين.", "!weather", "!weather", "$(weather Riyadh)", "$(weather Riyadh)", "new"], ["$(time city)", "world", "The time in a city right now.", "الوقت الحين في مدينة.", "!time", "!time", "$(time Riyadh)", "$(time Riyadh)", "new"], ["$(streak)", "event", "How many streams in a row they watched (Twitch watch streak or Falkorie's !streak).", "كم بث ورا بعض شاهدوه (سلسلة المشاهدة في تويتش أو !streak في Falkorie).", "Watch streak reply", "رد سلسلة المشاهدة", "$(user) watched $(streak) streams in a row!", "$(user) شاهد $(streak) بثوث ورا بعض!", "event"], ["$(tier)", "event", "The subscription type: Tier 1, 2, 3 or Prime.", "نوع الاشتراك: Tier 1 أو 2 أو 3 أو Prime.", "Subscription reply", "رد الاشتراك", "Thanks $(user) for the $(tier) sub!", "شكراً $(user) على اشتراك $(tier)!", "event"], ["$(months)", "event", "How many months they've subscribed in total.", "كم شهر اشتركوا بالمجموع.", "Subscription reply", "رد الاشتراك", "$(user) subscribed for $(months) months!", "$(user) مشترك من $(months) أشهر!", "event"], ["$(message)", "event", "The message they wrote with their sub, Bits or donation.", "الرسالة اللي كتبوها مع الاشتراك أو البيتس أو التبرع.", "Subscription reply", "رد الاشتراك", "$(user) says: $(message)", "$(user) يقول: $(message)", "event"], ["$(gifts)", "event", "How many subs were gifted at once.", "كم اشتراك انهدى مرة وحدة.", "Gift subs reply", "رد إهداء الاشتراكات", "$(user) gifted $(gifts) subs!", "$(user) أهدى $(gifts) اشتراكات!", "event"], ["$(raider)", "event", "The streamer who raided you.", "الستريمر اللي سوّى لك رِيد.", "Raid reply", "رد الغارة", "Welcome $(raider) and $(viewers) raiders!", "حيّاك $(raider) ومعه $(viewers) مشاهد!", "event"], ["$(level)", "event", "The Hype Train level, or the new level Falkorie announced.", "مستوى قطار الحماس، أو المستوى الجديد اللي أعلنه Falkorie.", "Hype train reply", "رد قطار الحماس", "Hype Train level $(level)!", "قطار الحماس مستوى $(level)!", "event"], ["$(bits)", "event", "How many Bits were cheered.", "كم بيتس انرسلت.", "Bits reply", "رد البيتس", "Thanks $(user) for $(bits) Bits!", "شكراً $(user) على $(bits) بيتس!", "event"], ["$(amount)", "event", "The donation amount.", "مبلغ التبرع.", "Donation reply", "رد التبرع", "$(user) donated $(amount) $(currency)!", "$(user) تبرّع بـ $(amount) $(currency)!", "event"], ["$(currency)", "event", "The donation currency, like USD or SAR.", "عملة التبرع، مثل USD أو SAR.", "Donation reply", "رد التبرع", "$(amount) $(currency), thank you!", "$(amount) $(currency)، شكراً!", "event"], ["$(total)", "event", "Everything this person gave so far.", "كل اللي قدّمه هالشخص لين الحين.", "Bits reply", "رد البيتس", "$(user) has cheered $(total) Bits in total!", "$(user) أرسل $(total) بيتس بالمجموع!", "event,new"], ["$(eval …)", "adv", "Does a little math, like a random number.", "يسوي عملية حسابية، مثل رقم عشوائي.", "!roll", "!roll", "$(user) rolled $(eval Math.floor(Math.random() * 101))", "$(user) طلع له $(eval Math.floor(Math.random() * 101))", ""], ["$(urlfetch link)", "adv", "Puts the text of a public web page in the reply.", "يحط نص صفحة ويب عامة في الرد.", "!quote", "!quote", "$(urlfetch https://example.com/quote)", "$(urlfetch https://example.com/quote)", ""]];      // [variable, group, English, Arabic, example command EN, AR, reply EN, AR, tags]
-const VAR_SAMPLE = {"en": {"user": "FQPN", "touser": "sam_99", "query": "hello chat", "querystring": "twitch%20bot", "count": "42", "count *": "8", "getcount *": "8", "accountage": "2 years, 3 months, 5 days", "random.chatter": "night_owl", "channel": "fqpn_", "game": "Valorant", "title": "Ranked grind!", "uptime": "2h 14m", "viewers": "128", "clip": "https://clips.twitch.tv/…", "followers": "1234", "follow": "followed fqpn_ on March 3, 2024 (1 year, 2 months ago)", "followdate": "March 3, 2024", "followage": "1 year, 2 months, 3 days", "firststreak": "3", "firststreakpeak": "7", "watchtime": "34 hours, 12 minutes", "messages": "1,250", "weather *": "{0}: 31°C, clear sky", "time *": "{0}: 3:42 PM", "streak": "12", "tier": "Tier 1", "months": "7", "message": "Keep going!", "gifts": "5", "raider": "StreamerXYZ", "level": "3", "bits": "100", "amount": "12.50", "currency": "USD", "total": "1466", "eval *": "57", "urlfetch *": "(text from the page)"}, "ar": {"user": "فقبن", "touser": "sam_99", "query": "هلا بالشات", "querystring": "twitch%20bot", "count": "42", "count *": "8", "getcount *": "8", "accountage": "سنتين و3 أشهر و5 أيام", "random.chatter": "night_owl", "channel": "fqpn_", "game": "Valorant", "title": "رانكد!", "uptime": "ساعتين و14 دقيقة", "viewers": "128", "clip": "https://clips.twitch.tv/…", "followers": "1234", "follow": "يتابع fqpn_ من 3 مارس 2024 (سنة وشهرين)", "followdate": "3 مارس 2024", "followage": "سنة وشهرين و3 أيام", "firststreak": "3", "firststreakpeak": "7", "watchtime": "34 ساعة و12 دقيقة", "messages": "1,250", "weather *": "{0}: 31°م، صافي", "time *": "{0}: 3:42 م", "streak": "12", "tier": "Tier 1", "months": "7", "message": "كمّل!", "gifts": "5", "raider": "StreamerXYZ", "level": "3", "bits": "100", "amount": "12.50", "currency": "SAR", "total": "1466", "eval *": "57", "urlfetch *": "(نص من الصفحة)"}};
+const VARS = [["$(user)", "viewer", "The name of the viewer who used the command.", "اسم المشاهد اللي استخدم الأمر.", "!hi", "!hi", "Hi $(user)! Welcome to the stream", "هلا $(user)! حيّاك في البث", ""], ["$(touser)", "viewer", "The name written after the command, or the viewer if there isn't one.", "الاسم المكتوب بعد الأمر، أو المشاهد نفسه لو ما فيه.", "!hug @sam_99", "!hug @sam_99", "$(user) hugs $(touser)", "$(user) يحضن $(touser)", ""], ["$(query)", "viewer", "Everything the viewer typed after the command.", "كل اللي كتبه المشاهد بعد الأمر.", "!say hello chat", "!say hello chat", "$(user) says: $(query)", "$(user) يقول: $(query)", ""], ["$(querystring)", "viewer", "The same text, made safe to put inside a link.", "نفس النص، بس آمن تحطه داخل رابط.", "!google twitch bot", "!google twitch bot", "https://google.com/search?q=$(querystring)", "https://google.com/search?q=$(querystring)", ""], ["$(count)", "viewer", "How many times this command has been used.", "كم مرة انستخدم هالأمر.", "!hydrate", "!hydrate", "Drink water! Reminder number $(count)", "اشرب موية! التذكير رقم $(count)", ""], ["$(count name)", "viewer", "Adds 1 to a named counter and shows it.", "يزيد عدّاد له اسم 1 ويعرضه.", "!death", "!death", "FQPN died again: $(count deaths) deaths", "فقبن مات مرة ثانية: $(count deaths) موتة", "new"], ["$(getcount name)", "viewer", "Shows a named counter without adding to it.", "يعرض عدّاد له اسم بدون ما يزيده.", "!deaths", "!deaths", "Deaths so far: $(getcount deaths)", "عدد الموتات لين الحين: $(getcount deaths)", "new"], ["$(accountage)", "viewer", "How old the viewer's Twitch account is.", "عمر حساب المشاهد في تويتش.", "!age", "!age", "$(user)'s account is $(accountage) old", "عمر حساب $(user): $(accountage)", "new"], ["$(random.chatter)", "viewer", "A random viewer who chatted in the last 30 minutes.", "مشاهد عشوائي كتب في الشات آخر 30 دقيقة.", "!pick", "!pick", "The winner is $(random.chatter)!", "الفائز هو $(random.chatter)!", "new"], ["$(channel)", "stream", "Your channel name.", "اسم قناتك.", "!channel", "!channel", "You're watching $(channel)", "أنت تتابع $(channel)", ""], ["$(game)", "stream", "The game or category you're streaming now.", "اللعبة أو التصنيف اللي تبثه الحين.", "!game", "!game", "Now playing: $(game)", "نلعب الحين: $(game)", ""], ["$(title)", "stream", "Your current stream title.", "عنوان بثك الحالي.", "!title", "!title", "Title: $(title)", "العنوان: $(title)", ""], ["$(uptime)", "stream", "How long you've been live.", "كم صار لك وأنت تبث.", "!uptime", "!uptime", "Live for $(uptime)", "صار لنا $(uptime) على البث", ""], ["$(viewers)", "stream", "How many people are watching right now.", "كم واحد يشاهد الحين.", "!viewers", "!viewers", "$(viewers) people are watching", "فيه $(viewers) يشاهدون الحين", ""], ["$(clip)", "stream", "Makes a clip of the last moments and gives its link.", "يسوي كليب لآخر لحظات ويعطي رابطه.", "!clip", "!clip", "Clip saved: $(clip)", "انحفظ الكليب: $(clip)", "new"], ["$(gameinfo)", "stream", "The game open on your PC, with a short description (Game Radar).", "اللعبة المفتوحة على جهازك مع وصف قصير (رادار اللعبة).", "!game", "!لعبة", "$(gameinfo)", "$(gameinfo)", "new"], ["$(gamename)", "stream", "Just the name of the game open on your PC (Game Radar).", "اسم اللعبة المفتوحة على جهازك بس (رادار اللعبة).", "!playing", "!تلعب", "Now playing: $(gamename)", "يلعب الحين: $(gamename)", "new"], ["$(followers)", "followers", "How many followers your channel has.", "كم متابع عند قناتك.", "!followers", "!followers", "We're $(followers) followers strong!", "صرنا $(followers) متابع!", "new"], ["$(follow)", "followers", "A sentence saying if the viewer follows you.", "جملة تقول إذا المشاهد يتابعك أو لا.", "!follow", "!follow", "$(user) $(follow)", "$(user) $(follow)", ""], ["$(followdate)", "followers", "The date the viewer started following you.", "تاريخ بداية متابعة المشاهد لك.", "!followdate", "!followdate", "$(user) followed on $(followdate)", "$(user) تابع بتاريخ $(followdate)", ""], ["$(followage)", "followers", "How long the viewer has followed you.", "كم صار للمشاهد وهو يتابعك.", "!followage", "!followage", "$(user) has followed for $(followage)", "$(user) يتابعك من $(followage)", ""], ["$(firststreak)", "first", "How many streams in a row the viewer was first in chat.", "كم بث ورا بعض كان المشاهد أول واحد في الشات.", "!first", "!first", "$(user) was first $(firststreak) streams in a row", "$(user) كان الأول $(firststreak) بثوث ورا بعض", "new"], ["$(firststreakpeak)", "first", "The viewer's best \"first in chat\" streak ever.", "أفضل سلسلة «أول واحد» للمشاهد.", "!best", "!best", "$(user)'s best first streak: $(firststreakpeak)", "أفضل سلسلة لـ $(user): $(firststreakpeak)", "new"], ["$(watchtime)", "stats", "How long the viewer has watched your streams in total. Counted by FQPN's Chat Bot while you're live. Best: import your WizeBot numbers once in the app (Commands › Share › Twitch panel) so the count continues instead of starting from zero.", "كم تابع المشاهد بثوثك من وقت. يحسبه FQPN's Chat Bot وأنت لايف. الأفضل: انقل أرقامك من WizeBot مرة وحدة في البرنامج (الأوامر › مشاركة › بانل تويتش) عشان يكمل العد بدل ما يبدأ من الصفر.", "!watchtime", "!وقتي", "$(user) has watched for $(watchtime)", "$(user) تابعنا $(watchtime)", "new"], ["$(messages)", "stats", "How many messages the viewer has written in your chat in total. Best: import your WizeBot numbers once in the app (Commands › Share › Twitch panel) so the count continues.", "كم رسالة كتب المشاهد في شاتك من أول. الأفضل: انقل أرقامك من WizeBot مرة وحدة في البرنامج (الأوامر › مشاركة › بانل تويتش) عشان يكمل العد.", "!messages", "!رسايلي", "$(user) has written $(messages) messages", "$(user) كتب $(messages) رسالة", "new"], ["$(weather city)", "world", "The weather in a city right now.", "الطقس في مدينة الحين.", "!weather", "!weather", "$(weather Riyadh)", "$(weather Riyadh)", "new"], ["$(time city)", "world", "The time in a city right now.", "الوقت الحين في مدينة.", "!time", "!time", "$(time Riyadh)", "$(time Riyadh)", "new"], ["$(streak)", "event", "How many streams in a row they watched (Twitch watch streak or Falkorie's !streak).", "كم بث ورا بعض شاهدوه (سلسلة المشاهدة في تويتش أو !streak في Falkorie).", "Watch streak reply", "رد سلسلة المشاهدة", "$(user) watched $(streak) streams in a row!", "$(user) شاهد $(streak) بثوث ورا بعض!", "event"], ["$(tier)", "event", "The subscription type: Tier 1, 2, 3 or Prime.", "نوع الاشتراك: Tier 1 أو 2 أو 3 أو Prime.", "Subscription reply", "رد الاشتراك", "Thanks $(user) for the $(tier) sub!", "شكراً $(user) على اشتراك $(tier)!", "event"], ["$(months)", "event", "How many months they've subscribed in total.", "كم شهر اشتركوا بالمجموع.", "Subscription reply", "رد الاشتراك", "$(user) subscribed for $(months) months!", "$(user) مشترك من $(months) أشهر!", "event"], ["$(message)", "event", "The message they wrote with their sub, Bits or donation.", "الرسالة اللي كتبوها مع الاشتراك أو البيتس أو التبرع.", "Subscription reply", "رد الاشتراك", "$(user) says: $(message)", "$(user) يقول: $(message)", "event"], ["$(gifts)", "event", "How many subs were gifted at once.", "كم اشتراك انهدى مرة وحدة.", "Gift subs reply", "رد إهداء الاشتراكات", "$(user) gifted $(gifts) subs!", "$(user) أهدى $(gifts) اشتراكات!", "event"], ["$(raider)", "event", "The streamer who raided you.", "الستريمر اللي سوّى لك رِيد.", "Raid reply", "رد الغارة", "Welcome $(raider) and $(viewers) raiders!", "حيّاك $(raider) ومعه $(viewers) مشاهد!", "event"], ["$(level)", "event", "The Hype Train level, or the new level Falkorie announced.", "مستوى قطار الحماس، أو المستوى الجديد اللي أعلنه Falkorie.", "Hype train reply", "رد قطار الحماس", "Hype Train level $(level)!", "قطار الحماس مستوى $(level)!", "event"], ["$(bits)", "event", "How many Bits were cheered.", "كم بيتس انرسلت.", "Bits reply", "رد البيتس", "Thanks $(user) for $(bits) Bits!", "شكراً $(user) على $(bits) بيتس!", "event"], ["$(amount)", "event", "The donation amount.", "مبلغ التبرع.", "Donation reply", "رد التبرع", "$(user) donated $(amount) $(currency)!", "$(user) تبرّع بـ $(amount) $(currency)!", "event"], ["$(currency)", "event", "The donation currency, like USD or SAR.", "عملة التبرع، مثل USD أو SAR.", "Donation reply", "رد التبرع", "$(amount) $(currency), thank you!", "$(amount) $(currency)، شكراً!", "event"], ["$(total)", "event", "Everything this person gave so far.", "كل اللي قدّمه هالشخص لين الحين.", "Bits reply", "رد البيتس", "$(user) has cheered $(total) Bits in total!", "$(user) أرسل $(total) بيتس بالمجموع!", "event,new"], ["$(eval …)", "adv", "Does a little math, like a random number.", "يسوي عملية حسابية، مثل رقم عشوائي.", "!roll", "!roll", "$(user) rolled $(eval Math.floor(Math.random() * 101))", "$(user) طلع له $(eval Math.floor(Math.random() * 101))", ""], ["$(urlfetch link)", "adv", "Puts the text of a public web page in the reply.", "يحط نص صفحة ويب عامة في الرد.", "!quote", "!quote", "$(urlfetch https://example.com/quote)", "$(urlfetch https://example.com/quote)", ""]];      // [variable, group, English, Arabic, example command EN, AR, reply EN, AR, tags]
+const VAR_SAMPLE = {"en": {"user": "FQPN", "touser": "sam_99", "query": "hello chat", "querystring": "twitch%20bot", "count": "42", "count *": "8", "getcount *": "8", "accountage": "2 years, 3 months, 5 days", "random.chatter": "night_owl", "channel": "fqpn_", "game": "Valorant", "title": "Ranked grind!", "uptime": "2h 14m", "viewers": "128", "clip": "https://clips.twitch.tv/…", "gameinfo": "Playing VALORANT — tactical 5v5 hero shooter", "gamename": "VALORANT", "followers": "1234", "follow": "followed fqpn_ on March 3, 2024 (1 year, 2 months ago)", "followdate": "March 3, 2024", "followage": "1 year, 2 months, 3 days", "firststreak": "3", "firststreakpeak": "7", "watchtime": "34 hours, 12 minutes", "messages": "1,250", "weather *": "{0}: 31°C, clear sky", "time *": "{0}: 3:42 PM", "streak": "12", "tier": "Tier 1", "months": "7", "message": "Keep going!", "gifts": "5", "raider": "StreamerXYZ", "level": "3", "bits": "100", "amount": "12.50", "currency": "USD", "total": "1466", "eval *": "57", "urlfetch *": "(text from the page)"}, "ar": {"user": "فقبن", "touser": "sam_99", "query": "هلا بالشات", "querystring": "twitch%20bot", "count": "42", "count *": "8", "getcount *": "8", "accountage": "سنتين و3 أشهر و5 أيام", "random.chatter": "night_owl", "channel": "fqpn_", "game": "Valorant", "title": "رانكد!", "uptime": "ساعتين و14 دقيقة", "viewers": "128", "clip": "https://clips.twitch.tv/…", "gameinfo": "يلعب VALORANT — شوتر تكتيكي خمسة ضد خمسة", "gamename": "VALORANT", "followers": "1234", "follow": "يتابع fqpn_ من 3 مارس 2024 (سنة وشهرين)", "followdate": "3 مارس 2024", "followage": "سنة وشهرين و3 أيام", "firststreak": "3", "firststreakpeak": "7", "watchtime": "34 ساعة و12 دقيقة", "messages": "1,250", "weather *": "{0}: 31°م، صافي", "time *": "{0}: 3:42 م", "streak": "12", "tier": "Tier 1", "months": "7", "message": "كمّل!", "gifts": "5", "raider": "StreamerXYZ", "level": "3", "bits": "100", "amount": "12.50", "currency": "SAR", "total": "1466", "eval *": "57", "urlfetch *": "(نص من الصفحة)"}};
 // $(…) → its sample value, innermost first (like the app); unknown ones stay as typed. Used by the page and its script.
 function fillVars(s, S) {
   function one(body) {
@@ -1658,7 +1778,7 @@ h2{font-size:22px;font-weight:600;margin:0 0 16px}
 .beta{font-size:11px;font-weight:700;color:#d29922;border:1px solid rgba(210,153,34,.55);border-radius:5px;padding:0 6px;margin-inline-start:4px;vertical-align:2px}
 .feat p{margin:0;color:var(--soft);font-size:15px;overflow-wrap:anywhere}
 .lbhead{display:flex;align-items:center;gap:10px}.lbhead svg{width:24px;height:24px;fill:none;stroke:var(--red2);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-.lbgrid{display:grid;grid-template-columns:1.6fr 1fr;gap:14px}@media (max-width:760px){.lbgrid{grid-template-columns:1fr}}
+.lbgrid{display:grid;grid-template-columns:1.6fr 1fr;gap:14px;align-items:start}.lbcol{display:grid;gap:14px;min-width:0}@media (max-width:760px){.lbgrid{grid-template-columns:1fr}}
 .lbcard{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px;position:relative;overflow:hidden}
 .lbcard.main::before{content:"";position:absolute;inset:-40% auto auto -20%;width:60%;height:120%;background:radial-gradient(var(--glow2),transparent 70%);pointer-events:none}
 .lbtop{display:flex;gap:14px;align-items:center}.lbic{width:48px;height:48px;border-radius:12px;display:grid;place-items:center;background:color-mix(in srgb,var(--red2) 16%,transparent);color:var(--red2);flex:none}

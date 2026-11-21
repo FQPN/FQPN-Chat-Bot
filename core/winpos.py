@@ -160,6 +160,51 @@ _api = None
 _found = {}           # title -> window handle, remembered between checks
 
 
+def bring_to_front(title: str, api=None, sleep=time.sleep, wait: float = 8.0) -> bool:
+    """1.20.0: puts the app's window in front of every other window once it is open (like other apps do). Windows
+    normally refuses that when the user clicked something else while the app was starting, so: restore it if minimized,
+    lift it above everything for a moment (always-on-top, then back to normal at once), and ask for the focus with the
+    input of the window in front attached. Only ever this program's own window. True when it was found."""
+    api = api or _win32()
+    if api is None:
+        return False
+    hwnd, waited = None, 0.0
+    while hwnd is None and waited <= wait:              # the window may still be appearing
+        hwnd = api.find(title)
+        if hwnd is None:
+            sleep(0.25)
+            waited += 0.25
+    if hwnd is None:
+        return False
+    try:
+        u = api.user32
+        if not getattr(api, "_front_ready", False) and sys.platform == "win32":
+            from ctypes import wintypes as W
+            for f, args in ((u.ShowWindow, [W.HWND, ctypes.c_int]), (u.BringWindowToTop, [W.HWND]), (u.SetForegroundWindow, [W.HWND]),
+                            (u.AttachThreadInput, [W.DWORD, W.DWORD, W.BOOL])):
+                f.argtypes = args
+            u.GetForegroundWindow.restype = W.HWND
+            api._front_ready = True
+        if u.IsIconic(hwnd):
+            u.ShowWindow(hwnd, 9)                       # SW_RESTORE
+        SWP = 0x0001 | 0x0002 | 0x0040                 # NOSIZE | NOMOVE | SHOWWINDOW
+        u.SetWindowPos(hwnd, -1, 0, 0, 0, 0, SWP)       # HWND_TOPMOST: above everything...
+        u.SetWindowPos(hwnd, -2, 0, 0, 0, 0, SWP)       # ...then HWND_NOTOPMOST: a normal window again, still in front
+        fg = u.GetForegroundWindow()
+        me = api.thread_id() if hasattr(api, "thread_id") else ctypes.windll.kernel32.GetCurrentThreadId()
+        other = u.GetWindowThreadProcessId(fg, None) if fg else 0
+        joined = bool(other and other != me and u.AttachThreadInput(me, other, True))
+        try:
+            u.BringWindowToTop(hwnd)
+            u.SetForegroundWindow(hwnd)
+        finally:
+            if joined:
+                u.AttachThreadInput(me, other, False)
+    except Exception:
+        log.exception("Could not bring the window to the front")
+    return True
+
+
 def _win32():
     global _api
     if _api is None and sys.platform == "win32":

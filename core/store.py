@@ -48,6 +48,9 @@ DEFAULTS = {
     "giveaway": {},                         # 1.13.0: the current giveaway and its settings (core/giveaway.py)
     "giveaway_winners": [],                 # 1.13.0: the last 20 giveaway winners
     "event_totals": {},                     # 1.13.0: {total} in event replies: {"gift_sub"|"bits"|"donation": {login[|CUR]: amount}}
+    "game_radar": {"switch": "ask", "games": {}, "ignored": []},   # 1.20.0: Game Radar (core/gameradar.py)
+    "cloud_backup": {"target": "", "mode": "auto", "folder": "", "email": "", "asked": False, "last": None, "error": "",
+                     "error_detail": "", "drive_folder": ""},   # 1.20.0: Cloud backup (core/cloudbackup.py); never inside a backup itself
     "first_state": {},                      # 1.13.0: Pin first message: who was first this stream, and their streak (per command)
     "editor_state": {"active": False},      # 1.13.0: the editor link (url, when it ends, how many edits applied); never the password
     "publist_state": {                # kept by the app, not a setting: what was last sent to the public list website
@@ -90,6 +93,7 @@ DEFAULTS = {
         "live_check_seconds": 60,
         "commands_url": "",
         "disabled_builtins": [],   # built-in commands switched off in Commands > Built-in
+        "bot_as_viewer": False,    # 1.20.0: what a person types on the bot account counts like a viewer
         "separate_bot": False,     # the bot talks from its own Twitch account (Settings > Bot > Chat account)
         # 1.15.0 (owner): which kinds of messages that bot account sends (the rest come from your own account)
         "bot_sends": ["commands", "games", "timers", "events", "greetings", "stream", "giveaways", "warnings"],
@@ -102,6 +106,7 @@ DEFAULTS = {
         "chat_reset_who": "moderator",   # who can: "moderator" (mods and the streamer) or "broadcaster" (the streamer only)
     },
     "prefs": {   # how the installed app behaves (Settings > App, Notifications, Logs and data)
+        "labs_radar": False,       # 1.20.0 (beta): Settings > Labs > Game Radar
         "boot_anim": True,         # 1.19.0: the start-up animation when the app opens
         "boot_sound": True,        # 1.19.0: ... and its sound
         "startup": False,          # start with Windows

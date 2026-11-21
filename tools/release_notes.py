@@ -25,13 +25,20 @@ def entry(version: str, html: str) -> dict | None:
     return None
 
 
+def _ar_md(x: str) -> str:
+    """1.20.0: the Releases page has no <bdi>, so each !command or $(variable) in an Arabic line gets a left-to-right mark
+    on both sides (otherwise the "!" jumps to the wrong end). The app's own pop-up reads the base64 line and does this itself."""
+    x = re.sub(r"[\u2066-\u2069\u200e\u200f]", "", x)
+    return re.sub(r"(\$\([^)]*\)|![^\s،,.()؛<«»]+)", "\u200e\\1\u200e", x)
+
+
 def notes(version: str, html: str) -> str:
     e = entry(version, html)
     if not e:
         return f"FQPN's Chat Bot {version}\n"
     en, ar = [str(x) for x in e.get("en") or []], [str(x) for x in e.get("ar") or []]
     blob = base64.b64encode(json.dumps({"v": version, "en": en, "ar": ar}, ensure_ascii=False).encode("utf-8")).decode("ascii")
-    out = [f"## What's new in {version}", ""] + [f"- {x}" for x in en] + ["", "## ما الجديد", ""] + [f"- {x}" for x in ar]
+    out = [f"## What's new in {version}", ""] + [f"- {x}" for x in en] + ["", "## ما الجديد", ""] + [f"- {_ar_md(x)}" for x in ar]
     out += ["", f"<!-- fqpn-whatsnew:{blob} -->", ""]
     return "\n".join(out)
 

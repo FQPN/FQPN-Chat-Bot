@@ -14,7 +14,8 @@ DEVELOPERS = frozenset({
     "754527671",     # fqpn_
 })
 DEVELOPER_GREETING = "حيوووووو بالمبرمج الاسطوري 🔥"
-DEVELOPER_GREETINGS = {"1299878164": "يهلا وغلا ب اقوى مبرمجة 🔥"}      # 1.15.0 (owner): 1asoom's own; anyone else: the one above
+DEVELOPER_GREETINGS = {"1299878164": "يهلا وغلا ب اقوى مبرمجة 🔥",     # 1.15.0 (owner): 1asoom's own; anyone else: the one above
+                       "754527671": "يهلااا بالمبرمج الاسطوري 🔥"}      # 1.20.0 (owner): fqpn_'s own
 
 
 def messages_for(greetings: dict, login: str) -> list[str]:
